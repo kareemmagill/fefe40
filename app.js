@@ -3554,11 +3554,12 @@
     function djArea(x, z) {
       let d = Infinity;
       DJ_AREA.forEach(([x0, z0, x1, z1]) => { d = Math.min(d, Math.hypot(Math.max(x0 - x, 0, x - x1 - 1), Math.max(z0 - z, 0, z - z1 - 1))); });
-      const u = Math.min(1, d / 30);
-      return (1 - u) * (1 - u) * zoomFade();
+      // never all the way off while the DJ plays: a third of full volume even far away, so it's always there
+      const u = Math.min(1, d / 40);
+      return (0.3 + 0.7 * (1 - u)) * zoomFade();
     }
-    // 1 zoomed in, down to 0.15 fully zoomed out
-    const zoomFade = () => Math.max(0.15, Math.min(1, 1 - (view.fit - 16) / 60));
+    // 1 zoomed in, down to 0.45 fully zoomed out
+    const zoomFade = () => Math.max(0.45, Math.min(1, 1 - (view.fit - 16) / 80));
     // the booth with its speakers, as a box to hit (it's made of props, which voxel picking doesn't see)
     const deckBox = new T.Box3(new T.Vector3(43.8 + OX, 1, 24.8 + OZ), new T.Vector3(50.2 + OX, 3.1, 26.4 + OZ)), deckHit = new T.Vector3(); // speakers too
     function tapDecks(cx, cy) {
