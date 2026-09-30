@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- added to the home screen it opens full screen, without the browser's bars -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FIFI40">
 <meta name="theme-color" content="#083B6B">
 <meta name="description" content="Explore Casa Anahao in blocks before Filip's 40th: pool, pavilion, villas, dance floor and court.">
 <meta property="og:title" content="FIFI40 · Filip's 40th">
@@ -514,7 +520,7 @@ body.driving .dock { display: none; }
     <div class="guest-list" id="guest-list" hidden></div>
   </div>
 
-  <div class="tools">
+  <div class="tools" hidden>
     <button type="button" class="tool" id="rot-left" aria-label="Rotate left" title="Rotate left (Q)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><path d="M4 9h11a5 5 0 0 1 0 10h-4"/><path d="M8 5 4 9l4 4"/></svg>
     </button>
@@ -545,7 +551,7 @@ body.driving .dock { display: none; }
     <p class="hint" id="hint">Drag to explore · Pinch to zoom · Tap a place</p>
     <button type="button" class="enter" id="enter" hidden>Enter the party</button>
     <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
-    <nav class="chips" id="chips" aria-label="Places"></nav>
+    <nav class="chips" id="chips" aria-label="Places" hidden></nav>
   </div>
 
   <div class="drive" id="drive" hidden>

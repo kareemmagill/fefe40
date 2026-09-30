@@ -1617,6 +1617,7 @@
     const pointers = new Map();
     let pinch = null;
     let tap = null;
+    const TWIST = 1; // which way the view turns with the fingers
     const pa = new T.Vector3(), pb = new T.Vector3();
     function panBy(x0, y0, x1, y1) {
       follow = false;
@@ -1626,10 +1627,12 @@
       view.target.copy(goal.target);
       applyCamera();
     }
+    // Two fingers pinch to zoom and twist to turn the view; letting go snaps it to the nearest quarter turn.
     function resetPinch() {
+      if (pinch && pinch.turned) goal.az = pinch.az + Math.round((goal.az - pinch.az) / (Math.PI / 2)) * (Math.PI / 2);
       if (pointers.size >= 2) {
         const [a, b] = [...pointers.values()];
-        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, fit: goal.fit, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, fit: goal.fit, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, ang: Math.atan2(b.y - a.y, b.x - a.x), az: goal.az, turned: false };
       } else {
         pinch = null;
       }
@@ -1653,6 +1656,9 @@
         const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         goal.fit = view.fit = clampFit((pinch.fit * pinch.d) / d);
+        // the twist, once it's clearly meant (a little turn while pinching doesn't count)
+        const twist = Math.atan2(Math.sin(Math.atan2(b.y - a.y, b.x - a.x) - pinch.ang), Math.cos(Math.atan2(b.y - a.y, b.x - a.x) - pinch.ang));
+        if (pinch.turned || Math.abs(twist) > 0.2) { pinch.turned = true; goal.az = view.az = pinch.az + TWIST * twist; }
         applyCamera();
         panBy(pinch.mx, pinch.my, mx, my);
         pinch.mx = mx;
@@ -2687,6 +2693,15 @@
     }
     soundBtn.hidden = !snd;
     soundBtn.addEventListener("click", () => setSound(!(snd && snd.enabled)));
+    // Full screen from the first tap where the browser allows it (Android); iPhones only do that from the home screen.
+    const goFull = () => {
+      window.removeEventListener("pointerup", goFull, true);
+      const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req && !document.fullscreenElement && !document.webkitFullscreenElement) {
+        try { const p = req.call(el, { navigationUI: "hide" }); if (p && p.catch) p.catch(() => {}); } catch (e) { /* not allowed here */ }
+      }
+    };
+    if (window.matchMedia && matchMedia("(pointer: coarse)").matches) window.addEventListener("pointerup", goFull, true);
     // on by default (phones only allow sound after a tap, so it starts at the first tap anywhere), unless they've
     // turned it off with the speaker button before
     if (snd && lsGet("fefe40.sound") !== "0") {

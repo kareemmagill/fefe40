@@ -1,0 +1,9 @@
+{
+  "name": "FIFI40",
+  "short_name": "FIFI40",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0B2A4A",
+  "theme_color": "#0B2A4A"
+}
