@@ -509,11 +509,12 @@
       const near = 1.5, far = 13;
       if (d >= far) return 0;
       const u = d <= near ? 0 : (d - near) / (far - near);
-      return (1 - u) * (1 - u); // full right next to you, a lot quieter a few steps away
+      // full right next to you, a lot quieter a few steps away, and softer as the camera pulls out
+      return (1 - u) * (1 - u) * Math.max(0.2, Math.min(1, 1 - (L.fit - 16) / 60));
     }
     function musicVol() {
       if (!musicOn) return 0;
-      if (musicArea >= 0) return (0.1 + 0.08 * energy) * 2.2 * musicArea; // the game says how much of its area we're in
+      if (musicArea >= 0) return (0.1 + 0.08 * energy) * 1.5 * musicArea; // the game says how much of its area we're in
       const d = Math.sqrt((L.x - spot.x) * (L.x - spot.x) + (L.z - spot.z) * (L.z - spot.z));
       const near = Math.max(0, 1 - d / 15);
       return (0.1 + 0.08 * energy) * (1 + 1.2 * near) * Math.sqrt(zoomQuiet()) * (d > 26 ? 0 : 1);

@@ -3403,8 +3403,8 @@
     const tv = { view: false, shown: false, m: "", clip: "" };
     // the hole: transparent black written straight into the canvas (no blending), so the player underneath shows
     const holeMat = new T.MeshBasicMaterial({ color: 0x000000, opacity: 0, blending: T.NoBlending, clippingPlanes: [clipPlane] });
-    function musicDistance() {
-      const px = me ? me.x : view.target.x - OX, pz = me ? me.z : view.target.z - OZ;
+    function musicDistance() { // from where you're looking
+      const px = view.target.x - OX, pz = view.target.z - OZ;
       return Math.hypot(px - TV.x, pz - TV.z);
     }
     function loadYouTube(then) {
@@ -3541,11 +3541,16 @@
     }
     // The club music carries over the dance floor, the pool and the pickleball court, fading out a few metres beyond.
     const DJ_AREA = [[43, 24, 50, 34], [51, 15, 69, 33], [46, 38, 69, 53]];
+    // How loud the DJ is from where you're looking: full over the dance floor, pool and court, fading gently over the
+    // next 30 m (it carries on playing when you scroll away, just quieter), and softer as you pinch out.
     function djArea(x, z) {
       let d = Infinity;
       DJ_AREA.forEach(([x0, z0, x1, z1]) => { d = Math.min(d, Math.hypot(Math.max(x0 - x, 0, x - x1 - 1), Math.max(z0 - z, 0, z - z1 - 1))); });
-      return Math.max(0, 1 - d / 6);
+      const u = Math.min(1, d / 30);
+      return (1 - u) * (1 - u) * zoomFade();
     }
+    // 1 zoomed in, down to 0.15 fully zoomed out
+    const zoomFade = () => Math.max(0.15, Math.min(1, 1 - (view.fit - 16) / 60));
     // the booth with its speakers, as a box to hit (it's made of props, which voxel picking doesn't see)
     const deckBox = new T.Box3(new T.Vector3(44 + OX, 1, 24.9 + OZ), new T.Vector3(50 + OX, 2.6, 26.1 + OZ)), deckHit = new T.Vector3();
     function tapDecks(cx, cy) {
@@ -4753,7 +4758,7 @@
         let loveAt = null, loveD = Infinity;
         loveRooms.forEach((i) => { const l = bedLights[i]; if (!l) return; const d = me ? Math.hypot(l.position.x - OX - me.x, l.position.z - OZ - me.z) : Infinity; if (d < loveD) { loveD = d; loveAt = l.position; } });
         snd.setLove(!!loveAt, loveAt ? loveAt.x - OX : 0, loveAt ? loveAt.z - OZ : 0);
-        snd.setMusicArea(dj.on ? djArea(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ) : -1);
+        snd.setMusicArea(dj.on ? djArea(view.target.x - OX, view.target.z - OZ) : -1);
         snd.setMusicLevel(choir.on ? 0.45 : dj.on ? Math.max(0.65, Math.min(1, danceCrowd / 6)) : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
         snd.update(dt);
       }
