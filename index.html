@@ -317,6 +317,11 @@ body {
 .seg-btn:first-child { border-radius: 8px 0 0 8px; }
 .seg-btn:last-child { border-left: 0; border-radius: 0 8px 8px 0; }
 .seg-btn[aria-pressed="true"] { background: var(--yellow); }
+.sizes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.size { display: grid; gap: 6px; font-size: 0.875rem; font-weight: 600; }
+.size span { display: flex; justify-content: space-between; gap: 6px; }
+.size output { color: var(--yellow); font-weight: 700; }
+.size input { width: 100%; margin: 0; accent-color: var(--yellow); }
 .carousel { display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; align-items: center; gap: 8px; margin-top: 12px; }
 .arrow {
   width: 48px;
@@ -500,6 +505,10 @@ body {
           <button type="button" class="arrow" id="next" aria-label="Next outfit">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="m9 4 8 8-8 8"/></svg>
           </button>
+        </div>
+        <div class="sizes">
+          <label class="size" for="h-in"><span>Height <output id="h-out" for="h-in">178 cm</output></span><input type="range" id="h-in" min="140" max="210" step="1" value="178"></label>
+          <label class="size" for="wt-in"><span>Weight <output id="wt-out" for="wt-in">80 kg</output></span><input type="range" id="wt-in" min="40" max="160" step="1" value="80"></label>
         </div>
         <label class="check" for="cheeky">
           <input type="checkbox" id="cheeky">

@@ -23,6 +23,7 @@
   function sit(seat) {
     const p = base();
     p.rig[1] = seat - 0.825;
+    p.sat = true;
     p.legR = [-HALF, 0, 0.05];
     p.legL = [-HALF, 0, -0.05];
     return p;
@@ -34,7 +35,8 @@
   }
   function apply(av, p) {
     const q = av.parts;
-    av.rig.position.set(p.rig[0], p.rig[1], p.rig[2]);
+    // seated poses keep the hips on the seat whatever the guest's height (0.825 m is the standard hip height)
+    av.rig.position.set(p.rig[0], p.rig[1] + (p.sat ? 0.825 * (1 - (av.scale || 1)) : 0), p.rig[2]);
     av.rig.rotation.set(p.rig[3], p.rig[4], p.rig[5]);
     ["head", "torso", "armR", "armL", "legR", "legL"].forEach((k) => q[k].rotation.set(p[k][0], p[k][1], p[k][2]));
   }
@@ -1137,12 +1139,21 @@
       a.av.root.visible = true;
       a.hiddenAct = false;
       if (s.act === "scene") s.shameUntil = env.t + 25;
+      if (s.act === "snus") s.buzzUntil = env.t + 30;
       s.act = null;
       s.vx = undefined;
     }
     function walkingExtras(a, s, dt) {
       const lv = env.drunk(a);
       const shame = s.shameUntil > env.t;
+      // fresh out of the bathroom after snus: running faster with both hands in the air
+      const buzz = s.buzzUntil > env.t;
+      a.speedMul = buzz ? 1.6 : 1;
+      if (buzz) {
+        a.av.parts.armR.rotation.set(-2.9 + Math.sin(env.t * 14) * 0.25, 0, -0.35);
+        a.av.parts.armL.rotation.set(-2.9 - Math.sin(env.t * 14) * 0.25, 0, 0.35);
+        if (Math.random() < dt * 1.5) fx.icon(Math.random() < 0.5 ? "star" : "bang", a.x, a.y + 2.8, a.z, { size: 0.3 });
+      }
       a.av.hold("L", shame ? "shoes" : null);
       a.av.hold("head", shame ? "messy" : null);
       if (lv >= 2 && a.look && a.look.cheeky) {
@@ -1163,7 +1174,7 @@
         actors.forEach((a) => {
           const s = st(a);
           if (a.drop > 0) {
-            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
+            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
           } else s.dropping = false;
           s.on = false;
           if (a.drop > 0 || a.idleT < 0.35) return;

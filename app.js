@@ -1877,7 +1877,7 @@
     }
     // Walk an actor along a path of cells at walking speed; onNode fires as each cell centre is reached.
     function stepAlong(a, path, dt, onNode) {
-      let budget = SPEED * dt, moving = false, heading;
+      let budget = SPEED * (a.speedMul || 1) * dt, moving = false, heading; // actions can speed someone up
       while (budget > 1e-6 && path.length) {
         const [cx, cz] = path[0];
         const dx = cx + 0.5 - a.x, dz = cz + 0.5 - a.z, dist = Math.hypot(dx, dz);
@@ -2024,6 +2024,8 @@
         hair: myLook.hair,
         face: myLook.face ? toB64(myLook.face) : "",
         cheeky: myLook.cheeky ? 1 : 0,
+        h: FefeAvatar.bodyShape(myLook).h,
+        wt: FefeAvatar.bodyShape(myLook).wt,
         track: recs && recs.day ? trackOf(recs.day) : "",
         trackN: recs && recs.night ? trackOf(recs.night) : "",
         at: Date.now()
@@ -2062,7 +2064,10 @@
       const nodes = parse(r.track), nodesN = parse(r.trackN);
       const name = String(r.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest";
       const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, cheeky: r.cheeky === 1 };
-      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, typeof r.face === "string" ? r.face : ""].join("|") };
+      const sh = FefeAvatar.bodyShape({ body: look.body, h: +r.h || 0, wt: +r.wt || 0 }); // clamps to sensible sizes
+      look.h = sh.h;
+      look.wt = sh.wt;
+      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, typeof r.face === "string" ? r.face : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -2360,6 +2365,92 @@
         })
       : null;
     const actorList = [];
+
+    // ---------- karaoke screen: an ABBA night (song titles only, no lyrics) ----------
+    const ABBA = ["Dancing Queen", "Mamma Mia", "Waterloo", "Gimme! Gimme! Gimme!", "Take a Chance on Me", "Super Trouper", "Voulez-Vous", "Fernando", "Money, Money, Money", "Chiquitita"];
+    const karaoke = (() => {
+      const c = document.createElement("canvas");
+      c.width = 192;
+      c.height = 96;
+      const tex = new T.CanvasTexture(c);
+      tex.magFilter = T.NearestFilter;
+      tex.minFilter = T.LinearFilter;
+      tex.generateMipmaps = false;
+      const geo = new T.PlaneGeometry(2.56, 1.26);
+      geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(4).fill(dropAt(39, 3.4, 32.3, 5) + 14), 1));
+      const mat = new T.MeshBasicMaterial({ map: tex });
+      patchDrop(mat);
+      const mesh = new T.Mesh(geo, mat);
+      mesh.position.set(39.0 + OX, 3.35, 32.365 + OZ);
+      scene.add(mesh);
+      return { c, g: c.getContext("2d"), tex, next: 0 };
+    })();
+    // the four pixel performers in glam outfits
+    const GLAM = [["#FFFFFF", "#F2D16B"], ["#2F6FD1", "#6B3F1F"], ["#FEFE40", "#C9A35A"], ["#E23D9B", "#8A4B2A"]];
+    function paintKaraoke(t) {
+      const { g, c } = karaoke, W = c.width, H = c.height;
+      const song = ABBA[Math.floor(t / 20) % ABBA.length], u = (t % 20) / 20;
+      const grad = g.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, "#2A0B4F");
+      grad.addColorStop(1, "#C2185B");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, W, H);
+      // sparkles
+      for (let i = 0; i < 18; i++) {
+        const x = (i * 53 + Math.floor(t * 7) * (i % 3 + 1)) % W, y = (i * 29) % 44 + 18;
+        g.fillStyle = (Math.floor(t * 4) + i) % 3 ? "rgba(255,255,255,0.25)" : "#FFFFFF";
+        g.fillRect(x, y, 2, 2);
+      }
+      g.textAlign = "center";
+      g.textBaseline = "top";
+      g.fillStyle = "#FEFE40";
+      g.font = "bold 15px 'Pixelify Sans', 'Courier New', monospace";
+      g.fillText("\u266A ABBA \u266A", W / 2, 4);
+      g.fillStyle = "#FFFFFF";
+      g.font = "bold 12px 'Pixelify Sans', 'Courier New', monospace";
+      g.fillText(song, W / 2, 21);
+      // performers
+      GLAM.forEach(([suit, hair], i) => {
+        const x = 40 + i * 37, hop = Math.abs(Math.sin(t * 5 + i)) * 4, y = 40 - hop;
+        g.fillStyle = hair;
+        g.fillRect(x, y, 8, 4);
+        g.fillStyle = "#F0C9A0";
+        g.fillRect(x + 1, y + 3, 6, 5);
+        g.fillStyle = suit;
+        g.fillRect(x, y + 8, 8, 9);
+        const arm = Math.sin(t * 5 + i) > 0 ? -5 : 2;
+        g.fillRect(x - 3, y + 8 + arm, 3, 7);
+        g.fillRect(x + 8, y + 8 - arm, 3, 7);
+        g.fillRect(x + 1, y + 17, 2, 7);
+        g.fillRect(x + 5, y + 17, 2, 7);
+      });
+      // lyric bar with the bouncing ball, or who's on the mic
+      g.fillStyle = "rgba(0,0,0,0.45)";
+      g.fillRect(8, 70, W - 16, 20);
+      let singer = null;
+      if (party) actorList.forEach((a) => { if (!singer && party.actOf(a) === "sing") singer = a.name; });
+      g.font = "bold 11px 'Pixelify Sans', 'Courier New', monospace";
+      if (singer) {
+        g.fillStyle = "#FEFE40";
+        g.fillText("Now singing: " + singer, W / 2, 75);
+      } else {
+        const words = ["la", "la", "la", "\u266A", "la", "la", "la", "\u266A"], x0 = 24, step = (W - 48) / (words.length - 1);
+        const k = Math.floor(u * words.length * 2) % words.length;
+        words.forEach((w, i) => { g.fillStyle = i <= k ? "#FEFE40" : "#FFFFFF"; g.fillText(w, x0 + i * step, 76); });
+        g.fillStyle = "#FF6FB5";
+        g.fillRect(x0 + k * step - 2, 70 - Math.abs(Math.sin(t * 6)) * 5, 4, 4);
+      }
+      karaoke.tex.needsUpdate = true;
+    }
+    // repainted a few times a second, and only when the lounge is close enough to see
+    function updateKaraoke(t) {
+      if (t < karaoke.next) return;
+      karaoke.next = t + 0.16;
+      const dx = view.target.x - (39 + OX), dz = view.target.z - (33 + OZ);
+      if (karaoke.painted && (view.fit > 45 || dx * dx + dz * dz > 30 * 30)) return;
+      karaoke.painted = true;
+      paintKaraoke(t);
+    }
     function updateParty(dt) {
       updateMe(dt);
       ghosts.forEach((g, id) => updateGhost(g, id, dt));
@@ -2554,6 +2645,10 @@
       const res = await analyse(photo);
       if (joinEl.hidden) return;
       draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, cheeky: lsGet("fefe40.cheeky") === "1" };
+      // height and weight come back from last time, otherwise they follow the body until moved
+      sizeSet = !!lsGet("fefe40.h");
+      draft.h = +lsGet("fefe40.h") || FefeAvatar.HEIGHT[draft.body];
+      draft.wt = +lsGet("fefe40.wt") || FefeAvatar.WEIGHT[draft.body];
       guessNote.textContent = res.body ? "Guessed from your photo. Tap to change." : photo ? "We couldn't spot a face, so pick one." : "Pick one.";
       setDressMode("join");
       showStep("dress");
@@ -2573,6 +2668,7 @@
     function openWardrobe() {
       if (!me) return;
       draft = Object.assign({}, myLook);
+      sizeSet = true;
       joinEl.hidden = false;
       setDressMode("change");
       showStep("dress");
@@ -2605,6 +2701,7 @@
     });
 
     function refreshDress() {
+      showSizes();
       bodyM.setAttribute("aria-pressed", String(draft.body === "m"));
       bodyF.setAttribute("aria-pressed", String(draft.body === "f"));
       outfitName.textContent = FefeAvatar.OUTFITS[draft.outfit].name;
@@ -2612,8 +2709,31 @@
       cheekyIn.checked = !!draft.cheeky;
       rebuildPreview();
     }
-    bodyM.addEventListener("click", () => { draft.body = "m"; refreshDress(); });
-    bodyF.addEventListener("click", () => { draft.body = "f"; refreshDress(); });
+    let sizeSet = false;
+    function pickBody(b) {
+      draft.body = b;
+      if (!sizeSet) { draft.h = FefeAvatar.HEIGHT[b]; draft.wt = FefeAvatar.WEIGHT[b]; }
+      refreshDress();
+    }
+    bodyM.addEventListener("click", () => pickBody("m"));
+    bodyF.addEventListener("click", () => pickBody("f"));
+    const hIn = $("h-in"), wtIn = $("wt-in"), hOut = $("h-out"), wtOut = $("wt-out");
+    function showSizes() {
+      const sh = FefeAvatar.bodyShape(draft);
+      hIn.value = sh.h;
+      wtIn.value = sh.wt;
+      hOut.textContent = sh.h + " cm";
+      wtOut.textContent = sh.wt + " kg";
+    }
+    [[hIn, "h"], [wtIn, "wt"]].forEach(([input, key]) => input.addEventListener("input", () => {
+      if (!draft) return;
+      draft[key] = +input.value;
+      sizeSet = true;
+      lsSet("fefe40.h", String(draft.h));
+      lsSet("fefe40.wt", String(draft.wt));
+      showSizes();
+      if (pv && pv.av) FefeAvatar.reshape(pv.av, draft);
+    }));
     const cycle = (n) => { const len = FefeAvatar.OUTFITS.length; draft.outfit = (draft.outfit + n + len) % len; refreshDress(); };
     $("prev").addEventListener("click", () => cycle(-1));
     $("next").addEventListener("click", () => cycle(1));
@@ -2765,6 +2885,7 @@
       updateSlice(dt);
       updateCutaway(dt);
       updateNightLights(dt, now / 1000);
+      updateKaraoke(now / 1000);
       if (!reduceMotion) {
         waterPlanes.forEach((m, i) => {
           m.material.map.offset.x += dt * (0.03 + i * 0.01);

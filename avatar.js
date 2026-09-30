@@ -476,6 +476,7 @@
 
     const rig = new T.Group();
     root.add(rig);
+    const shape = bodyShape(look);
     const legR = pivot(rig, -2, 12, 0);
     mesh(legR, 4, 12, 4, R.legR, 0, -6, 0);
     const legL = pivot(rig, 2, 12, 0);
@@ -488,6 +489,7 @@
     mesh(armL, aw, 12, 4, R.armL, 0, -4, 0);
     const head = pivot(rig, 0, 24, 0);
     mesh(head, 8, 8, 8, R.head, 0, 4, 0);
+    fitShape(rig, head, shape);
     if (slim) adder(head)(-4, -3, -4.6, 8, 11, 0.8, look.hair);
     if (outfit.hat) outfit.hat(adder(head));
     if (outfit.extras) outfit.extras(adder(rig));
@@ -559,7 +561,8 @@
       root,
       rig,
       parts: { legR, legL, torso, armR, armL, head },
-      height: 32 * P,
+      height: 32 * P * shape.s,
+      scale: shape.s,
       hold,
       moustache,
       // phase advances with distance walked; moving blends between walking and standing
@@ -585,5 +588,20 @@
     };
   }
 
-  window.FefeAvatar = { OUTFITS, build, P };
+  // Height and weight: the body scales up from the feet with height, and gets wider (not taller) with weight.
+  // Heads keep their width so faces don't stretch. The standard avatar is a 178 cm, 80 kg guest.
+  const HEIGHT = { m: 178, f: 165 }, WEIGHT = { m: 80, f: 62 };
+  function bodyShape(look) {
+    const f = look && look.body === "f" ? "f" : "m";
+    const h = Math.max(140, Math.min(210, +(look && look.h) || HEIGHT[f]));
+    const wt = Math.max(40, Math.min(160, +(look && look.wt) || WEIGHT[f]));
+    const bmi = wt / ((h / 100) * (h / 100));
+    return { h, wt, s: h / 178, w: Math.max(0.8, Math.min(1.5, Math.sqrt(bmi / 25))) };
+  }
+  function fitShape(rig, head, shape) {
+    rig.scale.set(shape.w, shape.s, shape.w);
+    head.scale.set(1 / shape.w, 1, 1 / shape.w);
+  }
+
+  window.FefeAvatar = { OUTFITS, build, P, bodyShape, HEIGHT, WEIGHT, reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = 32 * P * sh.s; av.scale = sh.s; } };
 })();
