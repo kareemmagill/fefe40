@@ -4930,7 +4930,7 @@
     }
     function start(data) {
       data = data || {};
-      if (lsGet("fefe40.night") === "1") setNight(true); // been here past the first 4 minutes: it's night
+      setNight(true); // the party opens in the evening (the switch can still pick day before going in)
       if (location.hash === "#wipe-everything") setTimeout(wipeEverything, 500);
       if (location.hash === "#remove-duplicates") setTimeout(removeDuplicates, 500);
       if (typeof data.az === "number") {
