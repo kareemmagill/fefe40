@@ -76,6 +76,9 @@
     let lastSay = -1e9, svVoice = null, enVoice = null, voicesSeen = 0, queued = 0, speechUnlocked = false;
     let clips = [], lastClip = -1e9;
     const spot = { x: FLOOR_X, z: FLOOR_Z }; // where the music comes from
+    // bedroom music: its own slow loop from wherever a bedroom scene is on (setLove)
+    const love = { on: false, x: 0, z: 0, next: 0, step: 0 };
+    let loveBus = null;
     let club = false, musicArea = -1; // musicArea: 0-1 from the game, or -1 to go by distance from the spot
 
     // ---------- building blocks ----------
@@ -537,7 +540,9 @@
       fxBus.gain.value = 0.9;
       musicBus = ctx.createGain();
       musicBus.gain.value = 0;
-      fxBus.connect(comp); musicBus.connect(comp); comp.connect(master); master.connect(ctx.destination);
+      loveBus = ctx.createGain();
+      loveBus.gain.value = 0;
+      fxBus.connect(comp); musicBus.connect(comp); loveBus.connect(comp); comp.connect(master); master.connect(ctx.destination);
     }
     const running = () => offline || !ctx.state || ctx.state === "running";
     // iOS Safari needs resume() plus a sound started inside the gesture.
@@ -702,6 +707,40 @@
       musicOn = !!on;
       if (musicOn && ctx) { step = 0; nextT = ctx.currentTime + 0.1; }
     }
+    // An original slow jam for the bedrooms: warm electric-piano chords (Dmaj7, Bm7, Em7, A7) with a tremolo, a soft
+    // bass and a gentle rim click, at 66 bpm.
+    const LOVE_CH = [[50, [62, 66, 69, 73]], [47, [59, 62, 66, 69]], [52, [64, 67, 71, 74]], [45, [57, 61, 64, 67]]];
+    function loveNote(t, m, len, v, type) {
+      const g = ctx.createGain(), trem = ctx.createOscillator(), tg = ctx.createGain(), fl = ctx.createBiquadFilter();
+      fl.type = "lowpass";
+      fl.frequency.value = 1600;
+      env(g.gain, t, v, 0.04, len * 0.5, len * 0.5);
+      trem.frequency.value = 4.5;
+      tg.gain.value = v * 0.3;
+      trem.connect(tg);
+      tg.connect(g.gain);
+      trem.start(t);
+      trem.stop(t + len + 0.1);
+      fl.connect(g);
+      g.connect(loveBus);
+      osc(type || "triangle", mtof(m), t, t + len, fl);
+    }
+    function loveStep(t) {
+      const beat = 60 / 66, s = love.step, ch = LOVE_CH[(s >> 2) & 3], b = s & 3;
+      if (b === 0) ch[1].forEach((m, i) => loveNote(t + i * 0.03, m, beat * 3.8, 0.05, "triangle"));
+      if (b === 0 || b === 2) loveNote(t, ch[0] - 12, beat * 1.6, 0.14, "sine");
+      if (b === 1 || b === 3) tone(loveBus, t, "triangle", 1800, 900, 0.02, 0.001, 0.04);
+      if (b === 2 || (b === 3 && s % 8 === 7)) loveNote(t + beat / 2, ch[1][(s * 3) % 4] + 12, beat * 0.9, 0.035, "sine"); // a little sparkle up top
+      love.step = (s + 1) & 63;
+      return beat;
+    }
+    function setLove(on, x, z) {
+      if (typeof x === "number" && isFinite(x)) love.x = x;
+      if (typeof z === "number" && isFinite(z)) love.z = z;
+      if (!!on === love.on) return;
+      love.on = !!on;
+      if (love.on && ctx) { love.step = 0; love.next = ctx.currentTime + 0.1; }
+    }
     // when the next bar of the loop starts, for singing along on the beat
     function nextBar() {
       if (!ctx) return 0;
@@ -726,6 +765,13 @@
       if (now - lastMix > 0.1 || now < lastMix) {
         lastMix = now;
         musicBus.gain.setTargetAtTime(musicVol(), now, 0.25);
+      }
+      if (loveBus) {
+        loveBus.gain.setTargetAtTime(love.on ? 0.9 * place(love.x, love.z) : 0, now, 0.4);
+        if (love.on) {
+          if (love.next < now - 0.2) love.next = now + 0.05;
+          while (love.next < now + 0.3) love.next += loveStep(love.next);
+        }
       }
       if (!musicOn) return;
       if (nextT < now - 0.2) nextT = now + 0.05; // skipped frames: jump ahead instead of a burst
@@ -753,6 +799,7 @@
       now: safe(() => (ctx ? ctx.currentTime : 0)),
       playClip: safe(playClip),
       setMusic: safe(setMusic),
+      setLove: safe(setLove),
       setMusicArea: safe((g) => { musicArea = typeof g === "number" && isFinite(g) ? clamp(g, -1, 1) : -1; }),
       nextBar: safe(nextBar)
     };

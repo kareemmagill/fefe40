@@ -4747,6 +4747,10 @@
       updateTV(now / 1000);
       if (snd && snd.enabled) {
         snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
+        // a bedroom scene nearby: the slow jam, from the nearest one
+        let loveAt = null, loveD = Infinity;
+        loveRooms.forEach((i) => { const l = bedLights[i]; if (!l) return; const d = me ? Math.hypot(l.position.x - OX - me.x, l.position.z - OZ - me.z) : Infinity; if (d < loveD) { loveD = d; loveAt = l.position; } });
+        snd.setLove(!!loveAt, loveAt ? loveAt.x - OX : 0, loveAt ? loveAt.z - OZ : 0);
         snd.setMusicArea(dj.on ? djArea(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ) : -1);
         snd.setMusicLevel(choir.on ? 0.45 : dj.on ? Math.max(0.65, Math.min(1, danceCrowd / 6)) : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
         snd.update(dt);
