@@ -2015,6 +2015,20 @@
     // loop to show what they got up to there, short enough to keep it lively.
     const IDLE_MAX = 20;
     const newRec = (x, z) => ({ clock: 0, idle: 0, nodes: [[0, x, z]] });
+    // Each loop is 4 minutes long. A new one only replaces the loop you saved last time (on this phone) once it's a
+    // full 4 minutes; until then your old loop is what everyone sees. Same phone, same guest (fefe40.me).
+    const LOOP_S = 240;
+    const keptTrack = { day: lsGet("fefe40.loopDay") || "", night: lsGet("fefe40.loopNight") || "" };
+    let loopDoneShown = { day: false, night: false };
+    function loopTrack(mode) {
+      const r = recs && recs[mode];
+      if (r && r.clock >= LOOP_S) {
+        const tr = trackOf(r);
+        if (tr !== keptTrack[mode]) { keptTrack[mode] = tr; lsSet(mode === "day" ? "fefe40.loopDay" : "fefe40.loopNight", tr); }
+        return tr;
+      }
+      return keptTrack[mode] || (r ? trackOf(r) : "");
+    }
     function startRecording(x, z) {
       recs = { day: null, night: null };
       recs[night ? "night" : "day"] = rec = newRec(x, z);
@@ -2037,6 +2051,18 @@
     }
     function tickRecording(dt, moving) {
       if (!rec) return;
+      if (rec.clock >= LOOP_S) { // this loop is full: say so once, and save it
+        const mode = recs.night === rec ? "night" : "day";
+        if (!loopDoneShown[mode]) {
+          loopDoneShown[mode] = true;
+          scheduleSave(300);
+          hint.textContent = "Your 4-minute " + mode + " loop is recorded! Everyone now sees it" + (mode === "day" ? ". Try the night switch for a night loop." : ".");
+          hint.classList.remove("gone");
+          clearTimeout(hintTimer);
+          hintTimer = setTimeout(dismissHint, 6000);
+        }
+        return;
+      }
       if (moving) { rec.idle = 0; rec.clock += dt; }
       else if (rec.idle < IDLE_MAX) {
         const s = Math.min(dt, IDLE_MAX - rec.idle);
@@ -2048,7 +2074,7 @@
     // A node is [time, x, z], or [time, x, z, car, heading] while driving: car is its number from 1 and heading
     // is in 64ths of a turn.
     function recNode(x, z, car, h) {
-      if (!rec || rec.nodes.length >= 1500) return;
+      if (!rec || rec.nodes.length >= 1500 || rec.clock >= LOOP_S) return;
       const last = rec.nodes[rec.nodes.length - 1];
       const t = Math.max(last[0], Math.round(rec.clock * 10));
       if (last[0] === t && last[1] === x && last[2] === z && (last[3] || 0) === (car || 0) && (last[4] || 0) === (h || 0)) return;
@@ -2156,8 +2182,8 @@
         cheeky: myLook.cheeky ? 1 : 0,
         h: FefeAvatar.bodyShape(myLook).h,
         wt: FefeAvatar.bodyShape(myLook).wt,
-        track: recs && recs.day ? trackOf(recs.day) : "",
-        trackN: recs && recs.night ? trackOf(recs.night) : "",
+        track: loopTrack("day"),
+        trackN: loopTrack("night"),
         voice: [...myVoiceUp].join(","),
         at: Date.now()
       };
@@ -3996,7 +4022,7 @@
           intro: $("voice-intro"), live: $("voice-live"), review: $("voice-review"), peek: $("voice-peek"), error: $("voice-error"),
           go: $("voice-go"), skip: $("voice-skip"), stop: $("voice-stop"), again: $("voice-again"), redo: $("voice-redo"), done: $("voice-done"),
           list: $("voice-list"), summary: $("voice-summary"), count: $("voice-countdown"), card: $("voice-card"), line: $("voice-line"),
-          en: $("voice-en"), hint: $("voice-hint"), fill: $("voice-fill"), level: $("voice-level"), progress: $("voice-progress")
+          en: $("voice-en"), hint: $("voice-hint"), fill: $("voice-fill"), level: $("voice-level"), progress: $("voice-progress"), pass: $("voice-pass")
         }, {
           onDone(clips) {
             Object.keys(clips).forEach((id) => { myVoice[id] = clips[id]; myVoiceUp.delete(id); clipBufs.delete(myId + "/" + id); });

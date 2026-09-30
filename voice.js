@@ -9,7 +9,7 @@
   const LINES = DATA.lines.filter((l) => l && typeof l.id === "string" && typeof l.text === "string");
   const byId = new Map(LINES.map((l) => [l.id, l]));
   const RATE = 11025; // what clips are stored at
-  const MAX_SAY = 3.2, MAX_SING = 4.5; // longest clip kept, seconds
+  const MAX_SAY = 4.5, MAX_SING = 6; // longest clip kept, seconds
 
   // ---------- which lines a guest reads ----------
   function hash(s) {
@@ -303,7 +303,9 @@
       beat(3);
       loop();
     }
-    const GAP = { say: 0.38, sound: 0.3, sing: 0.62 };
+    // Unhurried: a line counts as said after a proper pause (not a comma's breath), and only once they've been at it
+    // for a fair part of the time it takes; nobody's timed, and "Skip" moves on when they'd rather.
+    const GAP = { say: 0.7, sound: 0.55, sing: 0.95 };
     function next() {
       if (!run) return;
       run.i++;
@@ -323,11 +325,7 @@
       els.hint.hidden = !els.hint.textContent;
       els.card.classList.toggle("sing", l.kind === "sing");
       els.progress.textContent = (run.i + 1) + " / " + run.todo.length;
-      els.fill.style.transition = "none";
-      els.fill.style.width = "0%";
-      void els.fill.offsetWidth;
-      els.fill.style.transition = "width " + Math.max(0.8, l.dur || 1.5) + "s linear";
-      els.fill.style.width = "100%";
+      els.fill.style.width = "0%"; // fills as they say it, rather than counting down
     }
     function loop() {
       if (!run || !mic) return;
@@ -352,18 +350,21 @@
           else if (v < off) floor = Math.max(0.0015, floor * 0.995 + v * 0.005); // the room's noise drifts
         } else if (run.state === "talk") {
           if (v > off) run.lastLoud = ft;
-          const gap = GAP[l.kind] || GAP.say, long = Math.min(l.kind === "sing" ? MAX_SING + 1.5 : MAX_SAY + 1.2, (l.dur || 1.5) * 2 + 1.5);
-          if ((ft - run.lastLoud > gap && run.lastLoud - run.onset > 0.12) || ft - run.onset > long) {
+          const gap = GAP[l.kind] || GAP.say, long = Math.min(l.kind === "sing" ? MAX_SING + 2 : MAX_SAY + 2, (l.dur || 1.5) * 2.5 + 2);
+          // a quick reader may be done well before the line's usual time: a longer pause still ends it
+          const talked = run.lastLoud - run.onset, quiet = ft - run.lastLoud;
+          if ((quiet > gap && talked > Math.max(0.25, (l.dur || 1.5) * 0.35)) || (quiet > 1.4 && talked > 0.25) || ft - run.onset > long) {
             run.got.push({ id: l.id, on: run.onset, off: Math.min(run.lastLoud, run.onset + long), sing: l.kind === "sing" });
             run.state = "done";
             run.frame++;
-            run.timer = setTimeout(next, 120);
+            run.timer = setTimeout(next, 450); // a breather before the next line
             return;
           }
         }
       }
       // nothing heard for a while: move on, it counts as missed
-      if (run.state === "wait" && t - run.shown > Math.max(4, (l.dur || 1.5) + 3)) { run.state = "done"; next(); }
+      if (run.state === "talk") els.fill.style.width = Math.min(100, Math.round(((t - run.onset) / Math.max(0.8, l.dur || 1.5)) * 100)) + "%";
+      if (run.state === "wait" && t - run.shown > Math.max(8, (l.dur || 1.5) + 6)) { run.state = "done"; next(); }
     }
     function finish() {
       const got = run.got;
@@ -401,6 +402,15 @@
     }
     els.go.addEventListener("click", () => start());
     els.stop.addEventListener("click", () => { if (run && mic) finish(); });
+    // skip this line: whatever they said of it so far is kept
+    if (els.pass) els.pass.addEventListener("click", () => {
+      if (!run || !mic || (run.state !== "wait" && run.state !== "talk")) return;
+      const l = run.todo[run.i];
+      if (run.state === "talk" && run.lastLoud - run.onset > 0.25) run.got.push({ id: l.id, on: run.onset, off: run.lastLoud, sing: l.kind === "sing" });
+      run.state = "done";
+      run.frame = mic.rms.length;
+      next();
+    });
     els.skip.addEventListener("click", () => { stopAll(); opts.onSkip(); });
     els.again.addEventListener("click", () => { clips = {}; pcmClips = {}; start(); });
     els.redo.addEventListener("click", () => start(lines.filter((l) => !clips[l.id])));
