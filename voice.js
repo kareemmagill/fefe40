@@ -304,7 +304,7 @@
       loop();
     }
     // Unhurried: a line counts as said after a proper pause (not a comma's breath), and only once they've been at it
-    // for a fair part of the time it takes; nobody's timed, and "Skip" moves on when they'd rather.
+    // for a fair part of the time it takes; nobody's timed.
     const GAP = { say: 0.7, sound: 0.55, sing: 0.95 };
     function next() {
       if (!run) return;
