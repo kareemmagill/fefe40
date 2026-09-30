@@ -500,12 +500,13 @@
     // People's sounds fade with distance from the listener (your avatar, once you've joined): clear up close, gone by
     // about 14 m, however far out the camera is.
     function place(x, z) {
-      if (typeof x !== "number" || typeof z !== "number" || !isFinite(x) || !isFinite(z)) return zoomQuiet();
+      if (!L.me) return 0; // only once you're at the party: people are heard around your avatar
+      if (typeof x !== "number" || typeof z !== "number" || !isFinite(x) || !isFinite(z)) return 1;
       const d = Math.sqrt((x - L.x) * (x - L.x) + (z - L.z) * (z - L.z));
-      const near = 3, far = 14;
+      const near = 1.5, far = 13;
       if (d >= far) return 0;
       const u = d <= near ? 0 : (d - near) / (far - near);
-      return (1 - u * u * (3 - 2 * u)) * zoomQuiet();
+      return (1 - u) * (1 - u); // full right next to you, a lot quieter a few steps away
     }
     function musicVol() {
       if (!musicOn) return 0;
@@ -603,7 +604,8 @@
         }, 400);
       }
     }
-    function setListener(x, z, fit) {
+    function setListener(x, z, fit, me) {
+      L.me = !!me;
       if (typeof x === "number" && isFinite(x)) L.x = x;
       if (typeof z === "number" && isFinite(z)) L.z = z;
       if (typeof fit === "number" && isFinite(fit)) L.fit = clamp(fit, 1, 1000);

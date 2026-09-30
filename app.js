@@ -4385,9 +4385,15 @@
         $("voice-step").hidden = mode !== "join";
         $("voice-title").textContent = mode === "again" ? "Time for " + lines.length + " more lines!" : have.size ? "Record " + lines.length + " more lines?" : "Now lend us your voice!";
         $("voice-forget").hidden = !have.size;
-        $("voice-skip").textContent = mode === "join" ? (have.size ? "Keep my voice" : "Skip") : "Close";
-        $("voice-skip").hidden = mode === "again"; // every 4 minutes it isn't optional (unless the microphone won't work)
-        voiceForced = mode === "again";
+        $("voice-skip").textContent = mode === "join" && have.size ? "Keep my voice" : "Skip";
+        $("voice-skip").hidden = false;
+        voiceForced = false;
+        // the party goes quiet while they record, so its sounds don't end up in their clips
+        const wasOn = !!(snd && snd.enabled);
+        if (wasOn) snd.disable();
+        if (jb.ready && jb.playing) jb.player.pauseVideo();
+        const done = voiceDone;
+        voiceDone = () => { done(); if (wasOn && snd && !snd.enabled) snd.enable(); };
         $("voice-done").textContent = mode === "join" ? "Save and pick my outfit" : "Save my voice";
         showStep("voice");
       });
@@ -4740,7 +4746,7 @@
       updateKaraoke(now / 1000);
       updateTV(now / 1000);
       if (snd && snd.enabled) {
-        snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit); // you hear from where your avatar is
+        snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
         snd.setMusicArea(dj.on ? djArea(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ) : -1);
         snd.setMusicLevel(choir.on ? 0.45 : dj.on ? Math.max(0.65, Math.min(1, danceCrowd / 6)) : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
         snd.update(dt);
