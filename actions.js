@@ -43,6 +43,9 @@
     ["head", "torso", "armR", "armL", "legR", "legL"].forEach((k) => q[k].rotation.set(p[k][0], p[k][1], p[k][2]));
   }
   const wave = (T, speed) => Math.sin(T * speed);
+  // the playground swing: chains 2.84 m from the top bar to the seat, swinging up to 0.55 rad each way
+  const SWING_LEN = 2.84;
+  const swingAngle = (T) => 0.55 * Math.sin(T * 2.2);
   const TREAD = 0.6; // lift for standing in the deep end
   // an arm lifting something to the mouth every `period` seconds
   function toMouth(T, period, offset) {
@@ -1165,13 +1168,14 @@
       if (m.T % 5 < 1.5) { const c = 0.28 + wave(m.T, 16) * 0.22; p.armR = [-1.25, 0, c]; p.armL = [-1.25, 0, -c]; }
       return { pose: p };
     },
+    // on the swing's own arc: app.js swings the seat and chains from the top bar by the same angle (swingAngle)
     swing(m) {
-      const p = sit(m.asg.seat || 1.15), s = wave(m.T, 2.2);
-      p.rig[2] = s * 0.9;
-      p.rig[1] += (1 - Math.cos(s * 0.5)) * 0.8;
-      p.rig[3] = -s * 0.25;
-      p.legR = [-HALF - s * 0.4, 0, 0.05];
-      p.legL = [-HALF - s * 0.4, 0, -0.05];
+      const p = sit(m.asg.seat || 1.15), th = swingAngle(m.T);
+      p.rig[2] = SWING_LEN * Math.sin(th);
+      p.rig[1] += SWING_LEN * (1 - Math.cos(th));
+      p.rig[3] = -th * 0.6;
+      p.legR = [-HALF + 0.5 - th * 0.7, 0, 0.05]; // legs out on the way up, tucked on the way back
+      p.legL = [-HALF + 0.5 - th * 0.7, 0, -0.05];
       p.armR = [-2.6, 0, 0.1];
       p.armL = [-2.6, 0, -0.1];
       return { pose: p };
@@ -1564,6 +1568,7 @@
       fx,
       actOf(a) { const s = states.get(a); return s ? s.act : null; },
       close(a) { const s = states.get(a); return !!(s && s.act && CLOSE_ACTS.has(s.act)); },
+      swingAngle,
       pileSpot(a) { return pileSpot(a, st(a)); }, // where their clothes would land now (for live guests)
       update(dt, actors, nowMs) {
         const t = nowMs / 1000;

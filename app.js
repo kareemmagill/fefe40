@@ -788,11 +788,7 @@
       box(37.3, 1, 42.3, 0.3, 4, 0.3, C.red);
       box(42.4, 1, 42.3, 0.3, 4, 0.3, C.red);
       box(37.3, 5, 42.3, 5.4, 0.3, 0.3, C.red);
-      [38.4, 40.6].forEach((x) => {
-        box(x, 2.2, 42.4, 0.05, 2.8, 0.05, C.metal);
-        box(x + 0.8, 2.2, 42.4, 0.05, 2.8, 0.05, C.metal);
-        box(x - 0.05, 2.1, 42.2, 0.95, 0.12, 0.5, C.fefe);
-      });
+      // (the two swings hang from this bar and move: see swings, built with the DJ decks)
       box(37, 1, 46, 2, 2, 2, C.blue);
       [[37, 46], [38.8, 46], [37, 47.8], [38.8, 47.8]].forEach(([x, z]) => box(x, 3, z, 0.2, 1.6, 0.2, C.red));
       box(36.9, 4.6, 45.9, 2.2, 0.3, 2.2, C.red);
@@ -3542,6 +3538,32 @@
         }
       };
     })();
+    // The playground swings: chains and a seat hanging from the top bar, swinging with whoever's on them (the same
+    // angle actions.js swings the rider by) and swaying a little in the breeze when empty.
+    const swings = (() => {
+      const list = [38.825, 41.025].map((x, i) => {
+        const g = new T.Group();
+        const part = (px, py, w, h, d, color) => { const m = new T.Mesh(carBox, carMat(color, "solid")); m.scale.set(w, h, d); m.position.set(px, py, 0); m.castShadow = true; g.add(m); };
+        part(-0.4, -1.42, 0.05, 2.8, 0.05, C.metal);
+        part(0.4, -1.42, 0.05, 2.8, 0.05, C.metal);
+        part(0, -2.84, 0.95, 0.12, 0.5, C.fefe);
+        g.position.set(x + OX, 5.0, 42.45 + OZ);
+        g.visible = false;
+        scene.add(g);
+        return { g, x, phase: i * 1.7 };
+      });
+      return {
+        update() {
+          const t = (Date.now() - PARTY_EPOCH) / 1000;
+          list.forEach((sw) => {
+            sw.g.visible = !building;
+            let th = 0.05 * Math.sin(t * 1.3 + sw.phase);
+            if (party) actorList.forEach((a) => { if (party.actOf(a) === "swing" && Math.abs(a.av.root.position.x - OX - sw.x) < 0.6) th = party.swingAngle(t); });
+            sw.g.rotation.x = -th;
+          });
+        }
+      };
+    })();
     // Music left on for three hours with nobody touching the decks goes off by itself.
     function djFromServer(d) {
       const t = d && Number.isFinite(+d.t) ? +d.t : 0;
@@ -3851,6 +3873,7 @@
       updatePuffs(dt);
       updateClothes(dt);
       decks.update(dt, performance.now() / 1000);
+      swings.update();
       if (!party) return;
       actorList.length = 0;
       if (me) actorList.push(me);
