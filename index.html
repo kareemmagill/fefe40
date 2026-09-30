@@ -317,51 +317,6 @@ body.driving .dock { display: none; }
   opacity: 0.8;
   pointer-events: none;
 }
-/* head scan: a dot for each angle round the face guide, lit once that angle is captured, and a big arrow */
-.scan-ring { position: absolute; inset: 0; pointer-events: none; }
-.scan-dot {
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  margin: -9px 0 0 -9px;
-  border: 3px solid var(--yellow);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.35);
-  transition: background 0.2s, transform 0.2s;
-}
-.scan-dot[data-at="front"] { left: 50%; top: 7%; }
-.scan-dot[data-at="right"] { left: 86%; top: 47%; }
-.scan-dot[data-at="left"] { left: 14%; top: 47%; }
-.scan-dot[data-at="down"] { left: 50%; top: 88%; }
-.scan-dot.now { transform: scale(1.35); }
-.scan-dot.done { background: var(--yellow); }
-.scan-arrow {
-  position: absolute;
-  left: 50%;
-  top: 45%;
-  transform: translate(-50%, -50%);
-  color: var(--yellow);
-  font: 700 4.5rem/1 var(--font-body);
-  text-shadow: 0 3px 0 var(--blue-edge), 0 0 18px rgba(0, 0, 0, 0.6);
-}
-.frame.flash::after { content: ""; position: absolute; inset: 0; background: #fff; animation: flash 0.35s ease-out forwards; }
-@keyframes flash { from { opacity: 0.85; } to { opacity: 0; } }
-.scan-thumbs { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
-.scan-thumbs figure { margin: 0; display: grid; gap: 3px; justify-items: center; font-size: 0.75rem; color: var(--sky-bottom); }
-.scan-thumbs canvas { width: 56px; height: 56px; border: 2px solid var(--blue-edge); border-radius: 8px; image-rendering: pixelated; }
-.scan-msg {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--scrim);
-  color: var(--yellow);
-  font: 700 1.05rem/1.25 var(--font-body);
-  text-align: center;
-}
 .frame-msg { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 18px; font-weight: 600; line-height: 1.4; text-align: center; }
 .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .row.end { justify-content: flex-end; }
@@ -532,6 +487,8 @@ body.driving .dock { display: none; }
     <div class="brand-row">
       <button type="button" class="meta guests-btn" id="guests" aria-expanded="false" aria-controls="guest-list" hidden></button>
       <button type="button" class="meta exit-btn invite-btn" id="invite">Invite</button>
+      <label class="meta exit-btn" id="test-faces" for="test-face-files" hidden>Test faces</label>
+      <input type="file" id="test-face-files" accept="image/*" multiple hidden>
       <button type="button" class="meta exit-btn" id="exit" hidden>Exit</button>
     </div>
     <div class="guest-list" id="guest-list" hidden></div>
@@ -595,23 +552,16 @@ body.driving .dock { display: none; }
     <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="join-title">
       <div id="step-photo">
         <p class="eyebrow">Step 1 of 2 · Photo and name</p>
-        <h2 class="sheet-title" id="join-title">Scan your party head</h2>
-        <p class="sheet-sub">A quick head scan: look straight, turn right, turn left, then tip your head down, so your block head gets your face, ears and hair. The photos stay on your phone; only small pixel versions go online.</p>
+        <h2 class="sheet-title" id="join-title">Snap your party face</h2>
+        <p class="sheet-sub">Look straight at the camera with your face in the oval. Your photo stays on your phone; only a small version of your face goes online.</p>
         <div class="frame">
           <video id="cam" playsinline muted autoplay></video>
           <canvas id="shot" width="480" height="480" hidden></canvas>
           <p class="frame-msg" id="cam-msg" hidden></p>
-          <p class="scan-msg" id="scan-msg" aria-live="assertive" hidden></p>
           <div class="frame-guide" id="guide" aria-hidden="true"></div>
-          <div class="scan-ring" id="scan-ring" aria-hidden="true" hidden>
-            <span class="scan-dot" data-at="front"></span><span class="scan-dot" data-at="right"></span>
-            <span class="scan-dot" data-at="left"></span><span class="scan-dot" data-at="down"></span>
-            <span class="scan-arrow" id="scan-arrow"></span>
-          </div>
         </div>
-        <div class="scan-thumbs" id="scan-thumbs" hidden></div>
         <div class="row">
-          <button type="button" class="btn primary" id="snap" disabled>Scan my head</button>
+          <button type="button" class="btn primary" id="snap" disabled>Take photo</button>
           <button type="button" class="btn" id="retake" hidden>Retake</button>
           <label class="btn" for="file">Use a photo</label>
           <input type="file" id="file" accept="image/*" capture="user" hidden>
@@ -672,6 +622,7 @@ body.driving .dock { display: none; }
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="avatar.js"></script>
+<script src="outfits-hd.js"></script>
 <script src="sound.js"></script>
 <script src="actions.js"></script>
 <script src="app.js"></script>

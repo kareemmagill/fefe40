@@ -1,10 +1,25 @@
-/* FEFE40 avatars: Minecraft-style blocky people with a pixel face from the guest's photo and 20 Swedish-themed outfits.
-   Exposes window.FefeAvatar = { OUTFITS, build(THREE, look), P }.
-   look = { body: "m" | "f", outfit: 0..19, skin: "#rrggbb", hair: "#rrggbb", face: Uint8Array(n*n*3) | null } (n = 32, or 16 for early guests) */
+/* FEFE40 avatars, prototype B "chunky human": the same blocky party people rebuilt at twice the voxel resolution on every
+   axis (64 voxels tall instead of 32 skin pixels, so 8x the voxels), with a neck, shoulders, hands and shoes, slimmer
+   limbs, a rounded voxel head with ears and a nose, and a sharp photo face of up to 96x96 texels.
+
+   Drop-in for avatar.js: window.FefeAvatar = { OUTFITS, build(THREE, look), P, bodyShape, HEIGHT, WEIGHT, reshape }.
+   Pivots, pose semantics, props (hold R/L/head/body), hats, moustache() and setPose() are unchanged; hats, props and poses
+   still use old skin pixels (P metres), a voxel is half of one.
+   Extras: faceFromImage(img, box, opts), decodeFace(str), FACE_N, FACE_MAX, V (metres per voxel).
+
+   look = { body: "m" | "f", outfit, skin: "#rrggbb", hair: "#rrggbb", face, faceL, faceR, faceT, h, wt }
+   face / faceL / faceR / faceT may each be
+     - a face string from faceFromImage(): "J:" + base64 JPEG or "W:" + base64 WebP (<= 4200 characters), decoded
+       asynchronously (the head shows skin with a drawn face for the few milliseconds until it is ready),
+     - an old raw RGB Uint8Array (32x32 or 16x16, as avatar.js takes), used as is,
+     - null (NPCs): a drawn pixel face. */
 (function () {
-  const P = 2.2 / 32; // metres per skin pixel: avatars stand 2.2 m tall
-  const S = 4; // atlas texels per skin pixel, so the head front holds a 32×32 photo face
-  const ATLAS = 64 * S;
+  const P = 2.2 / 32; // metres per old skin pixel: avatars stand 2.2 m tall
+  const V = P / 2; // metres per voxel: twice the resolution on every axis
+  const TX = 2; // atlas texels per voxel face (enough for per-corner shading and for 32x32 head scans on 16 voxels)
+  const AW = 256; // atlas width in texels
+  const FACE_N = 96; // photo face texels across the 16-voxel head front (6 per voxel)
+  const FACE_MAX = 4200; // longest face string the Firebase rule allows
 
   const SB = "#006AA7", SY = "#FECC02", FE = "#FEFE40", WHITE = "#F4F4F0", BLACK = "#1E1F24", NAVY = "#17325E";
   const RED = "#C8302C", GOLD = "#E8C547", BROWN = "#6B4423", GREEN = "#2E8B3A", GREY = "#8A8F96", PINK = "#FF6FB5";
@@ -338,200 +353,601 @@
     messy: (add, look) => { add(-3.5, 8, -2, 2, 2, 2, look.hair); add(1, 8, 0.5, 2.5, 1.5, 2, look.hair); add(3.5, 6, -3, 1.5, 2, 2, look.hair); add(-4.8, 5.5, 1, 1.5, 1.5, 1.5, look.hair); }
   };
 
-  // Minecraft skin layout (64×64 at 1 unit per skin pixel): [u, v, w, h, d] per part.
-  function regions(slim) {
-    const aw = slim ? 3 : 4;
-    return {
-      head: [0, 0, 8, 8, 8],
-      body: [16, 16, 8, 12, 4],
-      armR: [40, 16, aw, 12, 4],
-      armL: [32, 48, aw, 12, 4],
-      legR: [0, 16, 4, 12, 4],
-      legL: [16, 48, 4, 12, 4]
-    };
+  // ---------- colours ----------
+  const hexCache = new Map();
+  function hexInt(c, d) {
+    if (typeof c === "number") return c;
+    if (typeof c !== "string") return d;
+    let v = hexCache.get(c);
+    if (v === undefined) {
+      v = /^#[0-9a-fA-F]{6}$/.test(c) ? parseInt(c.slice(1), 16) : d;
+      hexCache.set(c, v);
+    }
+    return v === undefined ? d : v;
   }
-  function faceRects(u, v, w, h, d) {
-    return {
-      top: [u + d, v, w, d],
-      bottom: [u + d + w, v, w, d],
-      right: [u, v + d, d, h],
-      front: [u + d, v + d, w, h],
-      left: [u + d + w, v + d, d, h],
-      back: [u + 2 * d + w, v + d, w, h]
-    };
-  }
+  const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+  const shade = (c, k) => (clamp255(((c >> 16) & 255) * k) << 16) | (clamp255(((c >> 8) & 255) * k) << 8) | clamp255((c & 255) * k);
+  const mix = (a, b, t) =>
+    (clamp255(((a >> 16) & 255) * (1 - t) + ((b >> 16) & 255) * t) << 16) |
+    (clamp255(((a >> 8) & 255) * (1 - t) + ((b >> 8) & 255) * t) << 8) |
+    clamp255((a & 255) * (1 - t) + (b & 255) * t);
+  const toHex = (c) => "#" + (c & 0xffffff).toString(16).padStart(6, "0");
 
-  function paintAtlas(look, outfit) {
-    const slim = look.body === "f";
-    const R = regions(slim);
-    const c = document.createElement("canvas");
-    c.width = c.height = ATLAS;
-    const g = c.getContext("2d");
-    const part = (reg, fn) => {
-      const rects = faceRects(reg[0], reg[1], reg[2], reg[3], reg[4]);
-      Object.keys(rects).forEach((side) => {
-        const [x0, y0, fw, fh] = rects[side];
-        for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
-          g.fillStyle = fn(x, y, side, fw, fh) || look.skin;
-          g.fillRect((x0 + x) * S, (y0 + y) * S, S, S);
+  // ---------- voxel grids ----------
+  // Voxel kinds. What colour a face gets is up to the part's painter; the kind says what the voxel is made of.
+  const SKIN = 1, CLOTH = 2, SHOE = 3, SOLE = 4, HAIR = 5, EAR = 6, NOSE = 7, NECK = 8, HAND = 9, SKIRT = 10;
+  const DIRS = [[0, 1], [0, -1], [1, 1], [1, -1], [2, 1], [2, -1]]; // +x -x +y -y +z -z
+  const SIDES = ["left", "right", "top", "bottom", "front", "back"]; // the old skin's names for those faces
+
+  // A part's voxels: a box from (x0, y0, z0) to (x1, y1, z1), in voxels from the part's pivot.
+  function Grid(x0, y0, z0, x1, y1, z1) {
+    this.o = [x0, y0, z0];
+    this.n = [Math.round(x1 - x0), Math.round(y1 - y0), Math.round(z1 - z0)];
+    this.k = new Uint8Array(this.n[0] * this.n[1] * this.n[2]);
+  }
+  Grid.prototype.at = function (i, j, k) {
+    const n = this.n;
+    return i < 0 || j < 0 || k < 0 || i >= n[0] || j >= n[1] || k >= n[2] ? 0 : this.k[(k * n[1] + j) * n[0] + i];
+  };
+  Grid.prototype.box = function (x0, y0, z0, x1, y1, z1, kind, only) {
+    const o = this.o, n = this.n;
+    for (let k = Math.max(0, Math.round(z0 - o[2])); k < Math.min(n[2], Math.round(z1 - o[2])); k++)
+      for (let j = Math.max(0, Math.round(y0 - o[1])); j < Math.min(n[1], Math.round(y1 - o[1])); j++)
+        for (let i = Math.max(0, Math.round(x0 - o[0])); i < Math.min(n[0], Math.round(x1 - o[0])); i++) {
+          const at = (k * n[1] + j) * n[0] + i;
+          if (!only || only(this.k[at], i + o[0] + 0.5, j + o[1] + 0.5, k + o[2] + 0.5)) this.k[at] = kind;
         }
-      });
-    };
-    const long = slim;
-    part(R.head, (x, y, side) => {
-      if (side === "top" || side === "back") return look.hair;
-      if (side === "bottom") return look.skin;
-      if (side === "left" || side === "right") return y < (long ? 8 : 2) || (!long && y < 5 && ((side === "right" && x === 0) || (side === "left" && x === 7))) ? look.hair : look.skin;
-      return look.skin;
-    });
-    // photo face on the head front (32×32 texels), or a simple drawn face when there is no photo
-    const [fx, fy] = faceRects(0, 0, 8, 8, 8).front;
-    const n = look.face ? Math.round(Math.sqrt(look.face.length / 3)) : 0;
-    if (n >= 8 && n * n * 3 === look.face.length) {
-      const tmp = document.createElement("canvas");
-      tmp.width = tmp.height = n;
-      const tg = tmp.getContext("2d");
-      const img = tg.createImageData(n, n);
-      for (let i = 0; i < n * n; i++) {
-        img.data[i * 4] = look.face[i * 3];
-        img.data[i * 4 + 1] = look.face[i * 3 + 1];
-        img.data[i * 4 + 2] = look.face[i * 3 + 2];
-        img.data[i * 4 + 3] = 255;
+  };
+
+  // Greedy meshing: exposed faces merge into rectangles per direction and slice, whatever their colour, because colour
+  // comes from the atlas. Photo faces (the head front) merge separately and get projected UVs instead of atlas patches.
+  function greedy(g, photo) {
+    const n = g.n, out = [], c3 = [0, 0, 0], ctr = [0, 0, 0];
+    for (let d = 0; d < 6; d++) {
+      const a = DIRS[d][0], s = DIRS[d][1], u = (a + 1) % 3, v = (a + 2) % 3;
+      const nu = n[u], nv = n[v], mask = new Uint8Array(nu * nv);
+      for (let c = 0; c < n[a]; c++) {
+        let any = false;
+        for (let q = 0; q < nv; q++) for (let p = 0; p < nu; p++) {
+          c3[a] = c; c3[u] = p; c3[v] = q;
+          const kind = g.at(c3[0], c3[1], c3[2]);
+          let m = 0;
+          if (kind) {
+            c3[a] = c + s;
+            if (!g.at(c3[0], c3[1], c3[2])) {
+              c3[a] = c;
+              for (let t = 0; t < 3; t++) ctr[t] = g.o[t] + c3[t] + 0.5;
+              m = photo && photo(kind, ctr, d) ? 2 : 1;
+              any = true;
+            }
+          }
+          mask[q * nu + p] = m;
+        }
+        if (!any) continue;
+        for (let q = 0; q < nv; q++) for (let p = 0; p < nu; ) {
+          const m = mask[q * nu + p];
+          if (!m) { p++; continue; }
+          let w = 1;
+          while (p + w < nu && mask[q * nu + p + w] === m) w++;
+          let h = 1;
+          grow: while (q + h < nv) {
+            for (let t = 0; t < w; t++) if (mask[(q + h) * nu + p + t] !== m) break grow;
+            h++;
+          }
+          for (let y = 0; y < h; y++) mask.fill(0, (q + y) * nu + p, (q + y) * nu + p + w);
+          out.push({ g, d, a, s, u, v, c, p, q, w, h, photo: m === 2 });
+          p += w;
+        }
       }
-      tg.putImageData(img, 0, 0);
-      g.imageSmoothingEnabled = false;
-      g.drawImage(tmp, fx * S, fy * S, 8 * S, 8 * S);
-    } else {
-      const px = (x, y, col) => { g.fillStyle = col; g.fillRect((fx + x) * S, (fy + y) * S, S, S); };
-      for (let x = 0; x < 8; x++) { px(x, 0, look.hair); px(x, 1, look.hair); }
-      if (long) for (let y = 2; y < 7; y++) { px(0, y, look.hair); px(7, y, look.hair); }
-      px(1, 4, WHITE); px(2, 4, "#3A2A20"); px(5, 4, "#3A2A20"); px(6, 4, WHITE);
-      px(3, 6, "#9E4A3A"); px(4, 6, "#9E4A3A");
     }
-    // the sides and top of the head from the head scan (ears and hair), when there is one
-    [[look.faceL, "left"], [look.faceR, "right"], [look.faceT, "top"]].forEach(([data, side]) => {
-      const m = data ? Math.round(Math.sqrt(data.length / 3)) : 0;
-      if (m < 8 || m * m * 3 !== data.length) return;
-      const [sx, sy] = faceRects(0, 0, 8, 8, 8)[side];
-      const tmp = document.createElement("canvas");
-      tmp.width = tmp.height = m;
-      const tg = tmp.getContext("2d"), img = tg.createImageData(m, m);
-      for (let i = 0; i < m * m; i++) { img.data[i * 4] = data[i * 3]; img.data[i * 4 + 1] = data[i * 3 + 1]; img.data[i * 4 + 2] = data[i * 3 + 2]; img.data[i * 4 + 3] = 255; }
-      tg.putImageData(img, 0, 0);
-      g.imageSmoothingEnabled = false;
-      g.drawImage(tmp, sx * S, sy * S, 8 * S, 8 * S);
-    });
-    part(R.body, (x, y, side) => outfit.shirt(x, y, side));
-    part(R.armR, (x, y, side, w) => outfit.sleeve(x, y, side, 0, w));
-    part(R.armL, (x, y, side, w) => outfit.sleeve(x, y, side, 1, w));
-    part(R.legR, (x, y, side) => outfit.leg(x, y, side, 0));
-    part(R.legL, (x, y, side) => outfit.leg(x, y, side, 1));
-    return c;
+    return out;
   }
 
-  function boxUV(T, w, h, d, reg) {
-    const geo = new T.BoxGeometry(w * P, h * P, d * P);
-    const rects = faceRects(reg[0], reg[1], w, h, d);
-    const order = ["left", "right", "top", "bottom", "front", "back"]; // BoxGeometry faces: +x, -x, +y, -y, +z, -z
-    const uv = geo.attributes.uv;
-    for (let f = 0; f < 6; f++) {
-      const [x0, y0, fw, fh] = rects[order[f]];
-      for (let k = 0; k < 4; k++) {
-        const i = f * 4 + k;
-        const su = uv.getX(i), sv = uv.getY(i);
-        uv.setXY(i, ((x0 + su * fw) * S) / ATLAS, 1 - ((y0 + (1 - sv) * fh) * S) / ATLAS);
-      }
+  // Ambient occlusion per face corner, Minecraft style: 3 = open, 0 = tucked into a corner.
+  const AO = [0.66, 0.79, 0.9, 1];
+  function cornerAO(g, air, a, u, v, su, sv) {
+    const x = air.slice();
+    x[u] += su;
+    const s1 = g.at(x[0], x[1], x[2]) ? 1 : 0;
+    x[u] -= su; x[v] += sv;
+    const s2 = g.at(x[0], x[1], x[2]) ? 1 : 0;
+    x[u] += su;
+    const cn = g.at(x[0], x[1], x[2]) ? 1 : 0;
+    return s1 && s2 ? 0 : 3 - s1 - s2 - cn;
+  }
+
+  // Which side of the old skin a voxel face shows. Faces on steps (a chest wider than the waist, the top of a toe cap)
+  // take the side the voxel sits nearest to, so they match the faces around them.
+  function sideOf(d, c, b) {
+    if ((d === 2 && c[1] + 0.5 < b[3] - 0.01) || (d === 3 && c[1] - 0.5 > b[2] + 0.01)) {
+      const nx = (c[0] - (b[0] + b[1]) / 2) / ((b[1] - b[0]) / 2), nz = (c[2] - (b[4] + b[5]) / 2) / ((b[5] - b[4]) / 2);
+      return Math.abs(nx) > Math.abs(nz) ? (nx > 0 ? "left" : "right") : nz > 0 ? "front" : "back";
     }
-    uv.needsUpdate = true;
+    return SIDES[d];
+  }
+  // The old skin pixel under a voxel centre: the part's nominal box b = [x0, x1, y0, y1, z0, z1] (voxels) stands for the old
+  // box of ow x oh x od skin pixels, so each old pixel covers about 2x2 voxel faces. Returns [x, y, face width].
+  const cl = (v, n) => (v <= 0 ? 0 : v >= 1 ? n - 1 : Math.floor(v * n));
+  function oldPx(side, c, b, ow, oh, od) {
+    const fx = (c[0] - b[0]) / (b[1] - b[0]), fy = (b[3] - c[1]) / (b[3] - b[2]), fz = (c[2] - b[4]) / (b[5] - b[4]);
+    switch (side) {
+      case "front": return [cl(fx, ow), cl(fy, oh), ow];
+      case "back": return [cl(1 - fx, ow), cl(fy, oh), ow];
+      case "left": return [cl(1 - fz, od), cl(fy, oh), od];
+      case "right": return [cl(fz, od), cl(fy, oh), od];
+      case "top": return [cl(fx, ow), cl(fz, od), ow];
+      default: return [cl(fx, ow), cl(1 - fz, od), ow];
+    }
+  }
+  const HEM = 0.84; // cloth just above bare skin (sleeve ends, shorts) and the shirt's hem get a little darker
+
+  // ---------- body parts ----------
+  // Every part keeps the old pivot: legs at the hips (y 24 voxels), arms at the shoulders (44), head at the neck (48).
+  function legSpec(outfit, i, sk) {
+    const g = new Grid(-3, -24, -3, 3, 2, 5);
+    g.box(-3, -22, -3, 3, 2, 3, CLOTH); // slimmer legs, running up into the hips
+    g.box(-3, -23, -3, 3, -22, 5, SHOE); // shoes with a toe cap
+    g.box(-3, -24, -3, 3, -23, 5, SOLE);
+    g.box(-3, -23, 4, 3, -22, 5, 0);
+    const b = [-3, 3, -24, 0, -3, 3];
+    const colAt = (c, side) => {
+      if (outfit.legHD) { const [x, y] = oldPx(side, c, b, 6, 24, 6); return outfit.legHD(x, y, side, i); } // full voxel detail
+      const [x, y] = oldPx(side, c, b, 4, 12, 4);
+      return outfit.leg(x, y, side, i);
+    };
+    return {
+      g,
+      paint(kind, c, d) {
+        const side = sideOf(d, c, b);
+        const col = hexInt(colAt(c, side), sk);
+        if (kind === SOLE) return shade(col, 0.7);
+        if (kind === CLOTH && d !== 2 && d !== 3 && c[1] > -22 && colAt(c, side) && !colAt([c[0], c[1] - 1, c[2]], side)) return shade(col, HEM);
+        return col;
+      }
+    };
+  }
+
+  function armSpec(outfit, i, slim, sk) {
+    const hw = slim ? 2.5 : 3, hh = slim ? 1.5 : 2, ow = slim ? 3 : 4;
+    const g = new Grid(-hw - 1, -20, -3, hw + 1, 2, 3);
+    g.box(-hw, -16, -3, hw, 1, 3, CLOTH);
+    g.box(-hw + 1, 1, -2, hw - 1, 2, 2, CLOTH); // rounded shoulder
+    if (i === 0) g.box(hw, -3, -2, hw + 1, 1, 2, CLOTH); // the top of the arm meets the shoulder, so arms don't float
+    else g.box(-hw - 1, -3, -2, -hw, 1, 2, CLOTH);
+    g.box(-hh, -20, -2, hh, -16, 2, HAND);
+    if (i === 0) g.box(hh, -19, 0, hh + 1, -17, 2, HAND); // thumbs on the inside, pointing forward
+    else g.box(-hh - 1, -19, 0, -hh, -17, 2, HAND);
+    const b = [-hw, hw, -20, 2, -3, 3];
+    // the sleeve's 11 old rows run from the shoulder to the wrist, the old bottom row is the hand
+    const colAt = (c, side, hand) => {
+      if (outfit.sleeveHD) { // full voxel detail: rows 0 (shoulder) to 21, the hand in rows 18 to 21
+        const [x, , w] = oldPx(side, c, b, 2 * hw, 22, 6);
+        const y = side === "top" ? 0 : side === "bottom" ? 21 : Math.max(0, Math.min(21, Math.floor(2 - c[1])));
+        return outfit.sleeveHD(x, y, side, i, w, !!hand, slim);
+      }
+      const [x, , w] = oldPx(side, c, b, ow, 12, 4);
+      const y = hand ? 11 : side === "top" ? 0 : side === "bottom" ? 3 : Math.max(0, Math.min(10, Math.floor(((2 - c[1]) / 18) * 11)));
+      return outfit.sleeve(x, y, side, i, w);
+    };
+    return {
+      g,
+      paint(kind, c, d) {
+        let side = sideOf(d, c, b);
+        if (kind === HAND && (side === "top" || side === "bottom")) side = d === 3 ? "bottom" : c[2] > 1 ? "front" : "left";
+        const raw = colAt(c, side, kind === HAND);
+        const col = hexInt(raw, sk);
+        if (kind === CLOTH && raw && d !== 2 && d !== 3 && (c[1] < -15 || !colAt([c[0], c[1] - 1, c[2]], side, false))) return shade(col, HEM);
+        return col;
+      }
+    };
+  }
+
+  function torsoSpec(outfit, slim, sk) {
+    const g = new Grid(-8, -2, -4, 8, 28, 4);
+    if (slim) {
+      g.box(-7, -2, -4, 7, 6, 4, CLOTH); // hips
+      g.box(-6, 6, -4, 6, 12, 4, CLOTH); // waist
+      g.box(-7, 12, -4, 7, 21, 4, CLOTH); // chest
+      g.box(-6, 21, -3, 6, 22, 3, CLOTH); // shoulders
+      g.box(-2, 22, -3, 2, 28, 1, NECK);
+    } else {
+      g.box(-7, -2, -4, 7, 9, 4, CLOTH);
+      g.box(-8, 9, -4, 8, 21, 4, CLOTH);
+      g.box(-7, 21, -3, 7, 22, 3, CLOTH);
+      g.box(-3, 22, -3, 3, 28, 2, NECK);
+    }
+    const b = [-8, 8, -2, 22, -4, 4];
+    return {
+      g,
+      paint(kind, c, d) {
+        if (kind === NECK) return shade(sk, 1.02 - Math.max(0, c[1] - 22) * 0.05);
+        const side = sideOf(d, c, b);
+        const hd = outfit.shirtHD; // full voxel detail: 16 x 24 on the front and back, 8 x 24 on the sides
+        const [x, y, w] = hd ? oldPx(side, c, b, 16, 24, 8) : oldPx(side, c, b, 8, 12, 4);
+        const raw = hd ? hd(x, y, side, w, slim) : outfit.shirt(x, y, side);
+        const col = hexInt(raw, sk);
+        return raw && c[1] < -1 && d !== 2 && d !== 3 ? shade(col, HEM) : col;
+      }
+    };
+  }
+
+  // A skirt flares out from the hips as a voxel A-line; its pattern is the old 8-column skirt texture on every side.
+  function skirtSpec(sk) {
+    const rows = sk.len * 2, g = new Grid(-10, 24 - rows, -6, 10, 24, 6);
+    for (let r = 0; r < rows; r++) {
+      const t = rows > 1 ? r / (rows - 1) : 1, hw = 8 + Math.round(2 * t), hd = 5 + Math.round(t);
+      g.box(-hw, 23 - r, -hd, hw, 24 - r, hd, SKIRT);
+    }
+    return {
+      g,
+      paint(kind, c, d) {
+        if (sk.fnHD) { // full voxel detail: 20 columns round the front, one row per voxel
+          const x = d === 0 || d === 1 ? cl((c[2] + 6) / 12, 12) : cl((c[0] + 10) / 20, 20);
+          return hexInt(sk.fnHD(x, d === 2 ? 0 : Math.max(0, Math.floor(24 - c[1])), SIDES[d]), 0xffffff);
+        }
+        const row = Math.max(0, Math.min(sk.len - 1, Math.floor((24 - c[1]) / 2)));
+        const x = d === 0 || d === 1 ? cl((c[2] + 6) / 12, 8) : cl((c[0] + 10) / 20, 8);
+        return hexInt(sk.fn(x, d === 2 ? 0 : row), 0xffffff);
+      }
+    };
+  }
+
+  // The head: a 16-voxel rounded block (the old 8x8x8 box) with a chin, jaw, ears and a nose, and short or long hair.
+  // Its front shows the photo, projected straight on, so the nose's front carries the photo's nose.
+  function headSpec(slim, sk, hr, scans) {
+    const g = new Grid(-9, -6, -8, 9, 16, 9);
+    for (let y = 0; y < 16; y++) for (let z = -8; z < 8; z++) for (let x = -8; x < 8; x++) {
+      const cx = x + 0.5, cy = y + 0.5, cz = z + 0.5, ax = Math.abs(cx), az = Math.abs(cz);
+      if (ax === 7.5 && cz === 7.5) continue; // front corners
+      if (cz < 0 && ax + az > 13.5) continue; // the back is rounder
+      if (cy === 15.5 && (ax > 6.5 || az > 6.5 || ax + az > 12.5)) continue; // crown
+      if (cy === 14.5 && ((ax === 7.5 && az >= 6.5) || (az === 7.5 && ax >= 6.5) || (cz < 0 && ax + az > 12.5))) continue;
+      if (cy === 0.5 && (ax > 4.5 || cz < -1.5)) continue; // chin
+      if (cy === 1.5 && (ax > 5.5 || cz < -2.5)) continue; // jaw
+      if (cy === 2.5 && ax > 6.5) continue;
+      if (cy === 3.5 && ax === 7.5 && cz > 3) continue;
+      if (cy < 3 && cz < -2) continue; // the skull's base sits higher at the back: the nape of the neck shows
+      g.box(x, y, z, x + 1, y + 1, z + 1, SKIN);
+    }
+    g.box(-1, 5, 8, 1, 8, 9, NOSE);
+    if (slim) {
+      // long hair down the back to the shoulder blades, and framing the face
+      g.box(-7, -6, -8, 7, 3, -5, HAIR, (k, x, y, z) => Math.abs(x) + Math.abs(z) <= 13.5 && !(y < -5 && Math.abs(x) > 5.5));
+      g.box(-8, 3, 6, -7, 15, 8, HAIR);
+      g.box(7, 3, 6, 8, 15, 8, HAIR);
+      g.box(-8, 14, 5, 8, 15, 8, HAIR, (k) => k === SKIN); // a fringe line under the crown
+    } else {
+      [-9, 8].forEach((x0) => {
+        g.box(x0, 5, -2, x0 + 1, 9, 1, EAR);
+        g.box(x0, 8, -2, x0 + 1, 9, -1, 0);
+      });
+    }
+    const hairAt = (c) => shade(hr, 0.9 + 0.16 * noise(Math.floor(c[0]) + 20, Math.floor(c[1]) + 20, Math.floor(c[2]) + 20));
+    // short hair on the sides: above and behind the ears; long hair covers the sides except round the jaw
+    const sideHair = slim ? (c) => !(c[2] > 1 && c[1] < 7) : (c) => c[1] > 12 || (c[2] < -2 && c[1] > 3) || (c[1] > 9 && c[2] < 2);
+    const scan = (img, u, v) => {
+      const n = img.n, x = cl(u, n), y = cl(v, n), o = (y * n + x) * 4;
+      return (img.data[o] << 16) | (img.data[o + 1] << 8) | img.data[o + 2];
+    };
+    return {
+      g,
+      // the whole nose takes the photo too (its sides and underside stretch the pixels at its edges), so the bump reads as
+      // shape rather than a seam, even when the photo's nose isn't quite where the block's nose is
+      photo: (kind, c, d) => (d === 4 && kind === SKIN) || kind === NOSE,
+      paint(kind, c, d, t) {
+        if (kind === HAIR) return hairAt(c);
+        if (kind === EAR) return (d === 0 || d === 1) && c[1] > 5.5 && c[1] < 8.5 && c[2] > -1.5 && c[2] < 0.5 ? shade(sk, 0.78) : shade(sk, 0.95);
+        if (kind === NOSE) return d === 3 ? shade(sk, 0.7) : d === 2 ? sk : shade(sk, 0.94);
+        if (d === 2) return scans.T ? scan(scans.T, (t[0] + 8) / 16, (t[2] + 8) / 16) : hairAt(c);
+        if (d === 3) return shade(sk, 0.82);
+        if (d === 0 || d === 1) {
+          const s = d === 0 ? scans.L : scans.R;
+          if (s) return scan(s, d === 0 ? (8 - t[2]) / 16 : (t[2] + 8) / 16, (16 - t[1]) / 16);
+          return sideHair(c) ? hairAt(c) : sk;
+        }
+        if (d === 5) return c[1] > 3 || slim ? hairAt(c) : sk;
+        return sk;
+      }
+    };
+  }
+
+  // ---------- atlas ----------
+  // Every non-photo quad gets its own patch (TX texels per voxel face plus a 1-texel border), shelf-packed into a
+  // 256-wide atlas; the photo gets one square patch that all front faces of the head share.
+  function layout(specs, faceN) {
+    const items = [];
+    specs.forEach((sp) => {
+      sp.quads = greedy(sp.g, sp.photo);
+      sp.quads.forEach((q) => { if (!q.photo) items.push({ q, sp, w: q.w * TX + 2, h: q.h * TX + 2 }); });
+    });
+    const photo = { photo: true, w: faceN + 2, h: faceN + 2 };
+    items.push(photo);
+    items.sort((a, b) => b.h - a.h || b.w - a.w);
+    let x = 0, y = 0, rowH = 0;
+    items.forEach((it) => {
+      if (x + it.w > AW) { x = 0; y += rowH; rowH = 0; }
+      it.x = x; it.y = y;
+      x += it.w;
+      rowH = Math.max(rowH, it.h);
+    });
+    let AH = 32;
+    while (AH < y + rowH) AH *= 2;
+    return { items, photo, AH, faceN };
+  }
+
+  function paintQuads(lay, data) {
+    const AH = lay.AH, air = [0, 0, 0], vc = [0, 0, 0], ctr = [0, 0, 0], tc = [0, 0, 0];
+    lay.items.forEach((it) => {
+      if (it.photo) return;
+      const q = it.q, g = q.g, paint = it.sp.paint;
+      for (let bq = 0; bq < q.h; bq++) for (let bp = 0; bp < q.w; bp++) {
+        vc[q.a] = q.c; vc[q.u] = q.p + bp; vc[q.v] = q.q + bq;
+        const kind = g.at(vc[0], vc[1], vc[2]);
+        for (let t = 0; t < 3; t++) { air[t] = vc[t]; ctr[t] = g.o[t] + vc[t] + 0.5; }
+        air[q.a] += q.s;
+        for (let sy = 0; sy < TX; sy++) for (let sx = 0; sx < TX; sx++) {
+          tc[0] = ctr[0]; tc[1] = ctr[1]; tc[2] = ctr[2];
+          tc[q.a] += q.s * 0.5;
+          tc[q.u] += (sx + 0.5) / TX - 0.5;
+          tc[q.v] += (sy + 0.5) / TX - 0.5;
+          const col = paint(kind, ctr, q.d, tc);
+          const k = AO[cornerAO(g, air, q.a, q.u, q.v, sx < TX / 2 ? -1 : 1, sy < TX / 2 ? -1 : 1)];
+          const o = ((it.y + 1 + bq * TX + sy) * AW + it.x + 1 + bp * TX + sx) * 4;
+          data[o] = clamp255(((col >> 16) & 255) * k);
+          data[o + 1] = clamp255(((col >> 8) & 255) * k);
+          data[o + 2] = clamp255((col & 255) * k);
+          data[o + 3] = 255;
+        }
+      }
+      pad(data, it.x, it.y, it.w, it.h);
+    });
+  }
+  // copy each patch's edge texels into its 1-texel border so filtering never picks up a neighbour
+  function pad(data, x, y, w, h) {
+    const cp = (fx, fy, tx, ty) => { const f = (fy * AW + fx) * 4, t = (ty * AW + tx) * 4; data[t] = data[f]; data[t + 1] = data[f + 1]; data[t + 2] = data[f + 2]; data[t + 3] = 255; };
+    for (let i = 1; i < w - 1; i++) { cp(x + i, y + 1, x + i, y); cp(x + i, y + h - 2, x + i, y + h - 1); }
+    for (let j = 0; j < h; j++) { cp(x + 1, y + j, x, y + j); cp(x + w - 2, y + j, x + w - 1, y + j); }
+  }
+
+  function geometryFor(T, sp, lay) {
+    const pos = [], nor = [], uv = [], idx = [], AH = lay.AH, ph = lay.photo, fN = lay.faceN;
+    const byQuad = new Map();
+    lay.items.forEach((it) => { if (!it.photo) byQuad.set(it.q, it); });
+    const corner = [0, 0, 0];
+    sp.quads.forEach((q) => {
+      const g = q.g, base = pos.length / 3, plane = q.c + (q.s > 0 ? 1 : 0);
+      const it = byQuad.get(q);
+      [[0, 0], [1, 0], [1, 1], [0, 1]].forEach(([du, dv]) => {
+        corner[q.a] = plane; corner[q.u] = q.p + du * q.w; corner[q.v] = q.q + dv * q.h;
+        const x = g.o[0] + corner[0], y = g.o[1] + corner[1], z = g.o[2] + corner[2];
+        pos.push(x * V, y * V, z * V);
+        const nn = [0, 0, 0];
+        nn[q.a] = q.s;
+        nor.push(nn[0], nn[1], nn[2]);
+        if (q.photo) {
+          // projected straight on; faces that don't point forward sample just inside their own edge
+          const px = q.d === 0 || q.d === 1 ? x - q.s * 0.05 : x, py = q.d === 2 || q.d === 3 ? y - q.s * 0.05 : y;
+          uv.push((ph.x + 1 + ((px + 8) / 16) * fN) / AW, (ph.y + 1 + ((16 - py) / 16) * fN) / AH);
+        }
+        else uv.push((it.x + 1 + du * q.w * TX) / AW, (it.y + 1 + dv * q.h * TX) / AH);
+      });
+      if (q.s > 0) idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      else idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+    });
+    const geo = new T.BufferGeometry();
+    geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new T.Float32BufferAttribute(nor, 3));
+    geo.setAttribute("uv", new T.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeBoundingSphere();
     return geo;
   }
 
-  const matCache = new Map();
-  function colorMat(T, color, glow) {
-    const k = color + (glow ? "g" : "");
-    if (!matCache.has(k)) matCache.set(k, glow ? new T.MeshBasicMaterial({ color }) : new T.MeshLambertMaterial({ color }));
-    return matCache.get(k);
+  // ---------- faces: photo strings, old raw pixels, or a drawn face ----------
+  const FACE_RE = /^[JW]:[A-Za-z0-9+/]+={0,2}$/;
+  const isFaceString = (s) => typeof s === "string" && s.length <= FACE_MAX && FACE_RE.test(s);
+  const decoded = new Map(); // "n|string" -> { p: Promise, v: { n, data } | null }
+  // A face string (from faceFromImage) to n x n RGBA pixels. Asynchronous: the browser decodes the JPEG/WebP.
+  function decodeFace(str, n) {
+    n = n || FACE_N;
+    const key = n + "|" + str;
+    let e = decoded.get(key);
+    if (e) return e.p;
+    if (!isFaceString(str)) return Promise.reject(new Error("not a face string"));
+    e = { v: null, p: null };
+    e.p = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = c.height = n;
+        const g = c.getContext("2d");
+        g.imageSmoothingEnabled = true;
+        g.imageSmoothingQuality = "high";
+        g.drawImage(img, 0, 0, n, n);
+        e.v = { n, data: g.getImageData(0, 0, n, n).data };
+        resolve(e.v);
+      };
+      img.onerror = () => { decoded.delete(key); reject(new Error("face did not decode")); };
+      img.src = "data:image/" + (str[0] === "W" ? "webp" : "jpeg") + ";base64," + str.slice(2);
+    });
+    decoded.set(key, e);
+    if (decoded.size > 200) decoded.delete(decoded.keys().next().value);
+    return e.p;
+  }
+  // -> { n, data } now, { n, pending: Promise } for a string still decoding, or null
+  function faceSource(v, n) {
+    if (isFaceString(v)) {
+      const e = decoded.get(n + "|" + v);
+      if (e && e.v) return e.v;
+      return { n, pending: decodeFace(v, n) };
+    }
+    const m = v && v.length ? Math.round(Math.sqrt(v.length / 3)) : 0;
+    if (m >= 8 && m * m * 3 === v.length) {
+      const data = new Uint8ClampedArray(m * m * 4);
+      for (let i = 0; i < m * m; i++) { data[i * 4] = v[i * 3]; data[i * 4 + 1] = v[i * 3 + 1]; data[i * 4 + 2] = v[i * 3 + 2]; data[i * 4 + 3] = 255; }
+      return { n: m, data };
+    }
+    return null;
   }
 
+  // A pixel-art face on the 16x16 voxel grid, for guests without a photo and NPCs (and while a photo decodes).
+  function drawnFace(sk, hr, slim) {
+    const f = new Uint8ClampedArray(16 * 16 * 4), px = (x, y, c) => { const o = (y * 16 + x) * 4; f[o] = c >> 16; f[o + 1] = (c >> 8) & 255; f[o + 2] = c & 255; f[o + 3] = 255; };
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(x, y, sk);
+    for (let x = 0; x < 16; x++) { px(x, 0, hr); px(x, 1, hr); if (x < 4 || x > 11 || x === 6 || x === 7) px(x, 2, hr); }
+    if (slim) for (let y = 3; y < 11; y++) { px(0, y, hr); px(15, y, hr); }
+    const brow = hr, white = 0xf4f4f0, iris = 0x2a2320, lip = 0xa3503f;
+    [3, 4, 11, 12].forEach((x) => px(x, 4, brow));
+    px(5, 5, brow); px(10, 5, brow);
+    px(3, 6, white); px(4, 6, iris); px(3, 7, white); px(4, 7, iris);
+    px(11, 6, iris); px(12, 6, white); px(11, 7, iris); px(12, 7, white);
+    for (let y = 8; y < 11; y++) { px(7, y, shade(sk, 0.96)); px(8, y, shade(sk, 0.96)); }
+    const blush = mix(sk, 0xff8fa0, 0.22);
+    [2, 3, 12, 13].forEach((x) => px(x, 10, blush));
+    px(5, 11, lip); px(10, 11, lip);
+    for (let x = 6; x < 10; x++) px(x, 12, lip);
+    return { n: 16, data: f };
+  }
+
+  // ---------- merged coloured blocks for hats, capes and props ----------
+  const blockMats = new Map();
+  function blockMat(T, glow) {
+    const k = glow ? "g" : "l";
+    if (!blockMats.has(k)) blockMats.set(k, glow ? new T.MeshBasicMaterial({ vertexColors: true }) : new T.MeshLambertMaterial({ vertexColors: true }));
+    return blockMats.get(k);
+  }
+  let unitBox = null;
+  // blocks: [x, y, z, w, h, d, colour, glow] by min corner in old skin pixels -> one mesh (two when some glow)
+  function blockMeshes(T, blocks) {
+    if (!unitBox) unitBox = new T.BoxGeometry(1, 1, 1);
+    const bp = unitBox.attributes.position.array, bn = unitBox.attributes.normal.array, bi = unitBox.index.array;
+    const out = [];
+    [false, true].forEach((glow) => {
+      const list = blocks.filter((b) => !!b[7] === glow);
+      if (!list.length) return;
+      const pos = [], nor = [], col = [], idx = [];
+      list.forEach(([x, y, z, w, h, d, c]) => {
+        const o = pos.length / 3, cc = hexInt(c, 0xffffff);
+        for (let i = 0; i < bp.length; i += 3) {
+          pos.push((x + w / 2 + bp[i] * w) * P, (y + h / 2 + bp[i + 1] * h) * P, (z + d / 2 + bp[i + 2] * d) * P);
+          nor.push(bn[i], bn[i + 1], bn[i + 2]);
+          col.push(((cc >> 16) & 255) / 255, ((cc >> 8) & 255) / 255, (cc & 255) / 255);
+        }
+        for (let i = 0; i < bi.length; i++) idx.push(o + bi[i]);
+      });
+      const geo = new T.BufferGeometry();
+      geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new T.Float32BufferAttribute(nor, 3));
+      geo.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      geo.computeBoundingSphere();
+      const m = new T.Mesh(geo, blockMat(T, glow));
+      m.castShadow = !glow;
+      out.push(m);
+    });
+    return out;
+  }
+
+  // ---------- build ----------
   function build(T, look) {
     const outfit = OUTFITS[((look.outfit % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
     const slim = look.body === "f";
-    const R = regions(slim);
     const aw = slim ? 3 : 4;
-    const atlas = paintAtlas(look, outfit);
-    const tex = new T.CanvasTexture(atlas);
+    const sk = hexInt(look.skin, 0xd9a57e), hr = hexInt(look.hair, 0x4a3020);
+    const shape = bodyShape(look);
+    const root = new T.Group();
+    const rig = new T.Group();
+    root.add(rig);
+    const pivot = (parent, x, y, z) => { const g = new T.Group(); g.position.set(x * P, y * P, z * P); parent.add(g); return g; };
+    const legR = pivot(rig, -2, 12, 0), legL = pivot(rig, 2, 12, 0), torso = pivot(rig, 0, 12, 0);
+    const armR = pivot(rig, -(4 + aw / 2), 22, 0), armL = pivot(rig, 4 + aw / 2, 22, 0), head = pivot(rig, 0, 24, 0);
+
+    // the face: a photo string (decoded now if cached, else soon), old raw pixels, or a drawn face
+    let face = faceSource(look.face, FACE_N);
+    const drawn = drawnFace(sk, hr, slim);
+    const faceN = face ? face.n : 16;
+    const scans = { L: null, R: null, T: null };
+    const pending = [];
+    [["L", look.faceL], ["R", look.faceR], ["T", look.faceT]].forEach(([k, v]) => {
+      const s = faceSource(v, 32);
+      if (s && s.pending) pending.push(s.pending.then((d) => { scans[k] = d; }));
+      else scans[k] = s;
+    });
+    if (face && face.pending) pending.push(face.pending.then((d) => { face = d; }));
+
+    const specs = [
+      Object.assign(legSpec(outfit, 0, sk), { parent: legR }),
+      Object.assign(legSpec(outfit, 1, sk), { parent: legL }),
+      Object.assign(torsoSpec(outfit, slim, sk), { parent: torso }),
+      Object.assign(armSpec(outfit, 0, slim, sk), { parent: armR }),
+      Object.assign(armSpec(outfit, 1, slim, sk), { parent: armL }),
+      Object.assign(headSpec(slim, sk, hr, scans), { parent: head })
+    ];
+    if (outfit.skirt) specs.push(Object.assign(skirtSpec(outfit.skirt), { parent: rig }));
+    const lay = layout(specs, faceN);
+    const AH = lay.AH;
+    const data = new Uint8Array(AW * AH * 4);
+    const tex = new T.DataTexture(data, AW, AH, T.RGBAFormat);
     tex.magFilter = T.NearestFilter;
     tex.minFilter = T.NearestFilter;
     tex.generateMipmaps = false;
     const mat = new T.MeshLambertMaterial({ map: tex });
     const owned = [tex, mat];
-    const root = new T.Group();
-    const pivot = (parent, x, y, z) => {
-      const g = new T.Group();
-      g.position.set(x * P, y * P, z * P);
-      parent.add(g);
-      return g;
-    };
-    const mesh = (parent, w, h, d, reg, ox, oy, oz) => {
-      const geo = boxUV(T, w, h, d, reg);
+    specs.forEach((sp) => {
+      const geo = geometryFor(T, sp, lay);
       owned.push(geo);
       const m = new T.Mesh(geo, mat);
-      m.position.set(ox * P, oy * P, oz * P);
       m.castShadow = true;
-      parent.add(m);
-      return m;
-    };
-    // add(parent)(x, y, z, w, h, d, color, glow): a coloured block by its min corner, in skin pixels
-    const adder = (parent) => (x, y, z, w, h, d, color, glow) => {
-      const geo = new T.BoxGeometry(w * P, h * P, d * P);
-      owned.push(geo);
-      const m = new T.Mesh(geo, colorMat(T, color, glow));
-      m.position.set((x + w / 2) * P, (y + h / 2) * P, (z + d / 2) * P);
-      m.castShadow = !glow;
-      parent.add(m);
-    };
+      sp.parent.add(m);
+    });
 
-    const rig = new T.Group();
-    root.add(rig);
-    const shape = bodyShape(look);
-    const legR = pivot(rig, -2, 12, 0);
-    mesh(legR, 4, 12, 4, R.legR, 0, -6, 0);
-    const legL = pivot(rig, 2, 12, 0);
-    mesh(legL, 4, 12, 4, R.legL, 0, -6, 0);
-    const torso = pivot(rig, 0, 12, 0);
-    mesh(torso, 8, 12, 4, R.body, 0, 6, 0);
-    const armR = pivot(rig, -(4 + aw / 2), 22, 0);
-    mesh(armR, aw, 12, 4, R.armR, 0, -4, 0);
-    const armL = pivot(rig, 4 + aw / 2, 22, 0);
-    mesh(armL, aw, 12, 4, R.armL, 0, -4, 0);
-    const head = pivot(rig, 0, 24, 0);
-    mesh(head, 8, 8, 8, R.head, 0, 4, 0);
-    fitShape(rig, head, shape);
-    if (slim) adder(head)(-4, -3, -4.6, 8, 11, 0.8, look.hair);
-    if (outfit.hat) outfit.hat(adder(head));
-    if (outfit.extras) outfit.extras(adder(rig));
-    if (outfit.held) outfit.held(adder(armR));
-    if (outfit.skirt) {
-      const sk = outfit.skirt, f = sk.flare;
-      const c = document.createElement("canvas");
-      c.width = 8;
-      c.height = sk.len;
-      const g = c.getContext("2d");
-      for (let y = 0; y < sk.len; y++) for (let x = 0; x < 8; x++) { g.fillStyle = sk.fn(x, y); g.fillRect(x, y, 1, 1); }
-      const st = new T.CanvasTexture(c);
-      st.magFilter = T.NearestFilter;
-      st.minFilter = T.NearestFilter;
-      st.generateMipmaps = false;
-      const sm = new T.MeshLambertMaterial({ map: st });
-      const geo = new T.BoxGeometry((8 + 2 * f) * P, sk.len * P, (4 + 2 * f) * P);
-      owned.push(st, sm, geo);
-      const m = new T.Mesh(geo, sm);
-      m.position.set(0, (12 - sk.len / 2) * P, 0);
-      m.castShadow = true;
-      rig.add(m);
+    // photo patch: the face pixels (resampled to the patch), plus the sharpie moustache when it's on
+    let tache = false;
+    const ph = lay.photo;
+    function paintFace() {
+      const src = face && face.data ? face : drawn;
+      const n = faceN, sn = src.n;
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+        const so = (Math.floor(((y + 0.5) * sn) / n) * sn + Math.floor(((x + 0.5) * sn) / n)) * 4;
+        const o = ((ph.y + 1 + y) * AW + ph.x + 1 + x) * 4;
+        data[o] = src.data[so]; data[o + 1] = src.data[so + 1]; data[o + 2] = src.data[so + 2]; data[o + 3] = 255;
+      }
+      if (tache) {
+        // drawn in whole voxels between the nose and the mouth, curling up at the ends
+        const u = n / 16, fill = (x0, y0, w, h) => {
+          for (let y = Math.round(y0 * u); y < Math.round((y0 + h) * u); y++) for (let x = Math.round(x0 * u); x < Math.round((x0 + w) * u); x++) {
+            const o = ((ph.y + 1 + y) * AW + ph.x + 1 + x) * 4;
+            data[o] = 0x15; data[o + 1] = 0x15; data[o + 2] = 0x1a;
+          }
+        };
+        fill(5, 11, 6, 0.8);
+        fill(4, 10.4, 1, 1);
+        fill(11, 10.4, 1, 1);
+      }
+      pad(data, ph.x, ph.y, ph.w, ph.h);
     }
+    function repaint() {
+      paintQuads(lay, data);
+      paintFace();
+      tex.needsUpdate = true;
+    }
+    repaint();
+    let alive = true;
+    if (pending.length) Promise.all(pending.map((p) => p.catch(() => {}))).then(() => { if (alive) repaint(); });
 
-    // Things held in a hand ("R", "L") or worn on the head ("head"), swapped in and out by the party actions.
+    // hats, capes and held things from the outfit: merged blocks in old skin pixels
+    const blocksOn = (parent, fn) => {
+      if (!fn) return;
+      const list = [];
+      fn((x, y, z, w, h, d, color, glow) => list.push([x, y, z, w, h, d, color, glow]));
+      blockMeshes(T, list).forEach((m) => { owned.push(m.geometry); parent.add(m); });
+    };
+    blocksOn(head, outfit.hatHD || outfit.hat);
+    blocksOn(rig, outfit.extrasHD || outfit.extras);
+    blocksOn(armR, outfit.heldHD || outfit.held);
+    fitShape(rig, head, shape);
+
+    // Things held in a hand ("R", "L"), worn on the head ("head") or round the waist ("body"), swapped by the party.
     const held = {};
     function hold(slot, kind) {
       const cur = held[slot];
@@ -542,34 +958,17 @@
         delete held[slot];
       }
       if (!kind || !PROPS[kind]) return;
-      const group = new T.Group(), own = [];
-      PROPS[kind]((x, y, z, w, h, d, color, glow) => {
-        const geo = new T.BoxGeometry(w * P, h * P, d * P);
-        own.push(geo);
-        const m = new T.Mesh(geo, colorMat(T, color, glow));
-        m.position.set((x + w / 2) * P, (y + h / 2) * P, (z + d / 2) * P);
-        group.add(m);
-      }, look);
+      const group = new T.Group(), list = [];
+      PROPS[kind]((x, y, z, w, h, d, color, glow) => list.push([x, y, z, w, h, d, color, glow]), look);
+      const own = [];
+      blockMeshes(T, list).forEach((m) => { own.push(m.geometry); group.add(m); });
       (slot === "head" ? head : slot === "R" ? armR : slot === "body" ? torso : armL).add(group);
       held[slot] = { kind, group, own };
     }
-    // Sharpie moustache drawn straight onto the face pixels (a drunk-nap prank), and back off again.
-    const [fx0, fy0] = faceRects(0, 0, 8, 8, 8).front;
-    const faceBackup = atlas.getContext("2d").getImageData(fx0 * S, fy0 * S, 8 * S, 8 * S);
-    let tache = false;
     function moustache(on) {
       if (tache === !!on) return;
       tache = !!on;
-      const g = atlas.getContext("2d");
-      g.putImageData(faceBackup, fx0 * S, fy0 * S);
-      if (on) {
-        g.fillStyle = "#15151A";
-        const px = (x, y, w, h) => g.fillRect(fx0 * S + x, fy0 * S + y, w, h);
-        px(9, 21, 14, 2);
-        px(7, 19, 3, 2);
-        px(22, 19, 3, 2);
-        px(15, 23, 2, 1);
-      }
+      paintFace();
       tex.needsUpdate = true;
     }
 
@@ -599,7 +998,10 @@
         head.position.y = 24 * P + bob;
         armR.position.y = armL.position.y = 22 * P + bob;
       },
+      // for tests and tuning: atlas size and triangles
+      stats: () => ({ atlas: [AW, AH], faceN, tris: specs.reduce((s, sp) => s + sp.quads.length * 2, 0) }),
       dispose() {
+        alive = false;
         ["R", "L", "head", "body"].forEach((s) => hold(s, null));
         owned.forEach((o) => o.dispose());
       }
@@ -623,5 +1025,164 @@
     head.scale.set(HEAD / shape.w, HEAD, HEAD / shape.w);
   }
 
-  window.FefeAvatar = { OUTFITS, build, P, bodyShape, HEIGHT, WEIGHT, reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = (32 + 8 * (HEAD - 1)) * P * sh.s; av.scale = sh.s; } };
+  // ---------- the face pipeline ----------
+  // Photo + face box (face-api's detection box, or null for "the middle of the photo") -> a face string of at most
+  // FACE_MAX characters: "J:" + base64 JPEG (or "W:" + base64 WebP where the browser can encode it), FACE_N x FACE_N
+  // when that fits at a decent quality, else 72 or 64. Also measures skin and hair colours like analyse() did.
+  // opts: { flip, dx, dy (nudges, in crop sizes), roll (radians, to level the eyes), size (fixed size, e.g. 32 for
+  //         head-scan sides), blend (false: keep the crop's edges), max (characters), formats (["webp", "jpeg"]) }
+  // Canvas encoders embed an sRGB colour profile (about 460 bytes, 15% of the budget). Browsers treat untagged images as
+  // sRGB anyway, so it goes: WebP keeps just its VP8 image chunk, JPEG drops its APP1-APP15 segments.
+  const le32 = (n) => String.fromCharCode(n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255);
+  function stripProfile(fmt, b64) {
+    const b = atob(b64);
+    if (fmt === "webp") {
+      for (let i = 12; i + 8 <= b.length; ) {
+        const id = b.slice(i, i + 4), n = (b.charCodeAt(i + 4) | (b.charCodeAt(i + 5) << 8) | (b.charCodeAt(i + 6) << 16) | (b.charCodeAt(i + 7) << 24)) >>> 0;
+        const chunk = b.slice(i, i + 8 + n + (n & 1));
+        if (id === "VP8 ") return btoa("RIFF" + le32(4 + chunk.length) + "WEBP" + chunk);
+        i += chunk.length;
+      }
+      return b64;
+    }
+    let out = b.slice(0, 2);
+    for (let i = 2; i < b.length - 1 && b.charCodeAt(i) === 0xff; ) {
+      const m = b.charCodeAt(i + 1);
+      if (m === 0xda) return btoa(out + b.slice(i));
+      const n = (b.charCodeAt(i + 2) << 8) | b.charCodeAt(i + 3);
+      if (m < 0xe1 || m > 0xef) out += b.slice(i, i + 2 + n);
+      i += 2 + n;
+    }
+    return b64;
+  }
+
+  function faceFromImage(img, box, opts) {
+    opts = opts || {};
+    const W = img.naturalWidth || img.videoWidth || img.width, H = img.naturalHeight || img.videoHeight || img.height;
+    // same framing as the old analyse(): from just above the brows to the chin, the face filling the head's front
+    let size = Math.min(W, H) * 0.56, cx = W / 2, cy = H * 0.46;
+    if (box) { size = Math.max(box.width, box.height) * (opts.zoom || 1.18); cx = box.x + box.width / 2; cy = box.y + box.height * 0.4; }
+    size = Math.min(size, W, H);
+    cx = Math.max(size / 2, Math.min(W - size / 2, cx)) + (opts.dx || 0) * size;
+    cy = Math.max(size / 2, Math.min(H - size / 2, cy)) + (opts.dy || 0) * size;
+    const sizes = opts.size ? [opts.size] : [FACE_N, 80, 72, 64];
+    const N = sizes[0], K = 4, BN = N * K;
+    // 1. crop at 4x with the browser's smoothing, then an exact 4x4 box filter down: even and sharp everywhere
+    const big = document.createElement("canvas");
+    big.width = big.height = BN;
+    const bg = big.getContext("2d", { willReadFrequently: true });
+    bg.imageSmoothingEnabled = true;
+    bg.imageSmoothingQuality = "high";
+    bg.fillStyle = "#808080";
+    bg.fillRect(0, 0, BN, BN);
+    bg.save();
+    bg.translate(BN / 2, BN / 2);
+    if (opts.flip) bg.scale(-1, 1);
+    if (opts.roll) bg.rotate(-opts.roll);
+    bg.scale(BN / size, BN / size);
+    bg.drawImage(img, -cx, -cy);
+    bg.restore();
+    const sd = bg.getImageData(0, 0, BN, BN).data;
+    const px = new Float32Array(N * N * 3);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) for (let k = 0; k < 3; k++) {
+      let s = 0;
+      for (let j = 0; j < K; j++) for (let i = 0; i < K; i++) s += sd[((y * K + j) * BN + x * K + i) * 4 + k];
+      px[(y * N + x) * 3 + k] = s / (K * K);
+    }
+    const lum = (i) => 0.3 * px[i * 3] + 0.59 * px[i * 3 + 1] + 0.11 * px[i * 3 + 2];
+    const inFace = (x, y) => ((x + 0.5) / N - 0.5) ** 2 / 0.12 + ((y + 0.5) / N - 0.55) ** 2 / 0.16 < 1;
+    // 2. levels on the face itself (party selfies are dim), a touch more colour, a light unsharp mask
+    const Ls = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (inFace(x, y)) Ls.push(lum(y * N + x));
+    Ls.sort((a, b) => a - b);
+    const lo = Ls[Math.floor(Ls.length * 0.03)] || 0, hi = Ls[Math.floor(Ls.length * 0.97)] || 255;
+    const black = lo * 0.7, gain = Math.max(1, Math.min(1.6, 215 / Math.max(30, hi - black)));
+    for (let i = 0; i < N * N; i++) {
+      const L = lum(i), L2 = L + (Math.max(0, black + (L - lo) * gain) - L) * 0.8, sat = 1.12 * Math.min(1.5, (L2 + 20) / (L + 20));
+      for (let k = 0; k < 3; k++) px[i * 3 + k] = L2 + (px[i * 3 + k] - L) * sat; // brighter keeps its colour
+    }
+    if (opts.sharpen !== false) {
+      const src = px.slice();
+      for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) for (let k = 0; k < 3; k++) {
+        const i = (y * N + x) * 3 + k;
+        const blur = (src[i - 3] + src[i + 3] + src[i - N * 3] + src[i + N * 3] + src[i] * 4) / 8;
+        px[i] = src[i] + (src[i] - blur) * 0.45;
+      }
+    }
+    const rgbAt = (i) => (clamp255(px[i * 3]) << 16) | (clamp255(px[i * 3 + 1]) << 8) | clamp255(px[i * 3 + 2]);
+    // 3. skin from the cheeks, hair from the top band (pixels that aren't skin-coloured)
+    const avg = (list) => {
+      const s = [0, 0, 0];
+      list.forEach((c) => { s[0] += (c >> 16) & 255; s[1] += (c >> 8) & 255; s[2] += c & 255; });
+      return list.length ? (Math.round(s[0] / list.length) << 16) | (Math.round(s[1] / list.length) << 8) | Math.round(s[2] / list.length) : 0;
+    };
+    const region = (u0, u1, v0, v1) => {
+      const out = [];
+      for (let y = Math.floor(v0 * N); y < Math.ceil(v1 * N); y++) for (let x = Math.floor(u0 * N); x < Math.ceil(u1 * N); x++) out.push(rgbAt(y * N + x));
+      return out;
+    };
+    const skin = avg(region(0.2, 0.36, 0.56, 0.7).concat(region(0.64, 0.8, 0.56, 0.7)));
+    const dist = (a, b) => Math.abs(((a >> 16) & 255) - ((b >> 16) & 255)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
+    const top = region(0.12, 0.88, 0, 0.1), notSkin = top.filter((c) => dist(c, skin) > 90);
+    const hair = avg(notSkin.length > top.length * 0.25 ? notSkin : top);
+    // 4. soften the corners into hair (above the eyes) and skin (below), so no background shows round the face
+    if (opts.blend !== false) {
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const u = (x + 0.5) / N, v = (y + 0.5) / N;
+        const d = Math.sqrt(((u - 0.5) / 0.5) ** 2 + ((v - 0.5) / 0.6) ** 2);
+        const t = Math.max(0, Math.min(1, (d - 0.88) / 0.16));
+        if (!t) continue;
+        const target = mix(hair, skin, Math.max(0, Math.min(1, (v - 0.3) / 0.25))), i = (y * N + x) * 3;
+        px[i] += (((target >> 16) & 255) - px[i]) * t;
+        px[i + 1] += (((target >> 8) & 255) - px[i + 1]) * t;
+        px[i + 2] += ((target & 255) - px[i + 2]) * t;
+      }
+    }
+    const out = document.createElement("canvas");
+    out.width = out.height = N;
+    const og = out.getContext("2d", { alpha: false }); // opaque, so WebP carries no alpha channel
+    const im = og.createImageData(N, N);
+    for (let i = 0; i < N * N; i++) { im.data[i * 4] = clamp255(px[i * 3]); im.data[i * 4 + 1] = clamp255(px[i * 3 + 1]); im.data[i * 4 + 2] = clamp255(px[i * 3 + 2]); im.data[i * 4 + 3] = 255; }
+    og.putImageData(im, 0, 0);
+    // 5. encode: the biggest size and best quality that fits the limit (WebP where the browser writes it, else JPEG)
+    const max = opts.max || FACE_MAX;
+    const formats = opts.formats || ["webp", "jpeg"];
+    const enc = (c, fmt, q) => {
+      const url = c.toDataURL("image/" + fmt, q), pre = "data:image/" + fmt + ";base64,";
+      return url.startsWith(pre) ? (fmt === "webp" ? "W:" : "J:") + stripProfile(fmt, url.slice(pre.length)) : null;
+    };
+    let best = null;
+    for (const n of sizes) {
+      let c = out;
+      if (n !== N) {
+        c = document.createElement("canvas");
+        c.width = c.height = n;
+        const cg = c.getContext("2d", { alpha: false });
+        cg.imageSmoothingEnabled = true;
+        cg.imageSmoothingQuality = "high";
+        cg.drawImage(out, 0, 0, n, n);
+      }
+      let got = null;
+      for (const fmt of formats) {
+        if (!enc(c, fmt, 0.5)) continue; // this browser can't write that format
+        let lo2 = 0.3, hi2 = 0.95;
+        const s0 = enc(c, fmt, hi2);
+        if (s0.length <= max) got = { face: s0, q: hi2, n, format: fmt };
+        else for (let it = 0; it < 7; it++) {
+          const q = (lo2 + hi2) / 2, s = enc(c, fmt, q);
+          if (s.length <= max) { got = { face: s, q, n, format: fmt }; lo2 = q; } else hi2 = q;
+        }
+        break; // the first format this browser writes is the one used
+      }
+      if (got && (!best || got.q > best.q)) best = got;
+      if (best && best.q >= 0.6) break; // good enough at this size; otherwise try a smaller face
+    }
+    if (!best) return null;
+    return { face: best.face, n: best.n, quality: +best.q.toFixed(2), format: best.format, chars: best.face.length, skin: toHex(skin), hair: toHex(hair), canvas: out };
+  }
+
+  window.FefeAvatar = {
+    OUTFITS, build, P, V, bodyShape, HEIGHT, WEIGHT, faceFromImage, decodeFace, isFaceString, FACE_N, FACE_MAX,
+    reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = (32 + 8 * (HEAD - 1)) * P * sh.s; av.scale = sh.s; }
+  };
 })();

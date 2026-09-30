@@ -2111,10 +2111,7 @@
         outfit: myLook.outfit,
         skin: myLook.skin,
         hair: myLook.hair,
-        face: myLook.face ? toB64(myLook.face) : "",
-        faceL: myLook.faceL ? toB64(myLook.faceL) : "",
-        faceR: myLook.faceR ? toB64(myLook.faceR) : "",
-        faceT: myLook.faceT ? toB64(myLook.faceT) : "",
+        face: typeof myLook.face === "string" ? myLook.face : myLook.face ? toB64(myLook.face) : "",
         cheeky: myLook.cheeky ? 1 : 0,
         h: FefeAvatar.bodyShape(myLook).h,
         wt: FefeAvatar.bodyShape(myLook).wt,
@@ -2145,7 +2142,9 @@
           return px;
         } catch (e) { return null; }
       };
-      const face = photo(r.face), faceL = photo(r.faceL), faceR = photo(r.faceR), faceT = photo(r.faceT);
+      // faces come as a small image string (current) or raw pixels (older records)
+      const faceStr = (v) => (FefeAvatar.isFaceString && FefeAvatar.isFaceString(v) ? v : photo(v));
+      const face = faceStr(r.face), faceL = faceStr(r.faceL), faceR = faceStr(r.faceR), faceT = faceStr(r.faceT);
       const parse = (track) => {
         const nodes = [];
         if (typeof track !== "string" || track.length > 30000) return nodes;
@@ -2425,11 +2424,51 @@
         setGhostTrack(g, false);
       });
       updateGuestCount();
-      hint.textContent = "Test crowd: 20 made-up guests, on this phone only";
+      document.getElementById("test-faces").hidden = false;
+      hint.textContent = "Test crowd: 20 made-up guests, on this phone only. Tap Test faces to give them photos.";
       hint.classList.remove("gone");
       clearTimeout(hintTimer);
       hintTimer = setTimeout(dismissHint, 6000);
     }
+
+    // Test faces: photos picked from this phone go onto the made-up guests (the same face processing a real guest
+    // gets), round-robin. Nothing is uploaded: the test crowd only lives on this phone.
+    document.getElementById("test-face-files").addEventListener("change", async (e) => {
+      const files = [...(e.target.files || [])].slice(0, 20);
+      e.target.value = "";
+      if (!files.length) return;
+      hint.textContent = "Making faces from " + files.length + " photo" + (files.length > 1 ? "s" : "") + "…";
+      hint.classList.remove("gone");
+      const looks = [];
+      for (const f of files) {
+        const img = await new Promise((resolve) => {
+          const im = new Image();
+          im.onload = () => resolve(im);
+          im.onerror = () => resolve(null);
+          im.src = URL.createObjectURL(f);
+        });
+        if (!img) continue;
+        const res = await analyse(img);
+        URL.revokeObjectURL(img.src);
+        if (res.face) looks.push(res);
+      }
+      if (!looks.length) { hint.textContent = "Couldn't read those photos"; return; }
+      NPCS.forEach(([name, body, cheeky], i) => {
+        const id = "npc" + String(i).padStart(4, "0"), g = ghosts.get(id), look = looks[i % looks.length];
+        if (!g) return;
+        const record = { name, body: look.body || body, outfit: (i * 7) % FefeAvatar.OUTFITS.length, skin: look.skin, hair: look.hair,
+          face: typeof look.face === "string" ? look.face : toB64(look.face), cheeky, track: npcTrack(DAY_ROUNDS, name), trackN: npcTrack(NIGHT_ROUNDS, name), at: 1 };
+        const clean = sanitize(record);
+        if (!clean) return;
+        upsertGhost(id, clean, 1);
+        const g2 = ghosts.get(id);
+        g2.npc = true;
+        setGhostTrack(g2, false);
+      });
+      hint.textContent = looks.length + " face" + (looks.length > 1 ? "s" : "") + " on the test crowd";
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(dismissHint, 5000);
+    });
 
     const tagV = new T.Vector3();
     function placeTag(a, w, h) {
@@ -3122,80 +3161,13 @@
       stopCamera();
       updateMake();
     }
-    // Head scan: straight on, then turned right and left, so the sides of the block head get ears and hair too.
-    // Frames are mirrored like the preview; turning right shows the left side of the head, turning left the right side.
-    const scanMsg = $("scan-msg");
-    let sides = null;
-    function grabFrame() {
-      const vw = video.videoWidth, vh = video.videoHeight, sz = Math.min(vw, vh), c = document.createElement("canvas");
-      c.width = c.height = shot.width;
-      const g = c.getContext("2d");
-      g.translate(c.width, 0);
-      g.scale(-1, 1);
-      g.drawImage(video, (vw - sz) / 2, (vh - sz) / 2, sz, sz, 0, 0, c.width, c.height);
-      return c;
-    }
-    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-    let scanning = false;
-    const scanRing = $("scan-ring"), scanArrow = $("scan-arrow"), scanThumbs = $("scan-thumbs"), frameEl = video.parentElement;
-    const SCAN = [
-      ["front", "Look straight at the camera", "\u25CE"],
-      ["right", "Turn your head to the right", "\u2192"],
-      ["left", "Now slowly to the left", "\u2190"],
-      ["down", "Tip your head down", "\u2193"]
-    ];
-    function showThumbs(frames) {
-      scanThumbs.textContent = "";
-      ["Front", "Right", "Left", "Top"].forEach((label, i) => {
-        const f = document.createElement("figure"), c = document.createElement("canvas"), cap = document.createElement("figcaption");
-        c.width = c.height = 56;
-        c.getContext("2d").drawImage(frames[i], 90, 60, 300, 300, 0, 0, 56, 56);
-        cap.textContent = label;
-        f.append(c, cap);
-        scanThumbs.appendChild(f);
-      });
-      scanThumbs.hidden = false;
-    }
-    async function scanHead() {
-      if (!video.videoWidth || scanning) return;
-      scanning = true;
-      snapBtn.disabled = true;
-      scanThumbs.hidden = true;
-      scanRing.hidden = false;
-      const dots = [...scanRing.querySelectorAll(".scan-dot")];
-      dots.forEach((d) => d.classList.remove("done", "now"));
-      const frames = [];
-      for (const [at, text, arrow] of SCAN) {
-        const dot = dots.find((d) => d.dataset.at === at);
-        dot.classList.add("now");
-        scanArrow.textContent = arrow;
-        for (let n = 3; n >= 1; n--) {
-          if (joinEl.hidden || !stream) { scanMsg.hidden = true; scanRing.hidden = true; scanning = false; return; }
-          scanMsg.textContent = text + "   " + n;
-          scanMsg.hidden = false;
-          await pause(frames.length ? 520 : 650);
-        }
-        frames.push(grabFrame());
-        dot.classList.remove("now");
-        dot.classList.add("done");
-        frameEl.classList.remove("flash");
-        void frameEl.offsetWidth; // restart the flash animation
-        frameEl.classList.add("flash");
-      }
-      scanMsg.hidden = true;
-      scanRing.hidden = true;
-      scanning = false;
-      sides = [frames[1], frames[2], frames[3]];
-      setPhoto(frames[0], frames[0].width, frames[0].height, false);
-      showThumbs(frames);
-    }
-    snapBtn.addEventListener("click", scanHead);
-    retakeBtn.addEventListener("click", () => { photo = null; sides = null; scanThumbs.hidden = true; startCamera(); });
+    snapBtn.addEventListener("click", () => { if (video.videoWidth) setPhoto(video, video.videoWidth, video.videoHeight, true); });
+    retakeBtn.addEventListener("click", () => { photo = null; startCamera(); });
     fileIn.addEventListener("change", () => {
       const f = fileIn.files && fileIn.files[0];
       if (!f) return;
       const img = new Image();
-      img.onload = () => { sides = null; scanThumbs.hidden = true; setPhoto(img, img.naturalWidth, img.naturalHeight, false); URL.revokeObjectURL(img.src); };
+      img.onload = () => { setPhoto(img, img.naturalWidth, img.naturalHeight, false); URL.revokeObjectURL(img.src); };
       img.onerror = () => noCamera("That photo couldn't be opened. Try another one.");
       img.src = URL.createObjectURL(f);
       fileIn.value = "";
@@ -3260,14 +3232,6 @@
         return px;
       };
       const face = pixels(src, cx - size / 2, cy - size / 2, false);
-      // side shots use the same square, nudged towards the back of the head, and unmirrored to wrap round the block
-      if (sides) {
-        const nudge = (dir) => Math.max(0, Math.min(W - size, cx - size / 2 + dir * size * 0.12));
-        out.faceL = pixels(sides[0], nudge(-1), cy - size / 2, true);
-        out.faceR = pixels(sides[1], nudge(1), cy - size / 2, true);
-        // head tipped down: the crown sits about where the forehead was, back of the head at the top of the picture
-        if (sides[2]) out.faceT = pixels(sides[2], cx - size / 2, Math.max(0, cy - size / 2 - size * 0.28), true);
-      }
       const avg = (x0, y0, x1, y1) => {
         const s = [0, 0, 0];
         let n = 0;
@@ -3275,8 +3239,42 @@
         return "#" + s.map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("");
       };
       out.face = face;
-      out.skin = avg(10, 18, 21, 23);
+      // skin tone for the neck, arms and legs: the cheeks of the photo (skipping hair, shadows and shine), coloured the
+      // same way as the face so they match
+      const skinTone = () => {
+        const n = 64, c = document.createElement("canvas");
+        c.width = c.height = n;
+        const g = c.getContext("2d");
+        g.drawImage(src, cx - size / 2, cy - size / 2, size, size, 0, 0, n, n);
+        const d = g.getImageData(0, 0, n, n).data, px = [];
+        [[0.3, 0.56], [0.7, 0.56]].forEach(([fx, fy]) => {
+          for (let y = Math.round((fy - 0.06) * n); y <= Math.round((fy + 0.06) * n); y++) {
+            for (let x = Math.round((fx - 0.06) * n); x <= Math.round((fx + 0.06) * n); x++) {
+              const i = (y * n + x) * 4, r = d[i], gr = d[i + 1], b = d[i + 2], L = 0.3 * r + 0.59 * gr + 0.11 * b;
+              if (L > 45 && L < 235 && r >= b) px.push([r, gr, b]);
+            }
+          }
+        });
+        if (px.length < 8) return null;
+        const med = [0, 1, 2].map((k) => px.map((p) => p[k]).sort((p, q) => p - q)[px.length >> 1]);
+        const L = 0.3 * med[0] + 0.59 * med[1] + 0.11 * med[2];
+        return "#" + med.map((v) => Math.max(0, Math.min(255, Math.round((L + (v - L) * 1.25 - 128) * 1.12 + 128))).toString(16).padStart(2, "0")).join("");
+      };
+      // only take it if it looks like skin (not a dark background when no face was found)
+      const skinLike = (hex) => {
+        if (!hex) return false;
+        const v = parseInt(hex.slice(1), 16), r = v >> 16, gr = (v >> 8) & 255, b = v & 255, L = 0.3 * r + 0.59 * gr + 0.11 * b;
+        return L > 70 && L < 240 && r >= gr && gr >= b * 0.75 && r - b > 12;
+      };
+      out.skin = [skinTone(), avg(10, 18, 21, 23)].find(skinLike) || "#C98F6B";
       out.hair = avg(4, 0, 27, 3);
+      // the sharp face: a small JPEG/WebP string of up to 96 x 96 pixels that fits the shared record (avatar.js)
+      if (FefeAvatar.faceFromImage) {
+        try {
+          const hd = FefeAvatar.faceFromImage(src, box);
+          if (hd && hd.face) { out.face = hd.face; out.hair = hd.hair || out.hair; }
+        } catch (e) { /* keep the pixel face */ }
+      }
       return out;
     }
 
@@ -3289,7 +3287,7 @@
       showStep("wait");
       const res = await analyse(photo);
       if (joinEl.hidden) return;
-      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, faceL: res.faceL || null, faceR: res.faceR || null, faceT: res.faceT || null, cheeky: lsGet("fefe40.cheeky") === "1" };
+      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, cheeky: lsGet("fefe40.cheeky") === "1" };
       // height and weight come back from last time, otherwise they follow the body until moved
       sizeSet = !!lsGet("fefe40.h");
       draft.h = +lsGet("fefe40.h") || FefeAvatar.HEIGHT[draft.body];
