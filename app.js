@@ -1435,15 +1435,17 @@
       b.className = "chip";
       b.textContent = z.name;
       b.setAttribute("aria-pressed", "false");
-      b.addEventListener("click", () => (selected === z ? clearSelection() : selectZone(id)));
+      b.addEventListener("click", () => (selected === z ? clearSelection() : selectZone(id, true)));
       chipsEl.appendChild(b);
       z.chip = b;
     });
 
-    function selectZone(id) {
+    // tapped: a real tap on a place button or the scene. Only those make sounds or start music; a deep link or a
+    // restored view just goes there (phones only allow sound after a tap, and nobody asked for it yet).
+    function selectZone(id, tapped) {
       const z = byId[id];
       if (!z) return;
-      zoneSound(id);
+      if (tapped) zoneSound(id);
       // on tall screens the place buttons cover the bottom edge, so aim a little past the place
       const shift = canvas.clientHeight > canvas.clientWidth ? z.fit * 0.12 : 0;
       goal.target.set(z.at[0] + OX + Math.sin(goal.az) * shift, 1, z.at[2] + OZ + Math.cos(goal.az) * shift);
@@ -1573,6 +1575,7 @@
         if (c) { goToCar(c); clearSelection(); return; }
       }
       pendingCar = null;
+      if (tapTV(cx, cy)) return; // the karaoke TV while its video plays
       const hit = pickVoxel(cx, cy);
       if (me) {
         if (!hit) return;
@@ -1603,9 +1606,9 @@
       }
       if (!hit) { clearSelection(); return; }
       const bid = hit.group.split(":")[0];
-      if (isHideable(hit.group) && byId[bid]) { selectZone(bid); return; }
+      if (isHideable(hit.group) && byId[bid]) { selectZone(bid, true); return; }
       const z = zoneAtCell(Math.floor(hit.u / 2), Math.floor(hit.w / 2));
-      if (z) selectZone(z.id);
+      if (z) selectZone(z.id, true);
       else clearSelection();
     }
 
@@ -2637,6 +2640,7 @@
     const sfx = (name, x, z, o) => { if (snd && snd.enabled) snd.play(name, x, z, o); };
     function setSound(on) {
       if (!snd) return;
+      if (!on) stopJukebox(); // the speaker button is for sound and music alike
       if (on) snd.enable(); else snd.disable();
       if (on) snd.setNight(night);
       soundBtn.setAttribute("aria-pressed", String(!!snd.enabled));
@@ -3066,8 +3070,8 @@
     window.addEventListener("keyup", (e) => driveKeys(e, false));
 
     // ---------- the sound of a place: tapping a place (joined or not) plays what it sounds like ----------
-    // Dance floor and karaoke start ABBA; everywhere else a line or two in Swedish. The first tap switches sound on,
-    // unless the speaker button was used to turn it off.
+    // Dance floor and karaoke switch on the music (it plays on the karaoke TV while that's in view); everywhere else a
+    // line or two in Swedish. The first tap switches sound on, unless the speaker button was used to turn it off.
     const ZONE_SOUNDS = {
       pool: ["plask", "jaa"], dance: ["dansa"], kitchen: ["bork", "kott"], bedroom: ["oj", "puss"], bathroom: ["prutt", "plopp"],
       bar: ["helan", "skal"], pavilion: ["skal", "grattis"], lounge: ["sjung"], court: ["heja", "hockey"], mainVilla: ["hej", "chatter"],
@@ -3078,8 +3082,8 @@
     function zoneSound(id) {
       if (!snd) return;
       if (!snd.enabled && lsGet("fefe40.sound") !== "0") setSound(true);
-      if (id === "dance" || id === "lounge") startJukebox();
       if (!snd.enabled) return;
+      if (id === "dance" || id === "lounge") startJukebox();
       const keys = ZONE_SOUNDS[id] || [], cx = view.target.x - OX, cz = view.target.z - OZ;
       clearTimeout(zoneLineTimer);
       if (keys[0]) snd.say(keys[0], cx, cz);
@@ -3087,21 +3091,27 @@
     }
 
     // ---------- ABBA jukebox ----------
-    // ABBA's own official videos, embedded from YouTube (nothing loads from YouTube until someone taps Play ABBA).
-    // Near the dance floor or the karaoke lounge it plays, louder the closer you are, and it pauses when you walk off.
-    // YouTube requires the player to be visible while it plays, so it sits in a small panel. iPhones ignore volume
-    // changes from web pages, so there it just plays near the music and pauses away from it.
+    // ABBA's own official videos, embedded from YouTube (nothing loads from YouTube until someone taps Play ABBA),
+    // playing on the karaoke TV. The player sits in a layer under the canvas and is moved onto the TV screen every
+    // frame; while it plays, the screen is drawn as a see-through hole in the canvas, so people and things in front of
+    // the TV still cover it. YouTube only allows playing while the player can be seen, so it plays only while the TV is
+    // on screen, facing us, big enough to see, with the pavilion roof off, clear of the close-up slice and not under a
+    // panel; otherwise it pauses and the painted karaoke screen comes back. It's louder the closer you are to the TV
+    // (iPhones ignore volume changes from web pages, so there it's just on or off).
     const ABBA_VIDEOS = ["xFrGuyw1V8s", "unfzfe8f9NI", "XEjLoHdbVeE", "Sj_9CiNkkn4"]; // Dancing Queen, Mamma Mia, Gimme! Gimme! Gimme!, Waterloo
-    // after dark the dance floor turns club: Swedish House Mafia's official videos
+    // after dark the party turns club: Swedish House Mafia's official videos
     const SHM_VIDEOS = ["1y6smkh6c-0", "BXpdmKELE1k", "PkQ5rEJaTmk", "u9n7Cw-4_HQ"]; // Don't You Worry Child, Save the World, One (Your Name), Moth to a Flame
     const jbList = () => (night ? SHM_VIDEOS : ABBA_VIDEOS);
-    const jbTitle = document.querySelector("#jukebox .jb-title");
-    const MUSIC_SPOTS = [[47, 30], [38.5, 33.5]];
-    const jbEl = document.getElementById("jukebox"), jbPlayBtn = document.getElementById("jb-play");
-    const jb = { player: null, ready: false, on: false, near: false, playing: false, next: 0, loading: false };
+    // the TV screen with its thin pink rim, in metres (the painted screen is 2.56 x 1.26), and the player's size in pixels
+    const TV = { x: 39, y: 3.35, z: 32.365, w: 2.6, h: 1.3, pw: 406, ph: 200 };
+    const jbPlayBtn = document.getElementById("jb-play"), tvLayer = document.getElementById("tv-layer"), tvVideo = document.getElementById("tv-video");
+    const jb = { player: null, ready: false, on: false, playing: false, blocked: false, next: 0, loading: false, night: false, asked: 0, stuck: 0, vol: -1 };
+    const tv = { view: false, shown: false, m: "", clip: "" };
+    // the hole: transparent black written straight into the canvas (no blending), so the player underneath shows
+    const holeMat = new T.MeshBasicMaterial({ color: 0x000000, opacity: 0, blending: T.NoBlending, clippingPlanes: [clipPlane] });
     function musicDistance() {
       const px = me ? me.x : view.target.x - OX, pz = me ? me.z : view.target.z - OZ;
-      return Math.min(...MUSIC_SPOTS.map(([x, z]) => Math.hypot(px - x, pz - z)));
+      return Math.hypot(px - TV.x, pz - TV.z);
     }
     function loadYouTube(then) {
       if (window.YT && window.YT.Player) { then(); return; }
@@ -3111,26 +3121,26 @@
       jb.loading = true;
       const tag = document.createElement("script");
       tag.src = "https://www.youtube.com/iframe_api";
+      tag.onerror = () => { jb.loading = false; jb.on = false; }; // offline: the Play button comes back to try again
       document.head.appendChild(tag);
     }
     function startJukebox() {
       jb.on = true;
-      jb.night = night;
-      jbTitle.textContent = night ? "Swedish House Mafia" : "ABBA at the party";
-      jbEl.hidden = false;
       jbPlayBtn.hidden = true;
-      if (jb.player) { if (jb.ready) jb.player.playVideo(); return; }
+      if (jb.player) return; // updateTV plays it whenever the TV is in view
       loadYouTube(() => {
         if (jb.player) return;
+        jb.night = night;
         jb.player = new YT.Player("jb-player", {
-          width: 200,
-          height: 200,
+          width: TV.pw,
+          height: TV.ph,
           videoId: jbList()[0],
           host: "https://www.youtube-nocookie.com",
-          playerVars: { playlist: jbList().join(","), loop: 1, playsinline: 1, rel: 0, modestbranding: 1 },
+          playerVars: { playlist: jbList().join(","), loop: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 },
           events: {
-            onReady: () => { jb.ready = true; if (jb.on && jb.near) jb.player.playVideo(); },
-            onStateChange: (e) => { jb.playing = e.data === 1; },
+            onReady: () => { jb.ready = true; jb.next = 0; },
+            onStateChange: (e) => { jb.playing = e.data === 1; if (jb.playing) jb.blocked = false; },
+            onAutoplayBlocked: () => { jb.blocked = true; }, // this phone only starts it from a tap on the video (see updateJukebox)
             onError: () => { if (jb.ready) jb.player.nextVideo(); } // a video that won't play here: skip it
           }
         });
@@ -3139,31 +3149,117 @@
     function stopJukebox() {
       jb.on = false;
       if (jb.ready) jb.player.pauseVideo();
-      jbEl.hidden = true;
     }
-    jbPlayBtn.addEventListener("click", startJukebox);
-    document.getElementById("jb-close").addEventListener("click", stopJukebox);
-    document.getElementById("jb-next").addEventListener("click", () => { if (jb.ready) jb.player.nextVideo(); });
+    jbPlayBtn.addEventListener("click", () => {
+      if (snd && !snd.enabled) setSound(true); // asking for music switches sound on too
+      startJukebox();
+    });
+    // a page in the background hides the video as well
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && jb.ready) jb.player.pauseVideo(); });
+    // Tapping the TV while its video shows skips to the next song; a joined guest who isn't in the lounge walks over.
+    function tapTV(cx, cy) {
+      if (!tv.shown) return false;
+      setRay(cx, cy);
+      if (!raycaster.intersectObject(karaoke.mesh).length) return false;
+      if (jb.playing) jb.player.nextVideo();
+      else jb.player.playVideo();
+      const lounge = byId.lounge, r = lounge.rect;
+      if (me && !(me.x >= r[0] && me.x < r[2] + 1 && me.z >= r[1] && me.z < r[3] + 1)) {
+        if (walkTo(lounge.spot[0], lounge.spot[1])) follow = true;
+        markSelected(lounge);
+      }
+      return true;
+    }
+    const tvP = new T.Vector3();
+    // where a point of the TV screen lands on the canvas, in CSS pixels (fx and fy run from -1 to 1 across the screen)
+    function tvPoint(fx, fy, w, h) {
+      tvP.set(TV.x + (fx * TV.w) / 2 + OX, TV.y + (fy * TV.h) / 2, TV.z + OZ).project(cam);
+      return [((tvP.x + 1) / 2) * w, ((1 - tvP.y) / 2) * h];
+    }
+    // the join sheet, or the guest list over the TV's patch of screen
+    function tvCovered(box) {
+      if (!joinEl.hidden) return true;
+      if (guestList.hidden) return false;
+      const r = guestList.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+      return r.right > c.left + box[0] && r.left < c.left + box[2] && r.bottom > c.top + box[1] && r.top < c.top + box[3];
+    }
+    // Every frame, after the camera has moved and before the render: decide whether the video can be seen, and pin the
+    // player onto the TV screen. The camera is orthographic, so the affine map from the player's rectangle through
+    // three projected corners of the screen is exact.
+    function updateTV(t) {
+      const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+      cam.updateMatrixWorld();
+      const tl = tvPoint(-1, 1, w, h), tr = tvPoint(1, 1, w, h), bl = tvPoint(-1, -1, w, h);
+      const ux = tr[0] - tl[0], uy = tr[1] - tl[1], vx = bl[0] - tl[0], vy = bl[1] - tl[1];
+      const mx = tl[0] + (ux + vx) / 2, my = tl[1] + (uy + vy) / 2;
+      const xs = [tl[0], tr[0], bl[0], tr[0] + vx], ys = [tl[1], tr[1], bl[1], tr[1] + vy];
+      const roof = buildings.get("pavilion");
+      const cut = Math.max(0, Math.min(1, (TV.y + TV.h / 2 - clipPlane.constant) / TV.h)); // share of the screen above the close-up slice
+      tv.view = ux * vy - uy * vx > 0 && // facing us
+        Math.hypot(ux, uy) >= (tv.view ? 34 : 40) && // big enough to watch (a little slack once on, so it doesn't flicker)
+        mx > 0 && mx < w && my > 0 && my < h && // on screen
+        !!roof && roof.fade > 0.5 && // the pavilion roof is off
+        buildClock.value > karaoke.land && // the TV has landed after the build-in
+        cut < 0.5 && !tvCovered([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+      const show = tv.view && jb.on && jb.ready;
+      if (show !== tv.shown) {
+        tv.shown = show;
+        karaoke.mesh.material = show ? holeMat : karaoke.mat;
+        tvVideo.style.visibility = show ? "visible" : "hidden";
+        karaoke.next = 0; // the painted screen is fresh again the moment the video goes
+        jb.next = 0; // and the video plays or pauses right away
+      }
+      if (show) {
+        const m = "matrix(" + [ux / TV.pw, uy / TV.pw, vx / TV.ph, vy / TV.ph].map((v) => v.toFixed(5)).join(",") + "," + tl[0].toFixed(2) + "," + tl[1].toFixed(2) + ")";
+        if (m !== tv.m) { tv.m = m; tvVideo.style.transform = m; }
+        // the slice takes the same share off the top of the video (the hole in the canvas is sliced with the rest)
+        const clip = cut > 0 ? "inset(" + (cut * 100).toFixed(2) + "% 0 0 0)" : "none";
+        if (clip !== tv.clip) { tv.clip = clip; tvVideo.style.clipPath = clip; tvVideo.style.webkitClipPath = clip; }
+      }
+      updateJukebox(t);
+    }
     function updateJukebox(t) {
       if (t < jb.next) return;
       jb.next = t + 0.25;
-      const d = musicDistance(), near = d < (jb.near ? 26 : 16) && view.fit < 60;
-      jb.near = near;
-      jbPlayBtn.hidden = jb.on || !near || !joinEl.hidden;
+      jbPlayBtn.hidden = jb.on || !tv.view;
       jbPlayBtn.textContent = night ? "\u25B6 Swedish House Mafia" : "\u25B6 Play ABBA";
-      if (!jb.on) return;
-      if (jb.ready && jb.night !== night) { // day and night have their own music
+      if (!jb.ready) return;
+      if (!tv.shown) { // out of sight: YouTube mustn't play hidden
+        if (jb.playing || jb.player.getPlayerState() === 3) jb.player.pauseVideo();
+        jb.asked = jb.stuck = 0;
+        tvTapMode(false);
+        return;
+      }
+      if (jb.night !== night) { // day and night have their own music
         jb.night = night;
-        jbTitle.textContent = night ? "Swedish House Mafia" : "ABBA at the party";
         jb.player.loadPlaylist(jbList(), 0);
         jb.player.setLoop(true);
       }
-      jbEl.hidden = !near;
-      if (!jb.ready) return;
-      if (near) {
-        jb.player.setVolume(Math.round(100 * Math.max(0.15, Math.min(1, 1 - (d - 7) / 19))));
-        if (!jb.playing && jb.player.getPlayerState() !== 3) jb.player.playVideo();
-      } else if (jb.playing) jb.player.pauseVideo();
+      const vol = Math.round(100 * Math.max(0.15, Math.min(1, 1 - (musicDistance() - 7) / 19)));
+      if (vol !== jb.vol) { jb.vol = vol; jb.player.setVolume(vol); }
+      if (jb.playing) jb.stuck = 0;
+      else if (!jb.blocked) {
+        // not playing: ask again now and then; if it never starts (and isn't just loading), the phone wants a tap on it
+        const st = jb.player.getPlayerState();
+        if (st !== 3) jb.stuck += 0.25;
+        if (jb.stuck > 4) jb.blocked = true;
+        else if (st !== 3 && t - jb.asked > 1.5) { jb.asked = t; jb.player.playVideo(); }
+      }
+      tvTapMode(jb.blocked && !jb.playing);
+    }
+    // Some phones (iPhones) only start YouTube from a tap on the video itself: until it plays, the player sits over
+    // the canvas and takes taps on the TV.
+    function tvTapMode(on) {
+      if (tvLayer.classList.contains("tap") === on) return;
+      tvLayer.classList.toggle("tap", on);
+      if (on) toast(coarse ? "Tap the TV to start the music" : "Click the TV to start the music", 6000);
+    }
+    // for tests (window.fefeDebug.tv): the screen's corners on the canvas (TL, TR, BL, BR) and what the video is doing
+    function tvState() {
+      const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1, r = canvas.getBoundingClientRect();
+      return { view: tv.view, shown: tv.shown, hole: karaoke.mesh.material === holeMat, on: jb.on, ready: jb.ready, playing: jb.playing, blocked: jb.blocked,
+        tap: tvLayer.classList.contains("tap"), m: tv.m, clip: tv.clip, fade: buildings.get("pavilion").fade, slice: clipPlane.constant, left: r.left, top: r.top,
+        fit: view.fit, az: view.az, build: buildClock.value, land: karaoke.land, corners: [[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([fx, fy]) => tvPoint(fx, fy, w, h)) };
     }
 
     // ---------- karaoke screen: an ABBA night (song titles only, no lyrics) ----------
@@ -3177,13 +3273,15 @@
       tex.minFilter = T.LinearFilter;
       tex.generateMipmaps = false;
       const geo = new T.PlaneGeometry(2.56, 1.26);
-      geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(4).fill(dropAt(39, 3.4, 32.3, 5) + 14), 1));
-      const mat = new T.MeshBasicMaterial({ map: tex });
+      const drop = dropAt(39, 3.4, 32.3, 5) + 14;
+      geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(4).fill(drop), 1));
+      const mat = new T.MeshBasicMaterial({ map: tex, clippingPlanes: [clipPlane] }); // sliced along with its frame
       patchDrop(mat);
       const mesh = new T.Mesh(geo, mat);
       mesh.position.set(39.0 + OX, 3.35, 32.365 + OZ);
       scene.add(mesh);
-      return { c, g: c.getContext("2d"), tex, next: 0 };
+      // land: build clock time by which it has dropped in and stopped jiggling (the YouTube video waits for that)
+      return { c, g: c.getContext("2d"), tex, mat, mesh, land: drop / DROP_STEP + 1.1, next: 0 };
     })();
     // the four pixel performers in glam outfits
     const GLAM = [["#FFFFFF", "#F2D16B"], ["#2F6FD1", "#6B3F1F"], ["#FEFE40", "#C9A35A"], ["#E23D9B", "#8A4B2A"]];
@@ -3310,7 +3408,7 @@
 
     // repainted a few times a second, and only when the lounge is close enough to see
     function updateKaraoke(t) {
-      if (t < karaoke.next) return;
+      if (t < karaoke.next || tv.shown) return; // not while the video is on it
       karaoke.next = t + 0.16;
       const dx = view.target.x - (39 + OX), dz = view.target.z - (33 + OZ);
       if (karaoke.painted && (view.fit > 45 || dx * dx + dz * dz > 30 * 30)) return;
@@ -4121,6 +4219,7 @@
       carScreen: (i) => { const c = carList[i], v = new T.Vector3(c.x + OX, c.y + 1, c.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
+    window.fefeDebug.tv = tvState;
 
     // ---------- per-frame updates ----------
     function updateCutaway(dt) {
@@ -4183,7 +4282,7 @@
       updateCutaway(dt);
       updateNightLights(dt, now / 1000);
       updateKaraoke(now / 1000);
-      updateJukebox(now / 1000);
+      updateTV(now / 1000);
       if (snd && snd.enabled) {
         snd.setListener(view.target.x - OX, view.target.z - OZ, view.fit);
         snd.setMusicLevel(choir.on ? 0.45 : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
