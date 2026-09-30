@@ -4776,8 +4776,28 @@
       requestAnimationFrame(frame);
     }
 
+    // One-off clean slate for the organiser: opening the site with #wipe-everything (and saying yes) deletes every
+    // guest, walk, live position and voice clip from the shared database, one guest at a time (the rules only let
+    // single guests be written), switches the DJ off, and forgets this phone's own guest.
+    async function wipeEverything() {
+      if (!store.shared || !confirm("Delete every guest, walk and voice clip at the party? This can't be undone.")) return;
+      const ids = new Set([myId]);
+      try { Object.keys(await store.index()).forEach((id) => ids.add(id)); } catch (e) { /* none */ }
+      try { Object.keys(await store.live()).forEach((id) => ids.add(id)); } catch (e) { /* none */ }
+      let done = 0;
+      for (const id of ids) {
+        if (!ID_RE.test(id)) continue;
+        await Promise.all(["guests", "index", "live", "voices"].map((k) => fetch(DB_URL + "/fefe40/" + k + "/" + id + ".json", { method: "DELETE" }).catch(() => {})));
+        done++;
+      }
+      await Promise.resolve(store.djSet(false)).catch(() => {});
+      try { Object.keys(localStorage).filter((k) => k.indexOf("fefe40.") === 0 && k !== "fefe40.sound").forEach((k) => localStorage.removeItem(k)); } catch (e) { /* private browsing */ }
+      alert("Done: " + done + " guest" + (done === 1 ? "" : "s") + " deleted. The party starts fresh.");
+      location.replace(location.pathname);
+    }
     function start(data) {
       data = data || {};
+      if (location.hash === "#wipe-everything") setTimeout(wipeEverything, 500);
       if (typeof data.az === "number") {
         finishBuild();
         goal.az = view.az = data.az;
