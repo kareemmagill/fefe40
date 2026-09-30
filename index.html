@@ -259,6 +259,11 @@ body.driving .dock { display: none; }
   animation: nudge 1.8s ease-in-out infinite;
 }
 .enter.alt { background: var(--white); font-size: 1.125rem; min-height: 48px; animation: none; }
+/* day or night, chosen before going in: a sliding switch with the sun on one side and the moon on the other */
+.day-night { position: relative; justify-self: center; display: flex; align-items: center; justify-content: space-between; width: 104px; height: 44px; padding: 0 12px; border: 3px solid var(--blue-edge); border-radius: 22px; background: #8FD3FF; color: var(--blue-deep); font-size: 1.1rem; box-shadow: 0 3px 0 var(--blue-edge); cursor: pointer; touch-action: manipulation; transition: background 0.3s; }
+.day-night[aria-checked="true"] { background: #1B2A55; color: var(--yellow); }
+.dn-knob { position: absolute; top: 4px; left: 4px; width: 30px; height: 30px; border-radius: 50%; background: var(--yellow); box-shadow: 0 1px 0 var(--blue-edge); transition: transform 0.3s; }
+.day-night[aria-checked="true"] .dn-knob { transform: translateX(54px); background: #F4F4F0; }
 .eyebrow { margin: 0 0 4px; color: var(--sky-bottom); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .check { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 12px; border: 2px solid var(--blue-edge); border-radius: 8px; background: var(--blue-deep); cursor: pointer; }
 .check input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; accent-color: var(--yellow); }
@@ -549,6 +554,7 @@ body.driving .dock { display: none; }
 
   <div class="dock">
     <p class="hint" id="hint" hidden></p>
+    <button type="button" class="day-night" id="night-switch" role="switch" aria-checked="false" aria-label="Night" hidden><span class="dn-sun" aria-hidden="true">&#9728;</span><span class="dn-knob"></span><span class="dn-moon" aria-hidden="true">&#9790;</span></button>
     <button type="button" class="enter" id="enter" hidden>Enter the party</button>
     <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
     <nav class="chips" id="chips" aria-label="Places" hidden></nav>
@@ -681,12 +687,12 @@ body.driving .dock { display: none; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202609301139"></script>
-<script src="outfits-hd.js?v=202609301139"></script>
-<script src="sound.js?v=202609301139"></script>
-<script src="voice-lines.js?v=202609301139"></script>
-<script src="voice.js?v=202609301139"></script>
-<script src="actions.js?v=202609301139"></script>
-<script src="app.js?v=202609301139"></script>
+<script src="avatar.js?v=202609301204"></script>
+<script src="outfits-hd.js?v=202609301204"></script>
+<script src="sound.js?v=202609301204"></script>
+<script src="voice-lines.js?v=202609301204"></script>
+<script src="voice.js?v=202609301204"></script>
+<script src="actions.js?v=202609301204"></script>
+<script src="app.js?v=202609301204"></script>
 </body>
 </html>

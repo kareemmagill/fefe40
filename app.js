@@ -3932,7 +3932,17 @@
       stepDress.hidden = which !== "dress";
     }
     function updateMake() { makeBtn.disabled = !nameIn.value.trim(); }
+    // Before going in: day or night. Night sticks (as it does after the first 4 minutes); day can still turn to night later.
+    const nightSwitch = $("night-switch");
+    const showSwitch = () => nightSwitch.setAttribute("aria-checked", String(night));
+    nightSwitch.addEventListener("click", () => {
+      setNight(!night);
+      if (night) lsSet("fefe40.night", "1");
+      else lsSet("fefe40.night", "0");
+      showSwitch();
+    });
     function openJoin() {
+      nightSwitch.hidden = true;
       // been here before on this phone: no photo or outfit again, straight into the party as last time
       if (!me) {
         let saved = null;
@@ -4597,6 +4607,7 @@
       pendingWalk = null;
       startRecording(sx, sz);
       enterBtn.hidden = true;
+      nightSwitch.hidden = true;
       findBtn.hidden = false;
       voiceBtn.hidden = !voiceUI;
       uploadVoice(); // anything recorded that didn't make it up last time
@@ -4630,6 +4641,8 @@
       pendingCar = null;
       follow = false;
       enterBtn.hidden = false;
+      nightSwitch.hidden = false;
+      showSwitch();
       findBtn.hidden = true;
       voiceBtn.hidden = true;
       exitBtn.hidden = true;
@@ -4853,6 +4866,8 @@
       opened = true;
       showCars();
       enterBtn.hidden = false;
+      nightSwitch.hidden = false;
+      showSwitch();
       if (/[?&]npc\b/.test(location.search)) addTestCrowd();
       if (store.shared) {
         syncGuests();
