@@ -29,6 +29,7 @@ Open **https://kareemmagill.github.io/fefe40/?npc** to add 20 made-up guests (As
 - `app.js`: the voxel villa, build-in animation, lights, camera and controls, walking, recording and sharing
 - `avatar.js`: avatar builder, the 20 outfits and the props they hold
 - `actions.js`: what avatars do in each area, by headcount, look and Cheeky mode
+- `sound.js`: sound effects, the disco loop and Swedish voice lines, all synthesised in the browser (switch on with the speaker button)
 - `database.rules.json`: rules for the shared guest database
 
 ## Sharing guests between phones

@@ -2444,8 +2444,11 @@
     soundBtn.addEventListener("click", () => setSound(!(snd && snd.enabled)));
     // remembered "on": switch back on at the first tap anywhere
     if (snd && lsGet("fefe40.sound") === "1") {
-      const wake = () => { window.removeEventListener("pointerdown", wake, true); if (!snd.enabled) setSound(true); };
-      window.addEventListener("pointerdown", wake, true);
+      const wake = () => {
+        ["touchend", "click"].forEach((ev) => window.removeEventListener(ev, wake, true));
+        if (!snd.enabled) setSound(true);
+      };
+      ["touchend", "click"].forEach((ev) => window.addEventListener(ev, wake, true));
     }
     const CANDY_RING = [[7, 8], [8, 8], [9, 9], [9, 10], [7, 11], [8, 11]];
     const TREES = trees.map(([x, z, t]) => ({ x: x + 0.5, z: z + 0.5, palm: t.palm, h: t.h, top: t.top, tx: t.tx, tz: t.tz }));
