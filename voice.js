@@ -87,8 +87,9 @@
     if (ctx.state !== "running" && ctx.resume) await ctx.resume().catch(() => {});
     let stream;
     try {
-      // no noise suppression: it would swallow the raspberries and kisses; auto gain keeps quiet readers audible
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 } });
+      // the phone's own noise reduction on (a party's hubbub), its auto gain off: that turns a quiet room up until the
+      // background sounds like someone talking
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: false, channelCount: 1 } });
     } catch (e) { ctx.close().catch(() => {}); throw e; }
     const rate = ctx.sampleRate, per = Math.round(rate * FRAME);
     const mic = { ctx, stream, rate, chunks: [], length: 0, rms: [], acc: 0, accN: 0, on: true };
@@ -266,7 +267,12 @@
   // els: the step's elements (see index.html #step-voice). opts.onDone(clips) gets { id: clip string } for the lines
   // that came out; opts.onSkip() when they'd rather not.
   function createStep(els, opts) {
-    let lines = [], marks = [], mic = null, run = null, clips = {}, pcmClips = {}, floor = 0.004, preview = null;
+    let lines = [], marks = [], mic = null, run = null, clips = {}, pcmClips = {}, floor = 0.004, noiseTop = 0.004, preview = null;
+    // the middle loudness of frames a..b (the room's recent level)
+    const median = (r, a, b) => {
+      const s = r.slice(Math.max(0, a), Math.max(0, b)).sort((x, y) => x - y);
+      return s.length ? s[s.length >> 1] : floor;
+    };
     const show = (which) => { els.intro.hidden = which !== "intro"; els.live.hidden = which !== "live"; els.review.hidden = which !== "review"; };
     function escape(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
     function open(setup) {
@@ -325,7 +331,7 @@
       els.hint.textContent = l.hint ? "Say: " + l.hint : l.note || (l.kind === "sing" ? "Sing it!" : "");
       els.hint.hidden = !els.hint.textContent;
       els.card.classList.toggle("sing", l.kind === "sing");
-      els.progress.textContent = (run.i + 1) + " / " + run.todo.length;
+      els.progress.textContent = (els.progress.dataset.noisy ? "Noisy here: hold the phone close · " : "") + (run.i + 1) + " / " + run.todo.length;
       els.fill.style.width = "0%"; // fills as they say it, rather than counting down
     }
     function loop() {
@@ -335,21 +341,27 @@
       els.level.style.width = Math.min(100, Math.round(Math.sqrt(last / 0.25) * 100)) + "%";
       if (run.state === "count") {
         if (performance.now() - run.t0 < 2400) return;
-        // how loud the room is when nobody's reading: the quieter 30% of the count-in
+        // How loud the room is while nobody's reading: its usual level (the quieter 30% of the count-in) and its
+        // loudest background moments (the top 10%), so music, chatter or a fan never count as someone speaking.
         const q = r.slice(10).sort((a, b) => a - b);
         floor = Math.max(0.0015, q.length ? q[Math.floor(q.length * 0.3)] : 0.004);
+        noiseTop = Math.max(floor, q.length ? q[Math.floor(q.length * 0.9)] : 0.004);
+        els.progress.dataset.noisy = noiseTop > 0.06 ? "1" : "";
         run.frame = r.length;
         next();
         return;
       }
-      const l = run.todo[run.i], on = Math.max(floor * 3.2, 0.012), off = Math.max(floor * 2, 0.007);
+      const l = run.todo[run.i];
       for (; run.frame < r.length; run.frame++) {
         const v = r[run.frame], ft = run.frame * FRAME;
         if (run.state === "wait") {
+          // a line starts only when the voice clearly breaks through the background: well above the room's loudest
+          // noise and the second just gone, for a tenth of a second
+          const base = median(r, run.frame - 50, run.frame), on = Math.max(0.012, noiseTop * 1.6, base * 2.8);
           run.loud = v > on ? run.loud + 1 : 0;
-          if (run.loud >= 3) { run.state = "talk"; run.onset = ft - 2 * FRAME; run.lastLoud = ft; }
-          else if (v < off) floor = Math.max(0.0015, floor * 0.995 + v * 0.005); // the room's noise drifts
+          if (run.loud >= 5) { run.state = "talk"; run.onset = ft - 4 * FRAME; run.lastLoud = ft; run.base = base; }
         } else if (run.state === "talk") {
+          const off = Math.max(0.007, floor * 2, noiseTop * 1.1, run.base * 1.7); // back down to the background
           if (v > off) run.lastLoud = ft;
           const gap = GAP[l.kind] || GAP.say, long = Math.min(l.kind === "sing" ? MAX_SING + 2 : MAX_SAY + 2, (l.dur || 1.5) * 2.5 + 2);
           // a quick reader may be done well before the line's usual time: a longer pause still ends it
