@@ -24,8 +24,10 @@
     const p = base();
     p.rig[1] = seat - 0.825;
     p.sat = true;
-    p.legR = [-HALF, 0, 0.05];
-    p.legL = [-HALF, 0, -0.05];
+    // on bar stools and swings the legs dangle rather than sticking out into the counter
+    const leg = seat >= 0.7 ? -0.55 : -HALF;
+    p.legR = [leg, 0, 0.05];
+    p.legL = [leg, 0, -0.05];
     return p;
   }
   function lie(h, faceDown) {
@@ -878,7 +880,7 @@
     helan(m) {
       const p = sit(0.87), u = m.T % 8;
       p.rig[5] = wave(m.T, 2.4) * 0.12;
-      if (u < 6) { p.armR = [0, 0, -1.35]; p.armL = [0, 0, 1.35]; if (m.every(0.8)) m.fx.icon("note", m.x, m.y + 2.6, m.z, {}); }
+      if (u < 6) { p.armR = [-2.9, 0, -0.15 + wave(m.T, 2.4) * 0.15]; p.armL = [-2.9, 0, 0.15 + wave(m.T, 2.4) * 0.15]; if (m.every(0.8)) m.fx.icon("note", m.x, m.y + 2.6, m.z, {}); }
       else { const k = toMouth(u - 6, 2, 0); p.armR = [lerp(-0.6, -2.4, k), 0, 0.3]; p.head = [-0.4 * k, 0, 0]; }
       return { pose: p, R: u < 6 ? null : "glass" };
     },
@@ -1446,7 +1448,7 @@
             if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
           } else s.dropping = false;
           s.on = false;
-          if (a.drop > 0 || a.idleT < 0.35) return;
+          if (a.drop > 0 || a.idleT < 0.35 || a.inCar) return;
           const area = AREAS.find((ar) => (ar.rect ? inRect(a.x, a.z, ar.rect) : ar.test(a, env)));
           if (!groups.has(area.id)) groups.set(area.id, { area, members: [] });
           groups.get(area.id).members.push(a);

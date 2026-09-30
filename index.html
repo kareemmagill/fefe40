@@ -146,6 +146,43 @@ body {
   pointer-events: none;
 }
 .dock > * { pointer-events: auto; }
+/* driving: wheel on the left, pedals on the right, the rest of the dock steps aside */
+.drive {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  pointer-events: none;
+}
+.drive[hidden] { display: none; }
+.drive > * { pointer-events: auto; }
+.pedals { display: flex; gap: 8px; }
+.drive .enter.alt { min-height: 44px; padding: 10px 12px 8px; font-size: 1rem; }
+.pedal {
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  border: 3px solid var(--blue-edge);
+  border-radius: 14px;
+  background: var(--white);
+  color: var(--blue-deep);
+  box-shadow: 0 4px 0 var(--blue-edge);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+}
+.pedal svg { width: 30px; height: 30px; }
+.pedal.go { background: var(--yellow); }
+.pedal.down { transform: translateY(3px); box-shadow: 0 1px 0 var(--blue-edge); }
+body.driving .dock { display: none; }
 .hint {
   padding: 6px 10px;
   border-radius: 999px;
@@ -453,6 +490,18 @@ body {
     <button type="button" class="enter" id="enter" hidden>Enter the party</button>
     <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
     <nav class="chips" id="chips" aria-label="Places"></nav>
+  </div>
+
+  <div class="drive" id="drive" hidden>
+    <div class="pedals" role="group" aria-label="Steering">
+      <button type="button" class="pedal" id="steer-l" aria-label="Steer left"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 4 6 12l9 8z"/></svg></button>
+      <button type="button" class="pedal" id="steer-r" aria-label="Steer right"><svg viewBox="0 0 24 24" fill="currentColor"><path d="m9 4 9 8-9 8z"/></svg></button>
+    </div>
+    <button type="button" class="enter alt" id="get-out">Get out</button>
+    <div class="pedals" role="group" aria-label="Pedals">
+      <button type="button" class="pedal" id="brake" aria-label="Brake and reverse"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h16l-8 9z"/></svg></button>
+      <button type="button" class="pedal go" id="gas" aria-label="Accelerate"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 15h16L12 6z"/></svg></button>
+    </div>
   </div>
 
   <div class="join" id="join" hidden>

@@ -598,8 +598,8 @@
     const bmi = wt / ((h / 100) * (h / 100));
     return { h, wt, s: h / 178, w: Math.max(0.8, Math.min(1.5, Math.sqrt(bmi / 25))) };
   }
-  // Heads are drawn a quarter bigger than Minecraft's so faces read at party distance.
-  const HEAD = 1.25;
+  // Heads are drawn a little bigger than Minecraft's so faces read at party distance.
+  const HEAD = 1.15;
   function fitShape(rig, head, shape) {
     rig.scale.set(shape.w, shape.s, shape.w);
     head.scale.set(HEAD / shape.w, HEAD, HEAD / shape.w);

@@ -271,7 +271,16 @@
       box(x + 0.3, 3.55, z + 0.3, 0.4, 0.45, 0.4, C.bulb, glow);
       box(x + 0.25, 4, z + 0.25, 0.5, 0.1, 0.5, C.black);
     }
+    // Cars can be driven, so their boxes aren't baked into the world: each car keeps its parts relative to its centre
+    // on the ground (front towards +z) and becomes its own movable group later on.
+    const CAR_SPECS = [];
+    function carParts(x, z, w, l, color) {
+      const spec = { x: x + w / 2, z: z + l / 2, w, l, color, parts: [] };
+      CAR_SPECS.push(spec);
+      return (bx, by, bz, bw, bh, bd, c, o) => spec.parts.push([bx - spec.x, by - 1, bz - spec.z, bw, bh, bd, c, (o && o.kind) || "solid"]);
+    }
     function car(x, z, color) {
+      const box = carParts(x, z, 2, 4, color);
       box(x + 0.15, 1.25, z + 0.1, 1.7, 0.75, 3.8, color);
       box(x + 0.25, 2.0, z + 1.0, 1.5, 0.6, 1.9, C.glassCar, { kind: "clear", j: false });
       box(x + 0.25, 2.6, z + 1.0, 1.5, 0.1, 1.9, color);
@@ -280,6 +289,7 @@
       box(x + 1.35, 1.55, z + 3.88, 0.35, 0.2, 0.05, C.bulb, glow);
     }
     function jeepney(x, z) {
+      const box = carParts(x, z, 2, 6, C.chrome);
       box(x + 0.15, 1.25, z + 0.1, 1.7, 1.45, 5.0, C.chrome);
       box(x + 0.2, 1.25, z + 5.1, 1.6, 0.8, 0.8, C.chrome);
       box(x + 0.12, 1.95, z + 0.3, 1.76, 0.4, 4.6, C.glassCar, { kind: "clear", j: false });
@@ -1545,6 +1555,12 @@
       return null;
     }
     function handleTap(cx, cy) {
+      if (me && me.inCar) return; // driving: the pedals do the work
+      if (me && me.drop === 0) {
+        const c = carFromTap(cx, cy);
+        if (c) { goToCar(c); clearSelection(); return; }
+      }
+      pendingCar = null;
       const hit = pickVoxel(cx, cy);
       if (me) {
         if (!hit) return;
@@ -1643,6 +1659,7 @@
     }, { passive: false });
     window.addEventListener("keydown", (e) => {
       if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+      if (typeof driveKeys === "function" && driveKeys(e, true)) return;
       const k = e.key.toLowerCase();
       const step = goal.fit * 0.12;
       const fx = -Math.sin(view.az), fz = -Math.cos(view.az);
@@ -1718,12 +1735,22 @@
       }
     });
 
+    // Cars move, so they block walking dynamically rather than in the baked grid (carList fills in once they're built).
+    let carList = [];
+    function carAt(x, z) {
+      for (let i = 0; i < carList.length; i++) {
+        const c = carList[i], dx = x + 0.5 - c.x, dz = z + 0.5 - c.z, cs = Math.cos(c.h), sn = Math.sin(c.h);
+        const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+        if (Math.abs(lx) < c.w / 2 + 0.25 && Math.abs(lz) < c.l / 2 + 0.25) return c;
+      }
+      return null;
+    }
     const SPAWN = [[29, 56], [30, 56], [31, 56], [32, 56], [29, 57], [30, 57], [31, 57], [32, 57]];
     const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
     // one step may go up or down at most one metre; diagonal steps need both side cells open too
     function canStep(x, z, nx, nz) {
       const a = heightAt(x, z), b = heightAt(nx, nz);
-      if (a === NONE || b === NONE || Math.abs(a - b) > 2) return false;
+      if (a === NONE || b === NONE || Math.abs(a - b) > 2 || (carList.length && carAt(nx, nz))) return false;
       if (nx !== x && nz !== z) {
         const c = heightAt(nx, z), d = heightAt(x, nz);
         if (c === NONE || d === NONE || Math.abs(c - a) > 2 || Math.abs(d - a) > 2 || Math.abs(c - b) > 2 || Math.abs(d - b) > 2) return false;
@@ -1751,7 +1778,7 @@
           for (let dz = -r; dz <= r; dz++) {
             if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
             const nx = x + dx, nz = z + dz, d = dx * dx + dz * dz;
-            if (inMap(nx, nz) && reach[cellIdx(nx, nz)] && d < bd) { bd = d; best = [nx, nz]; }
+            if (inMap(nx, nz) && reach[cellIdx(nx, nz)] && d < bd && !(carList.length && carAt(nx, nz))) { bd = d; best = [nx, nz]; }
           }
         }
         if (best) return best;
@@ -1930,6 +1957,24 @@
     }
     function updateMe(dt) {
       if (!me) return;
+      if (me.inCar) { // driving: the car moves, the guest rides along
+        const c = me.inCar;
+        me.x = c.x;
+        me.z = c.z;
+        me.y = c.y;
+        me.moving = false;
+        me.idleT = 0;
+        placeDriver();
+        tickRecording(dt, false);
+        if (follow) { goal.target.set(c.x + OX, c.y + 1, c.z + OZ); clampTarget(goal.target); }
+        heartbeat(performance.now());
+        updateWardrobe();
+        return;
+      }
+      if (pendingCar && !myPath.length && me.drop === 0) {
+        if (Math.hypot(pendingCar.x - me.x, pendingCar.z - me.z) < pendingCar.l / 2 + 1.8) enterCar(pendingCar);
+        else pendingCar = null;
+      }
       if (me.drop === 0 && pendingWalk) {
         const [px, pz] = pendingWalk;
         pendingWalk = null;
@@ -2410,6 +2455,199 @@
       : null;
     const actorList = [];
 
+    // ---------- cars: tap one to get in, drive it about, crash it ----------
+    const carMats = {};
+    const carMat = (c, kind) => carMats[c + kind] || (carMats[c + kind] = kind === "glow" ? new T.MeshBasicMaterial({ color: c })
+      : new T.MeshLambertMaterial({ color: c, transparent: kind === "clear", opacity: kind === "clear" ? 0.5 : 1 }));
+    const carBox = new T.BoxGeometry(1, 1, 1);
+    carList = CAR_SPECS.map((sp) => {
+      const g = new T.Group(), top = [];
+      sp.parts.forEach(([x, y, z, w, h, d, color, kind]) => {
+        const m = new T.Mesh(carBox, carMat(color, kind));
+        m.scale.set(w, h, d);
+        m.position.set(x + w / 2, y + h / 2, z + d / 2);
+        m.castShadow = kind === "solid";
+        g.add(m);
+        if (y >= 0.95) top.push(m); // cabin glass and roof: hidden while someone drives, so it's a convertible
+      });
+      g.visible = false;
+      scene.add(g);
+      return { g, top, x: sp.x, z: sp.z, h: 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
+    });
+    function showCars() { carList.forEach((c) => { c.g.visible = true; c.drop = 10 + Math.random() * 3; }); }
+    const drive = { car: null, gas: 0, steer: 0, keys: {}, shake: 0 };
+    let pendingCar = null;
+    const carGround = (x, z) => { const st = heightAt(Math.floor(x), Math.floor(z)); return st === NONE ? null : (st + 1) / 2; };
+    // what the car would hit with its outline at (x, z, h): walls, furniture, trees, steps, other cars or people
+    function carHit(c, x, z, h) {
+      const cs = Math.cos(h), sn = Math.sin(h), hw = c.w / 2 - 0.05, hl = c.l / 2 - 0.05;
+      const pts = [[-hw, hl], [0, hl], [hw, hl], [-hw, -hl], [0, -hl], [hw, -hl], [-hw, 0], [hw, 0], [-hw, hl / 2], [hw, hl / 2], [-hw, -hl / 2], [hw, -hl / 2]];
+      for (let i = 0; i < pts.length; i++) {
+        const [lx, lz] = pts[i], px = x + lx * cs + lz * sn, pz = z - lx * sn + lz * cs;
+        const cx = Math.floor(px), cz = Math.floor(pz);
+        if (!inMap(cx, cz)) return { what: "wall", px, pz };
+        const gy = carGround(px, pz);
+        if (gy === null || Math.abs(gy - c.y) > 0.55) {
+          const tree = TREES.find((t) => Math.hypot(t.x - px, t.z - pz) < 1.3);
+          return { what: tree ? "tree" : "wall", px, pz, tree };
+        }
+        for (let j = 0; j < carList.length; j++) {
+          const o = carList[j];
+          if (o === c || o.drop > 0) continue;
+          const dx = px - o.x, dz = pz - o.z, oc = Math.cos(o.h), os = Math.sin(o.h);
+          if (Math.abs(dx * oc - dz * os) < o.w / 2 && Math.abs(dx * os + dz * oc) < o.l / 2) return { what: "car", px, pz, other: o };
+        }
+        for (let j = 0; j < actorList.length; j++) {
+          const a = actorList[j];
+          if (a === me || a.inCar || a.drop > 0) continue;
+          if (Math.hypot(a.x - px, a.z - pz) < 0.45) return { what: "person", px, pz };
+        }
+      }
+      return null;
+    }
+    function crash(c, hit, speed) {
+      const fx = party && party.fx, hard = Math.abs(speed), y = c.y + 0.9;
+      c.speed = -speed * 0.3;
+      if (!fx) return;
+      if (hit.what === "person") { fx.icon("bang", hit.px, y + 1.6, hit.pz, { size: 0.45 }); c.speed = 0; return; }
+      if (hard < 2.5) { fx.icon("bang", hit.px, y + 1, hit.pz, { size: 0.3 }); return; }
+      c.dmg = Math.min(8, c.dmg + (hard > 7 ? 2 : 1));
+      drive.shake = Math.min(0.7, hard * 0.07);
+      for (let i = 0; i < 8 + hard * 2; i++) {
+        fx.block(i % 3 ? c.color : "#9AA0A8", hit.px, y, hit.pz, { vx: (Math.random() - 0.5) * 5, vz: (Math.random() - 0.5) * 5, vy: 2 + Math.random() * 3, g: 9, size: 0.1 + Math.random() * 0.15, life: 1, max: 1 });
+      }
+      fx.icon("bang", hit.px, y + 1.4, hit.pz, { size: 0.7 });
+      for (let i = 0; i < 3; i++) fx.icon("star", hit.px + (Math.random() - 0.5), y + 1.2, hit.pz + (Math.random() - 0.5), { size: 0.4, vx: (Math.random() - 0.5) * 2, vy: 2 });
+      for (let i = 0; i < 4; i++) fx.icon("puff", hit.px + (Math.random() - 0.5), y + 0.5, hit.pz + (Math.random() - 0.5), { size: 0.7, vy: 0.8, life: 1.5, max: 1.5 });
+      if (hit.what === "tree" && hit.tree) { // shake the leaves (and a coconut) loose
+        const t = hit.tree;
+        for (let i = 0; i < 26; i++) fx.block(i % 4 ? "#3F9A3A" : "#6CC24A", t.tx + (Math.random() - 0.5) * 3, t.top - Math.random(), t.tz + (Math.random() - 0.5) * 3, { vy: 0, g: 3, vx: (Math.random() - 0.5), vz: (Math.random() - 0.5), size: 0.16, life: 2.2, max: 2.2 });
+        if (t.palm) fx.arc("#6B4A2A", [t.tx, t.top - 0.5, t.tz], [hit.px, c.y + 1.8, hit.pz], 0.6, 0.3, 0.35);
+      }
+      if (hit.what === "car" && hit.other) { // shunt the other car
+        const o = hit.other;
+        o.vx += Math.sin(c.h) * speed * 0.6;
+        o.vz += Math.cos(c.h) * speed * 0.6;
+        o.dmg = Math.min(8, o.dmg + 1);
+      }
+    }
+    function updateCars(dt, t) {
+      carList.forEach((c) => {
+        if (!c.g.visible) return;
+        if (c.drop > 0) { c.dropV = (c.dropV || 0) + 30 * dt; c.drop = Math.max(0, c.drop - c.dropV * dt); if (c.drop === 0) { c.dropV = 0; poof(c.x, c.y, c.z); } }
+        const driving = c === drive.car;
+        let acc = 0;
+        if (driving) {
+          if (drive.gas > 0) acc = c.speed < -0.2 ? 16 : 7;
+          else if (drive.gas < 0) acc = c.speed > 0.2 ? -16 : -5;
+        }
+        c.speed += acc * dt;
+        const friction = driving && drive.gas ? 0.5 : 4;
+        c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), friction * dt);
+        c.speed = Math.max(-5, Math.min(11, c.speed));
+        const k = Math.exp(-dt * 3);
+        c.vx *= k;
+        c.vz *= k;
+        const turn = driving ? drive.steer * dt * 2.1 * Math.max(-1, Math.min(1, c.speed / 3.5)) : 0;
+        if (Math.abs(c.speed) > 0.01 || Math.abs(c.vx) + Math.abs(c.vz) > 0.02) {
+          const nh = c.h + turn, nx = c.x + Math.sin(nh) * c.speed * dt + c.vx * dt, nz = c.z + Math.cos(nh) * c.speed * dt + c.vz * dt;
+          const hit = carHit(c, nx, nz, nh);
+          if (hit) { crash(c, hit, c.speed); c.vx = c.vz = 0; }
+          else { c.x = nx; c.z = nz; c.h = nh; }
+        }
+        const gy = carGround(c.x, c.z);
+        if (gy !== null) c.y += (gy - c.y) * Math.min(1, dt * 10);
+        const bump = driving && Math.abs(c.speed) > 1 ? Math.sin(t * 23) * 0.015 : 0;
+        c.g.position.set(c.x + OX, c.y + c.drop + bump, c.z + OZ);
+        c.g.rotation.set(-c.speed * 0.004 * (acc ? Math.sign(acc) : 0), c.h, (c.dmg % 2 ? 1 : -1) * c.dmg * 0.012);
+        if (c.dmg >= 3 && party && t > c.smokeAt) { // a bashed-up car smokes from the bonnet
+          c.smokeAt = t + (c.dmg >= 6 ? 0.15 : 0.4);
+          party.fx.icon("puff", c.x + Math.sin(c.h) * (c.l / 2 - 0.5), c.y + 1.3, c.z + Math.cos(c.h) * (c.l / 2 - 0.5), { size: 0.5, vy: 0.9, life: 1.6, max: 1.6 });
+        }
+      });
+      drive.shake = Math.max(0, drive.shake - dt * 1.6);
+    }
+    // the driver sits behind the wheel, hands on it
+    function placeDriver() {
+      const c = me.inCar, av = me.av, cs = Math.cos(c.h), sn = Math.sin(c.h), lx = -0.42, lz = c.l > 5 ? 1.6 : 0.2;
+      av.setPose(0, false);
+      av.root.position.set(c.x + lx * cs + lz * sn + OX, c.y + c.drop, c.z - lx * sn + lz * cs + OZ);
+      av.root.rotation.y = c.h;
+      av.rig.position.y = 0.42 - 0.825 * (av.scale || 1);
+      av.parts.legR.rotation.set(-Math.PI / 2, 0, 0.05);
+      av.parts.legL.rotation.set(-Math.PI / 2, 0, -0.05);
+      av.parts.armR.rotation.set(-1.25, 0, 0.25 + drive.steer * 0.15);
+      av.parts.armL.rotation.set(-1.25, 0, -0.25 + drive.steer * 0.15);
+    }
+    function carFromTap(cx, cy) {
+      setRay(cx, cy);
+      const hits = raycaster.intersectObjects(carList.filter((c) => c.g.visible).map((c) => c.g), true);
+      return hits.length ? carList.find((c) => c.g === hits[0].object.parent) : null;
+    }
+    function goToCar(c) {
+      const side = [c.x - Math.cos(c.h) * (c.w / 2 + 0.7), c.z + Math.sin(c.h) * (c.w / 2 + 0.7)];
+      const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1]));
+      pendingCar = c;
+      if (at && walkTo(at[0], at[1])) follow = true;
+    }
+    const driveEl = document.getElementById("drive");
+    function enterCar(c) {
+      pendingCar = null;
+      myPath = [];
+      recNode(Math.floor(me.x), Math.floor(me.z));
+      me.inCar = c;
+      me.blendX = me.blendZ = 0;
+      drive.car = c;
+      drive.gas = drive.steer = 0;
+      c.top.forEach((m) => { m.visible = false; });
+      driveEl.hidden = false;
+      document.body.classList.add("driving");
+      follow = true;
+      goal.fit = Math.min(goal.fit, 24);
+    }
+    function getOut() {
+      const c = drive.car;
+      if (!c || !me) return;
+      c.top.forEach((m) => { m.visible = true; });
+      drive.car = null;
+      drive.gas = drive.steer = 0;
+      me.inCar = null;
+      const side = [c.x - Math.cos(c.h) * (c.w / 2 + 0.6), c.z + Math.sin(c.h) * (c.w / 2 + 0.6)];
+      const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1])) || nearestReachable(Math.floor(c.x), Math.floor(c.z)) || SPAWN[0];
+      me.x = at[0] + 0.5;
+      me.z = at[1] + 0.5;
+      me.y = worldY(at[0], at[1]);
+      me.blendX = me.blendZ = 0;
+      poof(me.x, me.y, me.z);
+      recNode(at[0], at[1]); // the replay jumps here with a fresh drop-in
+      scheduleSave(800);
+      driveEl.hidden = true;
+      document.body.classList.remove("driving");
+    }
+    // on-screen pedals and wheel for phones; arrows or WASD, and E to get out, on a keyboard
+    [["steer-l", "steer", 1], ["steer-r", "steer", -1], ["gas", "gas", 1], ["brake", "gas", -1]].forEach(([id, key, val]) => {
+      const b = document.getElementById(id);
+      const on = (e) => { e.preventDefault(); drive[key] = val; b.classList.add("down"); };
+      const off = () => { if (drive[key] === val) drive[key] = 0; b.classList.remove("down"); };
+      b.addEventListener("pointerdown", on);
+      ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => b.addEventListener(ev, off));
+    });
+    document.getElementById("get-out").addEventListener("click", getOut);
+    function driveKeys(e, down) {
+      if (!drive.car) return false;
+      const k = e.key.toLowerCase();
+      if (down && (k === "e" || k === "escape")) { getOut(); return true; }
+      const map = { arrowup: ["gas", 1], w: ["gas", 1], arrowdown: ["gas", -1], s: ["gas", -1], arrowleft: ["steer", 1], a: ["steer", 1], arrowright: ["steer", -1], d: ["steer", -1] }[k];
+      if (!map) return false;
+      drive.keys[k] = down;
+      const held = (keys, v) => keys.some((q) => drive.keys[q]) ? v : 0;
+      drive.gas = held(["arrowup", "w"], 1) || held(["arrowdown", "s"], -1);
+      drive.steer = held(["arrowleft", "a"], 1) || held(["arrowright", "d"], -1);
+      e.preventDefault();
+      return true;
+    }
+    window.addEventListener("keyup", (e) => driveKeys(e, false));
+
     // ---------- karaoke screen: an ABBA night (song titles only, no lyrics) ----------
     const ABBA = ["Dancing Queen", "Mamma Mia", "Waterloo", "Gimme! Gimme! Gimme!", "Take a Chance on Me", "Super Trouper", "Voulez-Vous", "Fernando", "Money, Money, Money", "Chiquitita"];
     const karaoke = (() => {
@@ -2561,6 +2799,7 @@
       paintKaraoke(t);
     }
     function updateParty(dt) {
+      updateCars(dt, performance.now() / 1000);
       updateMe(dt);
       ghosts.forEach((g, id) => updateGhost(g, id, dt));
       updatePuffs(dt);
@@ -2572,18 +2811,18 @@
       separate(dt);
       actorList.forEach((a) => faceCamera(a, dt));
     }
-    // Nobody stands inside anybody else: bodies closer than 0.62 m are eased apart (on screen only, so walking and
+    // Nobody stands inside anybody else: bodies closer than 0.7 m are eased apart (on screen only, so walking and
     // recording are untouched), unless they're in an act that's meant to be that close.
-    const SEP = 0.62;
+    const SEP = 0.7;
     function separate(dt) {
       const n = actorList.length;
       for (let i = 0; i < n; i++) { const a = actorList[i]; a.sepWx = 0; a.sepWz = 0; }
       for (let i = 0; i < n; i++) {
         const a = actorList[i], ra = a.av.root;
-        if (!ra.visible || a.drop > 0 || party.close(a)) continue;
+        if (!ra.visible || a.drop > 0 || a.inCar || party.close(a)) continue;
         for (let j = i + 1; j < n; j++) {
           const b = actorList[j], rb = b.av.root;
-          if (!rb.visible || b.drop > 0 || party.close(b) || Math.abs(ra.position.y - rb.position.y) > 1.2) continue;
+          if (!rb.visible || b.drop > 0 || b.inCar || party.close(b) || Math.abs(ra.position.y - rb.position.y) > 1.2) continue;
           let dx = rb.position.x - ra.position.x, dz = rb.position.z - ra.position.z, d = Math.hypot(dx, dz);
           if (d >= SEP) continue;
           const push = (SEP - d) / 2;
@@ -2980,6 +3219,8 @@
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
       trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
       speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
+      cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car]),
+      goCar: (i) => goToCar(carList[i]),
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
 
@@ -3037,6 +3278,7 @@
       view.az += (goal.az - view.az) * k;
       view.fit = Math.exp(Math.log(view.fit) + (Math.log(goal.fit) - Math.log(view.fit)) * k);
       view.target.lerp(goal.target, k);
+      if (drive.shake > 0) view.target.add(new T.Vector3((Math.random() - 0.5) * drive.shake, 0, (Math.random() - 0.5) * drive.shake));
       applyCamera();
       updateShadowView();
       updateSlice(dt);
@@ -3086,6 +3328,7 @@
     function openParty() {
       if (opened) return;
       opened = true;
+      showCars();
       enterBtn.hidden = false;
       if (/[?&]npc\b/.test(location.search)) addTestCrowd();
       if (store.shared) {
