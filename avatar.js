@@ -308,6 +308,32 @@
     }
   ];
 
+  // Props for hands (arm-local: the hand is around y = -10, front is +z) and heads (head-local: face at z = +4, eyes near y = 4.5).
+  const PROPS = {
+    glass: (add) => { add(-1, -13.5, 1, 2, 3, 2, "#E8F6FF"); add(-0.8, -13.3, 1.2, 1.6, 2.2, 1.6, "#F2B233"); add(-0.8, -11.1, 1.2, 1.6, 0.5, 1.6, "#FFFFFF"); },
+    horn: (add) => { add(-0.9, -14, 1, 1.8, 4, 1.8, "#EDE3C8"); add(-0.6, -16, 1.2, 1.2, 2, 1.2, "#EDE3C8"); add(-1, -10.4, 0.9, 2, 0.5, 2, GOLD); },
+    mic: (add) => { add(-0.5, -14, 1.5, 1, 4, 1, "#23252B"); add(-0.9, -15.5, 1.1, 1.8, 1.6, 1.8, "#A9B0B8"); },
+    paddle: (add) => { add(-0.4, -13, 0.6, 0.8, 3, 0.8, "#6B4423"); add(-2, -19, 0.2, 4, 6, 1, SB); },
+    paper: (add) => { add(-5, -16, 2.6, 10, 7, 0.3, "#EDEDE8"); for (let i = 0; i < 4; i++) add(-4, -14.5 - i * 1.3, 2.95, 8, 0.4, 0.05, "#6A6A6A"); },
+    phone: (add) => { add(-0.8, -13.6, 1.6, 1.6, 2.8, 0.4, "#23252B"); add(-0.6, -13.4, 2.05, 1.2, 2.4, 0.1, "#7FD8FF", true); },
+    plate: (add) => { add(-2.5, -10.6, -0.5, 5, 0.4, 5, "#F7F7F4"); add(-1.2, -10.2, 0.7, 2.4, 0.9, 2.4, "#F2A33A"); },
+    snus: (add) => { add(-1.1, -11.4, 0.9, 2.2, 0.9, 2.2, "#1F3C88"); add(-1.2, -10.6, 0.8, 2.4, 0.3, 2.4, "#E8E8E8"); },
+    cig: (add) => { add(-0.2, -10.6, 2, 0.4, 0.4, 3, "#FFFFFF"); add(-0.25, -10.65, 5, 0.5, 0.5, 0.5, "#FF5A36", true); },
+    pillow: (add) => { add(-3, -16, 0, 6, 4, 3, "#FFFFFF"); },
+    cue: (add) => { add(-0.3, -11, -10, 0.6, 0.6, 22, "#C79560"); add(-0.35, -11.05, 11.5, 0.7, 0.7, 0.6, "#E8F6FF"); },
+    lipstick: (add) => { add(-0.3, -12.5, 1.5, 0.6, 2.2, 0.6, "#C8302C"); },
+    controller: (add) => { add(-1.6, -11.2, 1.2, 3.2, 1, 2, "#23252B"); add(-1, -10.4, 1.6, 0.5, 0.3, 0.5, RED, true); },
+    popcorn: (add) => { add(-1.5, -13.4, 0.5, 3, 3, 3, RED); add(-1.3, -10.6, 0.7, 2.6, 0.9, 2.6, "#FFF6E0"); },
+    shoes: (add) => { add(-1.2, -12.6, 0, 1.2, 1.2, 3, "#23252B"); add(0.2, -12.6, 0, 1.2, 1.2, 3, "#23252B"); },
+    bottle: (add) => { add(-0.8, -15, 0.8, 1.6, 4.4, 1.6, "#2E7D32"); add(-0.4, -16.6, 1.2, 0.8, 1.6, 0.8, "#2E7D32"); },
+    cup: (add) => { add(-1, -12.2, 1, 2, 2, 2, "#FFFFFF"); add(-0.8, -10.3, 1.2, 1.6, 0.2, 1.6, "#6B4423"); },
+    bun: (add) => { add(-1.3, -11.8, 1.1, 2.6, 1.2, 2.6, "#B8743A"); add(-0.8, -10.7, 1.6, 1.6, 0.3, 1.6, "#E8C9A0"); },
+    cards: (add) => { add(-1.6, -11, 1.6, 3.2, 0.3, 2.2, "#FFFFFF"); add(-1, -10.8, 2, 0.8, 0.2, 1, RED); },
+    shades: (add) => { add(-4.3, 4.1, 4.05, 8.6, 1.5, 0.6, "#111114"); add(-4.4, 4.9, -2, 0.4, 0.4, 6, "#111114"); add(4, 4.9, -2, 0.4, 0.4, 6, "#111114"); },
+    icepack: (add) => { add(-2.6, 8, -2.2, 5.2, 1.3, 4.4, "#9FD3F0"); },
+    messy: (add, look) => { add(-3.5, 8, -2, 2, 2, 2, look.hair); add(1, 8, 0.5, 2.5, 1.5, 2, look.hair); add(3.5, 6, -3, 1.5, 2, 2, look.hair); add(-4.8, 5.5, 1, 1.5, 1.5, 1.5, look.hair); }
+  };
+
   // Minecraft skin layout (64×64 at 1 unit per skin pixel): [u, v, w, h, d] per part.
   function regions(slim) {
     const aw = slim ? 3 : 4;
@@ -415,7 +441,8 @@
     const slim = look.body === "f";
     const R = regions(slim);
     const aw = slim ? 3 : 4;
-    const tex = new T.CanvasTexture(paintAtlas(look, outfit));
+    const atlas = paintAtlas(look, outfit);
+    const tex = new T.CanvasTexture(atlas);
     tex.magFilter = T.NearestFilter;
     tex.minFilter = T.NearestFilter;
     tex.generateMipmaps = false;
@@ -447,21 +474,23 @@
       parent.add(m);
     };
 
-    const legR = pivot(root, -2, 12, 0);
+    const rig = new T.Group();
+    root.add(rig);
+    const legR = pivot(rig, -2, 12, 0);
     mesh(legR, 4, 12, 4, R.legR, 0, -6, 0);
-    const legL = pivot(root, 2, 12, 0);
+    const legL = pivot(rig, 2, 12, 0);
     mesh(legL, 4, 12, 4, R.legL, 0, -6, 0);
-    const torso = pivot(root, 0, 12, 0);
+    const torso = pivot(rig, 0, 12, 0);
     mesh(torso, 8, 12, 4, R.body, 0, 6, 0);
-    const armR = pivot(root, -(4 + aw / 2), 22, 0);
+    const armR = pivot(rig, -(4 + aw / 2), 22, 0);
     mesh(armR, aw, 12, 4, R.armR, 0, -4, 0);
-    const armL = pivot(root, 4 + aw / 2, 22, 0);
+    const armL = pivot(rig, 4 + aw / 2, 22, 0);
     mesh(armL, aw, 12, 4, R.armL, 0, -4, 0);
-    const head = pivot(root, 0, 24, 0);
+    const head = pivot(rig, 0, 24, 0);
     mesh(head, 8, 8, 8, R.head, 0, 4, 0);
     if (slim) adder(head)(-4, -3, -4.6, 8, 11, 0.8, look.hair);
     if (outfit.hat) outfit.hat(adder(head));
-    if (outfit.extras) outfit.extras(adder(root));
+    if (outfit.extras) outfit.extras(adder(rig));
     if (outfit.held) outfit.held(adder(armR));
     if (outfit.skirt) {
       const sk = outfit.skirt, f = sk.flare;
@@ -480,28 +509,77 @@
       const m = new T.Mesh(geo, sm);
       m.position.set(0, (12 - sk.len / 2) * P, 0);
       m.castShadow = true;
-      root.add(m);
+      rig.add(m);
+    }
+
+    // Things held in a hand ("R", "L") or worn on the head ("head"), swapped in and out by the party actions.
+    const held = {};
+    function hold(slot, kind) {
+      const cur = held[slot];
+      if ((cur ? cur.kind : null) === (kind || null)) return;
+      if (cur) {
+        cur.group.parent.remove(cur.group);
+        cur.own.forEach((o) => o.dispose());
+        delete held[slot];
+      }
+      if (!kind || !PROPS[kind]) return;
+      const group = new T.Group(), own = [];
+      PROPS[kind]((x, y, z, w, h, d, color, glow) => {
+        const geo = new T.BoxGeometry(w * P, h * P, d * P);
+        own.push(geo);
+        const m = new T.Mesh(geo, colorMat(T, color, glow));
+        m.position.set((x + w / 2) * P, (y + h / 2) * P, (z + d / 2) * P);
+        group.add(m);
+      }, look);
+      (slot === "head" ? head : slot === "R" ? armR : armL).add(group);
+      held[slot] = { kind, group, own };
+    }
+    // Sharpie moustache drawn straight onto the face pixels (a drunk-nap prank), and back off again.
+    const [fx0, fy0] = faceRects(0, 0, 8, 8, 8).front;
+    const faceBackup = atlas.getContext("2d").getImageData(fx0 * S, fy0 * S, 8 * S, 8 * S);
+    let tache = false;
+    function moustache(on) {
+      if (tache === !!on) return;
+      tache = !!on;
+      const g = atlas.getContext("2d");
+      g.putImageData(faceBackup, fx0 * S, fy0 * S);
+      if (on) {
+        g.fillStyle = "#15151A";
+        const px = (x, y, w, h) => g.fillRect(fx0 * S + x, fy0 * S + y, w, h);
+        px(9, 21, 14, 2);
+        px(7, 19, 3, 2);
+        px(22, 19, 3, 2);
+        px(15, 23, 2, 1);
+      }
+      tex.needsUpdate = true;
     }
 
     let bob = 0;
     return {
       root,
+      rig,
+      parts: { legR, legL, torso, armR, armL, head },
       height: 32 * P,
+      hold,
+      moustache,
       // phase advances with distance walked; moving blends between walking and standing
       setPose(phase, moving) {
         const a = moving ? Math.sin(phase) * 0.75 : 0;
-        legR.rotation.x = a;
-        legL.rotation.x = -a;
-        armR.rotation.x = -a * 0.8;
-        armL.rotation.x = a * 0.8;
-        armR.rotation.z = -0.05;
-        armL.rotation.z = 0.05;
+        rig.position.set(0, 0, 0);
+        rig.rotation.set(0, 0, 0);
+        legR.rotation.set(a, 0, 0);
+        legL.rotation.set(-a, 0, 0);
+        armR.rotation.set(-a * 0.8, 0, -0.05);
+        armL.rotation.set(a * 0.8, 0, 0.05);
+        head.rotation.set(0, 0, 0);
+        torso.rotation.set(0, 0, 0);
         bob = moving ? Math.abs(Math.cos(phase)) * P * 0.8 : 0;
         torso.position.y = 12 * P + bob;
         head.position.y = 24 * P + bob;
         armR.position.y = armL.position.y = 22 * P + bob;
       },
       dispose() {
+        ["R", "L", "head"].forEach((s) => hold(s, null));
         owned.forEach((o) => o.dispose());
       }
     };

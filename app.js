@@ -498,8 +498,8 @@
       chair(41, 11, fy, C.wood, "S");
       box(38.5, fy, 9, 2, 0.05, 2, C.yellow, { j: false });
 
-      sofa(28, 14, 4, 1, fy, C.blue, "N");
-      box(29, fy, 15.4, 2, 0.45, 1, C.woodLight);
+      sofa(30, 14, 4, 1, fy, C.blue, "N"); // clear of the bedroom door at x 29
+      box(31, fy, 15.4, 2, 0.45, 1, C.woodLight);
       chair(38, 15, fy, C.white, "N");
       chair(40, 15, fy, C.white, "N");
       table(39, 15, 1, 1, fy, C.woodDark, 0.6);
@@ -1600,7 +1600,7 @@
       }
     }
     const worldY = (x, z) => { const s = heightAt(x, z); return s === NONE ? 1 : (s + 1) / 2; };
-    function makeActor(name, look, isMe) {
+    function makeActor(name, look, isMe, key) {
       const av = FefeAvatar.build(T, look);
       av.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       scene.add(av.root);
@@ -1609,7 +1609,7 @@
       tag.textContent = name;
       tag.hidden = true;
       labelsEl.appendChild(tag);
-      return { name, av, tag, x: 30.5, y: 1, z: 56.5, heading: Math.PI / 4, phase: 0, drop: 0, dropV: 0 };
+      return { name, key: key || name, look, av, tag, x: 30.5, y: 1, z: 56.5, heading: Math.PI / 4, phase: 0, drop: 0, dropV: 0, moving: false, idleT: 0 };
     }
     function removeActor(a) {
       scene.remove(a.av.root);
@@ -1623,6 +1623,8 @@
         if (a.drop <= 0) { a.drop = 0; a.dropV = 0; poof(a.x, a.y, a.z); }
       }
       if (moving) a.phase += dt * 10;
+      a.moving = !!moving && a.drop === 0;
+      a.idleT = a.moving || a.drop > 0 ? 0 : a.idleT + dt;
       if (heading !== undefined) {
         const d = Math.atan2(Math.sin(heading - a.heading), Math.cos(heading - a.heading));
         a.heading += d * Math.min(1, dt * 12);
@@ -1692,12 +1694,19 @@
       heartbeat(performance.now());
       updateWardrobe();
     }
-    // The recording clock runs while walking and for at most 6 s of each standstill, so replayed loops stay lively.
+    // The recording clock runs while walking and for at most 20 s of each standstill: long enough for the replayed
+    // loop to show what they got up to there, short enough to keep it lively.
+    const IDLE_MAX = 20;
     function startRecording(x, z) { rec = { clock: 0, idle: 0, nodes: [[0, x, z]] }; }
     function tickRecording(dt, moving) {
       if (!rec) return;
       if (moving) { rec.idle = 0; rec.clock += dt; }
-      else if (rec.idle < 6) { const s = Math.min(dt, 6 - rec.idle); rec.idle += s; rec.clock += s; }
+      else if (rec.idle < IDLE_MAX) {
+        const s = Math.min(dt, IDLE_MAX - rec.idle);
+        rec.idle += s;
+        rec.clock += s;
+        if (rec.idle >= IDLE_MAX) scheduleSave(500); // keep the whole standstill in the shared loop
+      }
     }
     function recNode(x, z) {
       if (!rec || rec.nodes.length >= 1500) return;
@@ -1759,6 +1768,12 @@
       for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
       return btoa(s);
     }
+    // the recorded nodes, plus the time spent standing at the last one so the loop lingers there too
+    function trackOf(r) {
+      const nodes = r.nodes.slice(), end = nodes[nodes.length - 1], t = Math.round(r.clock * 10);
+      if (!myPath.length && t > end[0]) nodes.push([t, end[1], end[2]]);
+      return nodes.map((n) => n.join(",")).join(";");
+    }
     function saveMe(leaving) {
       if (!me) return;
       const record = {
@@ -1769,7 +1784,7 @@
         hair: myLook.hair,
         face: myLook.face ? toB64(myLook.face) : "",
         cheeky: myLook.cheeky ? 1 : 0,
-        track: rec ? rec.nodes.map((n) => n.join(",")).join(";") : "",
+        track: rec ? trackOf(rec) : "",
         at: Date.now()
       };
       Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
@@ -1813,7 +1828,7 @@
       const nodes = clean.nodes.length ? clean.nodes : [[0, SPAWN[0][0], SPAWN[0][1]]];
       const dur = nodes[nodes.length - 1][0] / 10 + 4;
       if (!g) {
-        const actor = makeActor(clean.name, clean.look, false);
+        const actor = makeActor(clean.name, clean.look, false, id);
         actor.x = nodes[0][1] + 0.5;
         actor.z = nodes[0][2] + 0.5;
         actor.y = worldY(nodes[0][1], nodes[0][2]);
@@ -1980,16 +1995,45 @@
 
     const tagV = new T.Vector3();
     function placeTag(a, w, h) {
-      tagV.set(a.x + OX, a.y + a.drop + a.av.height + 0.5, a.z + OZ).project(cam);
+      const r = a.av.root.position; // where the body is drawn, which an action may have nudged off its cell
+      tagV.set(r.x, r.y + a.av.height + 0.5, r.z).project(cam);
       const x = ((tagV.x + 1) / 2) * w, y = ((1 - tagV.y) / 2) * h;
-      const show = view.fit < 70 && x > -60 && x < w + 60 && y > -20 && y < h + 30;
+      const show = !a.hiddenAct && view.fit < 70 && x > -60 && x < w + 60 && y > -20 && y < h + 30;
       if (a.tag.hidden === show) a.tag.hidden = !show;
       if (show) a.tag.style.transform = "translate(" + x.toFixed(1) + "px," + y.toFixed(1) + "px) translate(-50%, -100%)";
     }
+    // ---------- what people get up to once they stop somewhere (actions.js) ----------
+    // The party clock counts from a fixed date, so every phone plays the same routine at the same moment.
+    const PARTY_EPOCH = Date.UTC(2026, 0, 1);
+    const deepCells = [];
+    for (let x = X0; x <= X1; x++) for (let z = Z0; z <= Z1; z++) if (heightAt(x, z) < -1 && reach[cellIdx(x, z)]) deepCells.push([x, z]);
+    let danceCrowd = 0;
+    const party = window.FefeActions
+      ? FefeActions.create({
+          T, scene, OX, OZ, heightAt,
+          isNight: () => night,
+          // the middle of the nearest deep-water cell and its floor height, for pushing someone in
+          nearestWater(x, z) {
+            let best = null, bd = 36;
+            deepCells.forEach(([cx, cz]) => {
+              const d = (cx + 0.5 - x) ** 2 + (cz + 0.5 - z) ** 2;
+              if (d < bd && d > 1) { bd = d; best = [cx + 0.5, cz + 0.5, worldY(cx, cz)]; }
+            });
+            return best;
+          },
+          onDance(n) { danceCrowd = n; }
+        })
+      : null;
+    const actorList = [];
     function updateParty(dt) {
       updateMe(dt);
       ghosts.forEach((g, id) => updateGhost(g, id, dt));
       updatePuffs(dt);
+      if (!party) return;
+      actorList.length = 0;
+      if (me) actorList.push(me);
+      ghosts.forEach((g) => actorList.push(g.actor));
+      party.update(dt, actorList, Date.now() - PARTY_EPOCH);
     }
     function updateTags() {
       const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -2292,7 +2336,7 @@
       const open = SPAWN.filter(([x, z]) => reach[cellIdx(x, z)]);
       const [sx, sz] = open.length ? open[(Math.random() * open.length) | 0] : SPAWN[0];
       myLook = Object.assign({}, draft);
-      me = makeActor(myName, myLook, true);
+      me = makeActor(myName, myLook, true, myId);
       me.x = sx + 0.5;
       me.z = sz + 0.5;
       me.y = worldY(sx, sz);
@@ -2322,7 +2366,9 @@
       clampTarget(goal.target);
     }
     findBtn.addEventListener("click", findMe);
-    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)] };
+    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
+      acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
+      look(x, z, fit) { follow = false; goal.target.set(x + OX, 1, z + OZ); goal.fit = fit || 14; } };
 
     // ---------- per-frame updates ----------
     function updateCutaway(dt) {
@@ -2379,10 +2425,10 @@
           m.material.map.offset.x += dt * (0.03 + i * 0.01);
           m.material.map.offset.y += dt * 0.018;
         });
-        disco.rotation.y += dt * 1.2;
+        disco.rotation.y += dt * (danceCrowd ? 2.4 : 1.2);
       }
       danceClock += dt;
-      const beat = reduceMotion ? 1.5 : 0.28;
+      const beat = reduceMotion ? 1.5 : danceCrowd ? 0.2 : 0.28;
       if (danceClock > beat) {
         danceClock = 0;
         paintDance(++danceStep);
