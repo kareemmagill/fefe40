@@ -561,7 +561,7 @@
       root,
       rig,
       parts: { legR, legL, torso, armR, armL, head },
-      height: 32 * P * shape.s,
+      height: (32 + 8 * (HEAD - 1)) * P * shape.s,
       scale: shape.s,
       hold,
       moustache,
@@ -598,10 +598,12 @@
     const bmi = wt / ((h / 100) * (h / 100));
     return { h, wt, s: h / 178, w: Math.max(0.8, Math.min(1.5, Math.sqrt(bmi / 25))) };
   }
+  // Heads are drawn a quarter bigger than Minecraft's so faces read at party distance.
+  const HEAD = 1.25;
   function fitShape(rig, head, shape) {
     rig.scale.set(shape.w, shape.s, shape.w);
-    head.scale.set(1 / shape.w, 1, 1 / shape.w);
+    head.scale.set(HEAD / shape.w, HEAD, HEAD / shape.w);
   }
 
-  window.FefeAvatar = { OUTFITS, build, P, bodyShape, HEIGHT, WEIGHT, reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = 32 * P * sh.s; av.scale = sh.s; } };
+  window.FefeAvatar = { OUTFITS, build, P, bodyShape, HEIGHT, WEIGHT, reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = (32 + 8 * (HEAD - 1)) * P * sh.s; av.scale = sh.s; } };
 })();

@@ -846,6 +846,7 @@
         }
       }
       [[-0.5, 0], [0.5, 0], [0, 0.5]].forEach(([ox, oz]) => dab(cx + ox, cy - 0.5, cz + oz, C.coconut));
+      return { palm: true, h, top: cy + 0.75, tx: cx, tz: cz };
     }
     // Shade tree: stout trunk with roots and two branches, under a round canopy made of three overlapping blobs.
     function broadleaf(x, z, flowering) {
@@ -867,15 +868,17 @@
         const a = rnd() * Math.PI * 2;
         blob(x + 0.5 + Math.cos(a) * 1.2, h + 1.0 + rnd() * 0.8, z + 0.5 + Math.sin(a) * 1.2, 1.3, 1.1, 1.3, shade, soft);
       }
+      return { palm: false, h, top: h + 1.2 + ry, tx: x + 0.5, tz: z + 0.5 };
     }
-    [[51, 15], [69, 15], [70, 33], [28, 45], [33, 41], [33, 53], [19, 42], [24, 21]].forEach(([x, z]) => { trees.push([x, z]); palm(x, z); });
+    // each tree: [x, z, { palm, h (trunk top), top (where a climber stands), tx, tz (top of the trunk) }]
+    [[51, 15], [69, 15], [70, 33], [28, 45], [33, 41], [33, 53], [19, 42], [24, 21]].forEach(([x, z]) => { const t = [x, z]; trees.push(t); t.push(palm(x, z)); });
     for (let tries = 0; tries < 6000 && trees.length < 80; tries++) {
       const x = -2 + ((rnd() * 76) | 0), z = -2 + ((rnd() * 60) | 0);
       const type = rnd(), isPalm = type < 0.35;
       if (!isFree(x, z, isPalm ? 2.2 : 2.9) || !farFromTrees(x, z, isPalm ? 3.6 : 4.8)) continue;
-      trees.push([x, z]);
-      if (isPalm) palm(x, z);
-      else broadleaf(x, z, type > 0.78);
+      const t = [x, z];
+      trees.push(t);
+      t.push(isPalm ? palm(x, z) : broadleaf(x, z, type > 0.78));
     }
     let bushes = 0;
     for (let tries = 0; tries < 4000 && bushes < 90; tries++) {
@@ -1538,6 +1541,13 @@
       const hit = pickVoxel(cx, cy);
       if (me) {
         if (!hit) return;
+        const tree = treeAtHit(hit);
+        if (tree) { // go and stand right by the trunk: actions.js takes it from there (climb, or pee in Cheeky mode)
+          const at = nearestReachable(Math.floor(tree.x), Math.floor(tree.z));
+          if (at && walkTo(at[0], at[1])) follow = true;
+          clearSelection();
+          return;
+        }
         const x = Math.floor(hit.u / 2), z = Math.floor(hit.w / 2);
         const bid = hit.group.split(":")[0];
         const roof = isHideable(hit.group) && byId[bid];
@@ -2347,9 +2357,21 @@
     const deepCells = [];
     for (let x = X0; x <= X1; x++) for (let z = Z0; z <= Z1; z++) if (heightAt(x, z) < -1 && reach[cellIdx(x, z)]) deepCells.push([x, z]);
     let danceCrowd = 0;
+    const TREES = trees.map(([x, z, t]) => ({ x: x + 0.5, z: z + 0.5, palm: t.palm, h: t.h, top: t.top, tx: t.tx, tz: t.tz }));
+    // a tapped leaf high up, or any tapped bit of trunk, means that tree
+    function treeAtHit(hit) {
+      const hx = hit.u / 2 + 0.25, hy = hit.v / 2, hz = hit.w / 2 + 0.25, leaf = (vMeta[vi(hit.u, hit.v, hit.w)] & 128) !== 0;
+      let best = null, bd = Infinity;
+      TREES.forEach((t) => {
+        const k = Math.max(0, Math.min(1, (hy - 1) / Math.max(1, t.h - 1))) ** 2;
+        const d = Math.hypot(t.x + (t.tx - t.x) * k - hx, t.z + (t.tz - t.z) * k - hz);
+        if (((leaf && hy > 2.2 && d < 3.6) || (hy >= 1 && d < 0.9)) && d < bd) { bd = d; best = t; }
+      });
+      return best;
+    }
     const party = window.FefeActions
       ? FefeActions.create({
-          T, scene, OX, OZ, heightAt,
+          T, scene, OX, OZ, heightAt, trees: TREES,
           isNight: () => night,
           // the middle of the nearest deep-water cell and its floor height, for pushing someone in
           nearestWater(x, z) {
@@ -2460,6 +2482,21 @@
       if (me) actorList.push(me);
       ghosts.forEach((g) => actorList.push(g.actor));
       party.update(dt, actorList, Date.now() - PARTY_EPOCH);
+      actorList.forEach((a) => faceCamera(a, dt));
+    }
+    // Heads turn towards the viewer (up to 90°) and tip up a little, so faces show from most angles. Not when we're
+    // looking at someone's back, when they're lying or tumbling, or when their act aims the head itself.
+    function faceCamera(a, dt) {
+      const r = a.av.rig.rotation;
+      let want = 0;
+      if (a.av.root.visible && !a.headLocked && Math.abs(r.x) < 0.5 && Math.abs(r.z) < 0.5) {
+        const body = a.av.root.rotation.y + r.y, rel = Math.atan2(Math.sin(view.az - body), Math.cos(view.az - body));
+        if (Math.abs(rel) < 2.1) want = Math.max(-1.5, Math.min(1.5, rel));
+      }
+      a.headYaw = (a.headYaw || 0) + (want - (a.headYaw || 0)) * Math.min(1, dt * 7);
+      const head = a.av.parts.head.rotation;
+      head.y += a.headYaw;
+      if (want !== 0) head.x -= 0.28 * Math.min(1, 1.6 - Math.abs(a.headYaw));
     }
     function updateTags() {
       const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -2602,8 +2639,9 @@
         if (det) { box = det.detection.box; out.body = det.gender === "female" ? "f" : "m"; }
       } catch (e) { /* no model or no face found: use the middle of the photo */ }
       const W = src.width, H = src.height;
-      let size = Math.min(W, H) * 0.62, cx = W / 2, cy = H * 0.46;
-      if (box) { size = Math.max(box.width, box.height) * 1.3; cx = box.x + box.width / 2; cy = box.y + box.height * 0.42; }
+      // the head's front is the face from just above the brows to the chin, so the face fills it
+      let size = Math.min(W, H) * 0.56, cx = W / 2, cy = H * 0.46;
+      if (box) { size = Math.max(box.width, box.height) * 1.18; cx = box.x + box.width / 2; cy = box.y + box.height * 0.4; }
       size = Math.min(size, W, H);
       cx = Math.max(size / 2, Math.min(W - size / 2, cx));
       cy = Math.max(size / 2, Math.min(H - size / 2, cy));
@@ -2823,6 +2861,8 @@
     findBtn.addEventListener("click", findMe);
     window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, dayNodes: recs && recs.day ? recs.day.nodes.length : 0, nightNodes: recs && recs.night ? recs.night.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
+      trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
+      speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
       look(x, z, fit, y) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; } };
 
     // ---------- per-frame updates ----------

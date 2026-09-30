@@ -113,6 +113,8 @@
     const boxMat = (color) => boxMats[color] || (boxMats[color] = new T.MeshBasicMaterial({ color }));
     const parts = [];
     const sticky = new Map();
+    const litMats = {};
+    const litMat = (color) => litMats[color] || (litMats[color] = new T.MeshLambertMaterial({ color }));
     const MAX = 500;
     function add(obj, x, y, z, o) {
       if (parts.length >= MAX) { const old = parts.shift(); scene.remove(old.obj); }
@@ -146,13 +148,26 @@
       keep(key, type, x, y, z, size) {
         let s = sticky.get(key);
         if (!s) {
-          s = { sprite: new T.Sprite(spriteMat(type, true)), seen: 0 };
+          s = { obj: new T.Sprite(spriteMat(type, true)), seen: 0 };
           const sz = size || 0.5;
-          s.sprite.scale.set(type === "dnd" ? sz * 2.6 : sz, sz, 1);
-          scene.add(s.sprite);
+          s.obj.scale.set(type === "dnd" ? sz * 2.6 : sz, sz, 1);
+          scene.add(s.obj);
           sticky.set(key, s);
         }
-        s.sprite.position.set(x + OX, y, z + OZ);
+        s.obj.position.set(x + OX, y, z + OZ);
+        s.seen = 0;
+      },
+      // a shaded box (a duvet) that stays while it keeps being refreshed every frame
+      keepBox(key, color, x, y, z, sx, sy, sz) {
+        let s = sticky.get(key);
+        if (!s) {
+          s = { obj: new T.Mesh(boxGeo, litMat(color)), seen: 0 };
+          s.obj.castShadow = true;
+          scene.add(s.obj);
+          sticky.set(key, s);
+        }
+        s.obj.position.set(x + OX, y, z + OZ);
+        s.obj.scale.set(sx, sy, sz);
         s.seen = 0;
       },
       update(dt) {
@@ -171,12 +186,13 @@
           p.obj.position.z += p.vz * dt;
           const k = Math.min(1, (p.life / p.max) * 3);
           if (p.obj.isSprite) p.obj.scale.set(p.obj.scale.x / Math.max(1e-3, p.obj.scale.y) * p.size * k, p.size * k, 1);
+          else if (p.flat) p.obj.scale.set(p.size * k, 0.02, p.size * k); // puddles
           else p.obj.scale.setScalar(p.size * k);
           if (p.spin) p.obj.rotation.y += p.spin * dt;
         }
         sticky.forEach((s, key) => {
           s.seen += dt;
-          if (s.seen > 0.25) { scene.remove(s.sprite); sticky.delete(key); }
+          if (s.seen > 0.25) { scene.remove(s.obj); sticky.delete(key); }
         });
       }
     };
@@ -435,8 +451,14 @@
     if (naughty.length >= 2) env.scene(room, naughty.length);
     let k = 0;
     const others = ms.filter((a) => !(naughty.length >= 2 && cheeky(a)));
+    // everyone in on it shares the main bed: jumping on it together, then under the duvet, heads out
+    const b0 = room.beds[0], b1 = room.beds[1] || b0, nn = naughty.length;
+    const cx = (b0[0] + b1[0]) / 2, gap = Math.min(0.75, (Math.abs(b1[0] - b0[0]) + 0.9) / nn), jumping = t % 22 < 6 || t % 22 >= 20;
     return ms.map((a) => {
-      if (naughty.length >= 2 && cheeky(a)) return Object.assign({ act: "scene" }, bed(0));
+      if (nn >= 2 && cheeky(a)) {
+        const j = naughty.indexOf(a), off = (j - (nn - 1) / 2) * gap;
+        return { act: "scene", spot: [cx + off, b0[1]], heading: jumping ? (off < 0 ? HALF : off > 0 ? -HALF : 0) : 0, bed: b0[2], lead: j === 0, cx, bz: b0[1], width: gap * nn + 0.3 };
+      }
       const i = k++;
       if (others.length === 1) return Object.assign({ act: choose(a, ["sleep", "sleep", "jumpbed"], t, 15, "bed") }, bed(i));
       if (others.length === 2) {
@@ -516,6 +538,23 @@
     return ms.map((a) => ({ act: cheeky(a) ? "smoke" : "idle" }));
   }
 
+  // Standing right by a tree: the first one there climbs it (or, in Cheeky mode, sometimes pees on it instead:
+  // guys standing facing the trunk, girls squatting with their back to it); anyone else at that tree cheers them on.
+  function planTree(ms, env) {
+    const t = env.t, first = new Map();
+    return ms.map((a) => {
+      const tree = env.treeNear(a);
+      const dx = tree.x - a.x, dz = tree.z - a.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
+      if (first.has(tree)) return { act: "cheer", face: [tree.x, tree.z] };
+      first.set(tree, a);
+      const act = cheeky(a) ? choose(a, ["climb", "pee", "climb"], t, 24, "tree") : "climb";
+      const facing = Math.atan2(ux, uz);
+      if (act === "climb") return { act, tree, spot: [tree.x - ux * 0.55, tree.z - uz * 0.55], heading: facing };
+      if (male(a)) return { act, tree, spot: [tree.x - ux * 0.95, tree.z - uz * 0.95], heading: facing };
+      return { act, tree, squat: true, spot: [tree.x - ux * 0.75, tree.z - uz * 0.75], heading: facing + PI };
+    });
+  }
+
   function planGarden(ms, env) {
     const t = env.t;
     return ms.map((a) => {
@@ -552,6 +591,7 @@
     { id: "playground", rect: [35, 40, 44, 50], plan: planPlay },
     { id: "photo", rect: [21, 37, 30, 41], plan: planPhoto },
     { id: "parking", rect: [1, 40, 17, 55], plan: planParking },
+    { id: "tree", test: (a, env) => !!env.treeNear(a), plan: planTree },
     { id: "garden", test: () => true, plan: planGarden }
   ]);
 
@@ -959,7 +999,29 @@
       return { pose: p, R: "pillow" };
     },
     sleepover(m) { const p = lie(m.asg.bed || 0.76); p.armR = [-2.5, 0, 0.4]; if (m.every(2.5)) m.fx.icon("dots", m.x, m.y + 1.4, m.z - 0.8, { size: 0.3 }); return { pose: p }; },
-    scene() { return { pose: base(), hide: true }; },
+    // jumping on the bed together holding hands, then under a bouncing duvet with just their heads out
+    scene(m) {
+      const u = m.T % 22, bed = m.asg.bed || 0.76;
+      if (u < 6 || u >= 20) {
+        const p = base(), hop = Math.abs(Math.sin(m.T * 4.2));
+        p.rig[1] = bed + hop * 0.65;
+        p.armR = [-1.3, 0, 0.35];
+        p.armL = [-1.3, 0, -0.35];
+        p.legR = [hop > 0.5 ? -0.4 : 0, 0, 0];
+        p.legL = [hop > 0.5 ? -0.4 : 0, 0, 0];
+        if (m.every(0.9)) m.fx.icon("heart", m.x, m.y + bed + 3, m.z, { size: 0.35 });
+        return { pose: p };
+      }
+      const p = lie(bed);
+      p.armR = [0, 0, -0.1];
+      p.armL = [0, 0, 0.1];
+      p.head = [0, Math.sin(m.T * 3 + m.seed * 6) * 0.35, 0];
+      if (m.asg.lead) {
+        const k = m.T * 7, w = m.asg.width;
+        m.fx.keepBox("duvet" + m.asg.cx + "," + m.asg.bz, "#EEF3FF", m.asg.cx, m.y + bed + 0.4 + Math.abs(Math.sin(k)) * 0.12, m.asg.bz + 0.35, w * (1 + Math.sin(k * 1.3) * 0.03), 0.42 + Math.abs(Math.sin(k)) * 0.08, 1.75);
+      }
+      return { pose: p };
+    },
 
     tv(m) { const p = sit(0.45); p.head = [Math.floor(m.T / 5) % 3 === 0 ? -0.15 : 0, 0, 0]; return { pose: p }; },
     gaming(m) {
@@ -1093,8 +1155,72 @@
       if (m.every(0.08)) m.fx.block(Math.random() < 0.5 ? "#8BC34A" : "#B5D86A", m.x + Math.sin(m.h) * 1.1, m.y + 1.3, m.z + Math.cos(m.h) * 1.1, { vx: Math.sin(m.h) * 1.5, vz: Math.cos(m.h) * 1.5, vy: -0.5, size: 0.12, life: 0.6, max: 0.6 });
       return { pose: p };
     },
+    // up the trunk (following a palm's lean), a look around from the top, a jump down with a poof
+    climb(m) {
+      const tr = m.asg.tree, u = m.t % 18, p = base();
+      const rise = Math.max(1, tr.top - m.y);
+      const along = (k) => { const q = k * k; return [(tr.tx - tr.x) * q, (tr.tz - tr.z) * q]; };
+      if (u < 4.5) {
+        const k = u / 4.5, [lx, lz] = along(k);
+        const c = Math.sin(u * 9);
+        p.armR = [-2.9 + c * 0.35, 0, -0.1];
+        p.armL = [-2.9 - c * 0.35, 0, 0.1];
+        p.legR = [-0.6 - c * 0.5, 0, 0];
+        p.legL = [-0.6 + c * 0.5, 0, 0];
+        m.offset = [tr.x - m.x + lx - Math.sin(m.h) * 0.35, tr.z - m.z + lz - Math.cos(m.h) * 0.35, k * rise];
+        return { pose: p };
+      }
+      const [lx, lz] = along(1);
+      if (u < 14) {
+        m.offset = [tr.x - m.x + lx, tr.z - m.z + lz, rise];
+        p.armR = [-2.9 + Math.sin(m.T * 8) * 0.3, 0, -0.35];
+        p.head = [0, Math.sin(m.T * 0.8) * 0.6, 0];
+        p.rig[4] = Math.sin(m.T * 0.4) * 1.2;
+        if (m.every(2.2)) m.fx.icon("star", m.x + lx, m.y + rise + 2.8, m.z + lz, { size: 0.35 });
+        if (tr.palm && m.every(6) && m.t > 6) m.fx.arc("#6B4A2A", [tr.x + lx + 0.4, m.y + rise - 0.2, tr.z + lz], [tr.x + 1.2, m.y + 0.1, tr.z + 0.6], 0.8, 0.2, 0.35); // coconut
+        return { pose: p };
+      }
+      if (u < 14.6) {
+        const k = (u - 14) / 0.6;
+        m.offset = [(tr.x - m.x + lx) * (1 - k), (tr.z - m.z + lz) * (1 - k), rise * (1 - k * k) + Math.sin(k * PI) * 0.6];
+        p.armR = [-2.9, 0, -0.5];
+        p.armL = [-2.9, 0, 0.5];
+        p.legR = [-0.5, 0, 0];
+        if (u + m.dt >= 14.6 && m.every(10)) for (let i = 0; i < 8; i++) m.fx.block("#FFFFFF", m.x, m.y + 0.2, m.z, { vx: Math.cos(i) * 2, vz: Math.sin(i) * 2, vy: 1, size: 0.2, life: 0.5, max: 0.5 });
+        return { pose: p };
+      }
+      p.armR = [-0.4 + Math.sin(m.T * 10) * 0.3, 0, 0.3];
+      return { pose: p };
+    },
+    // a cartoon yellow stream (standing) or drips (squatting), a puddle, then a little shiver of relief
+    pee(m) {
+      const tr = m.asg.tree, u = m.t % 14, going = u > 1.5 && u < 8;
+      let p;
+      if (m.asg.squat) {
+        p = sit(0.32);
+        p.legR = [-2.05, 0, 0.25];
+        p.legL = [-2.05, 0, -0.25];
+        p.armR = [-1.3, 0, 0.35];
+        p.armL = [-1.3, 0, -0.35];
+        p.head = [0, Math.sin(m.T * 0.9) * 0.5, 0];
+        if (going && m.every(0.07)) m.fx.block("#F2D22E", m.x - Math.sin(m.h) * 0.05, m.y + 0.3, m.z - Math.cos(m.h) * 0.05, { vy: -0.6, g: 9, size: 0.06, life: 0.3, max: 0.3 });
+      } else {
+        p = base();
+        p.armR = [-0.55, 0, 0.28];
+        p.armL = [-0.55, 0, -0.28];
+        p.head = u > 3 && u < 7 ? [-0.35, 0, 0] : [0, Math.sin(m.T * 0.9) * 0.4, 0];
+        if (going && m.every(0.035)) {
+          const sx = Math.sin(m.h), sz = Math.cos(m.h);
+          m.fx.block("#F2D22E", m.x + sx * 0.3, m.y + 0.85, m.z + sz * 0.3, { vx: sx * 2.1, vz: sz * 2.1, vy: 0.9, g: 9, size: 0.07, life: 0.42, max: 0.42 });
+        }
+      }
+      if (going && m.every(0.6)) m.fx.block("#E8C62A", m.asg.squat ? m.x : tr.x - Math.sin(m.h) * 0.45, m.y + 0.02, m.asg.squat ? m.z : tr.z - Math.cos(m.h) * 0.45, { g: 0, vy: 0, size: 0.45, life: 3, max: 3, flat: true });
+      if (u >= 8 && u < 9) { p.rig[1] += Math.abs(Math.sin(u * 30)) * 0.04; if (m.every(1)) m.fx.icon("blush", m.x, m.y + 2.6, m.z, { size: 0.3 }); }
+      return { pose: p };
+    },
     smell(m) { const p = base(); p.rig[3] = 0.45; p.rig[1] = -0.2; p.legR = [-0.5, 0, 0]; p.legL = [-0.5, 0, 0]; if (m.every(2.5)) m.fx.icon("heart", m.x, m.y + 1.8, m.z, { size: 0.3 }); return { pose: p }; }
   };
+  const HEAD_LOCKED = new Set(["kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
   function discoPose(T, side) {
     const p = base(), s = (Math.sin(T * 2.2 * PI) + 1) / 2;
     p.armR = [lerp(-0.6, -2.8, s), 0, lerp(0.7, -0.4, s)];
@@ -1130,6 +1256,11 @@
       get lastDrop() { return lastDrop; },
       drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 150)); },
       scene(room, count) { scenes.push({ room, count }); },
+      treeNear(a) {
+        let best = null, bd = 1.55;
+        (ctx.trees || []).forEach((tr) => { const d = Math.hypot(tr.x - a.x, tr.z - a.z); if (d < bd) { bd = d; best = tr; } });
+        return best;
+      },
       brawlLead(mid) { let best = null, bd = Infinity; env.actors.forEach((a) => { const d = Math.hypot(a.x - mid[0], a.z - mid[1]); if (d < bd) { bd = d; best = a; } }); return best; }
     };
     function stop(a, s) {
@@ -1138,6 +1269,7 @@
       a.av.hold("head", null);
       a.av.root.visible = true;
       a.hiddenAct = false;
+      a.headLocked = false;
       if (s.act === "scene") s.shameUntil = env.t + 25;
       if (s.act === "snus") s.buzzUntil = env.t + 30;
       s.act = null;
@@ -1251,6 +1383,7 @@
       apply(a.av, out.pose || base());
       a.av.root.visible = !out.hide;
       a.hiddenAct = !!out.hide;
+      a.headLocked = HEAD_LOCKED.has(asg.act); // these acts aim the head themselves, so it doesn't turn to the camera
     }
   }
 
