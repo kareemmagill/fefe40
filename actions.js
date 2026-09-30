@@ -1192,6 +1192,7 @@
           fx.keep("sock" + room.door.join(), "sock", room.door[0] + 0.5, 3.6, room.door[1], 0.35);
         });
         if (ctx.onDance) ctx.onDance(env.danceCount);
+        if (ctx.onScenes) ctx.onScenes(scenes.map((sc) => BEDROOMS.indexOf(sc.room)));
         fx.update(dt);
       }
     };

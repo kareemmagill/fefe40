@@ -480,6 +480,8 @@
       bed(28, 5, 2, 3, fy, C.fefe);
       box(27.1, fy, 5.1, 0.8, 0.7, 0.8, C.woodLight);
       box(30.1, fy, 5.1, 0.8, 0.7, 0.8, C.woodLight);
+      box(27.35, fy + 0.7, 5.35, 0.3, 0.35, 0.3, C.bulb, glow);
+      box(30.35, fy + 0.7, 5.35, 0.3, 0.35, 0.3, C.bulb, glow);
       box(27.5, fy, 9, 3, 0.05, 2, C.blue, { j: false });
       chair(30, 11, fy, C.woodLight, "S");
 
@@ -495,6 +497,7 @@
       bed(40, 5, 2, 3, fy, C.bedBlue);
       box(38.1, fy, 5.05, 0.8, 2.6, 1.9, C.woodDark);
       table(41, 10, 2, 1, fy, C.woodLight);
+      box(42.4, fy + 0.85, 10.3, 0.3, 0.35, 0.3, C.bulb, glow);
       chair(41, 11, fy, C.wood, "S");
       box(38.5, fy, 9, 2, 0.05, 2, C.yellow, { j: false });
 
@@ -524,6 +527,8 @@
       box(56.1, fy + 0.7, 7.3, 2.8, 0.1, 0.5, C.fefe, { j: false });
       box(55.1, fy, 6.1, 0.8, 0.7, 0.8, C.woodLight);
       box(59.1, fy, 6.1, 0.8, 0.7, 0.8, C.woodLight);
+      box(55.35, fy + 0.7, 6.35, 0.3, 0.35, 0.3, C.bulb, glow);
+      box(59.35, fy + 0.7, 6.35, 0.3, 0.35, 0.3, C.bulb, glow);
       sofa(54, 10, 1, 2, fy, C.blue, "W");
       fill(62, 1, 6, 65, 1, 11, (x, y, z) => ((x + z) % 2 ? C.tileW : C.tileB), { j: false });
       box(62.2, fy, 6.2, 2.6, 0.7, 1.4, C.white);
@@ -585,6 +590,22 @@
         box(x + 0.3, fy + 0.86, 29.15, 0.4, 0.03, 0.4, C.white, { j: false });
         box(x + 0.3, fy + 0.86, 30.45, 0.4, 0.03, 0.4, C.white, { j: false });
         if (x % 3 === 1) box(x + 0.35, fy + 0.89, 29.85, 0.3, 0.35, 0.3, C.fefe, { j: false });
+      }
+
+      // pendant lamps over the table, lit at night
+      [28.8, 34.2].forEach((x) => {
+        box(x - 0.02, fy + 2.2, 29.98, 0.04, 1.8, 0.04, C.black, { j: false });
+        box(x - 0.35, fy + 1.95, 29.65, 0.7, 0.25, 0.7, C.woodDark, { j: false });
+        box(x - 0.18, fy + 1.78, 29.82, 0.36, 0.2, 0.36, C.bulb, glow);
+      });
+      // fairy lights along the eaves, swagged every 4 m below the bunting
+      const eave = [[19, 24], [43, 24], [43, 38], [19, 38], [19, 24]];
+      for (let i = 0; i + 1 < eave.length; i++) {
+        const [ax, az] = eave[i], [bx, bz] = eave[i + 1], len = Math.hypot(bx - ax, bz - az);
+        for (let d = 0.5; d < len; d += 0.5) {
+          const t = d / len, sag = Math.sin(((d % 4) / 4) * Math.PI) * 0.35;
+          box(ax + (bx - ax) * t - 0.06, 4.95 - sag, az + (bz - az) * t - 0.06, 0.12, 0.14, 0.12, (d * 2) % 2 ? C.bulb : C.fefe, glow);
+        }
       }
 
       // Viking bar
@@ -1017,6 +1038,18 @@
       const mg = (m >> 3) & 15;
       return mg === g || mg === 0 ? 1 : 0;
     }
+    // ---------- build-in: every block drops from the sky and lands with a jiggle ----------
+    // Each vertex carries its block's landing time in 1/64 s steps and a shader patch moves it, so the GPU does the work.
+    // Blocks land from the ground up, sweeping across the site, with a little randomness.
+    const DROP_STEP = 64;
+    let dropMax = 0;
+    function dropAt(x, y, z, seed) {
+      const sweep = (x - X0 + (z - Z0)) / (X1 - X0 + Z1 - Z0 + 2);
+      const r = (((seed * 2654435761) >>> 0) % 1000) / 1000;
+      const t = Math.max(0, y + 3) * 0.12 + sweep * 0.8 + r * 0.3;
+      if (t > dropMax) dropMax = t;
+      return Math.min(255, Math.round(t * DROP_STEP));
+    }
     let voxelCount = 0, faceCount = 0;
     (function meshVoxels() {
       const CH = 32;
@@ -1030,6 +1063,7 @@
             voxelCount++;
             const kind = m & 7, g = (m >> 3) & 15, c = vCol[i];
             const cr = (c >> 16) & 255, cg = (c >> 8) & 255, cb = c & 255;
+            let dq = -1;
             for (let f = 0; f < 6; f++) {
               const F = FACES[f], n = F.n, t1 = F.t1, t2 = F.t2;
               const nm = metaV(u + n[0], v + n[1], w + n[2]);
@@ -1039,7 +1073,9 @@
               }
               const key = kind * 100000 + g * 1000 + (((u - GX0) / CH) | 0) * 10 + (((w - GZ0) / CH) | 0);
               let b = bins.get(key);
-              if (!b) { b = { kind, g, pos: [], nor: [], col: [], uv: [], idx: [] }; bins.set(key, b); }
+              if (!b) { b = { kind, g, pos: [], nor: [], col: [], uv: [], idx: [], drop: [] }; bins.set(key, b); }
+              if (dq < 0) { const bu = u >> 1, bv = v >> 1, bw = w >> 1; dq = dropAt(bu, bv, bw, bu * 7919 + bv * 104729 + bw * 31); } // whole 1 m blocks fall together
+              b.drop.push(dq, dq, dq, dq);
               const base = b.pos.length / 3;
               const ou = u + (n[0] > 0 ? 1 : 0), ov = v + (n[1] > 0 ? 1 : 0), ow = w + (n[2] > 0 ? 1 : 0);
               const qu = u + n[0], qv = v + n[1], qw = w + n[2];
@@ -1072,6 +1108,7 @@
         geo.setAttribute("normal", new T.BufferAttribute(new Int8Array(b.nor), 3, true));
         geo.setAttribute("color", new T.BufferAttribute(new Uint8Array(b.col), 3, true));
         geo.setAttribute("uv", new T.BufferAttribute(new Uint8Array(b.uv), 2));
+        geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(b.drop), 1));
         geo.setIndex(b.idx);
         geo.computeBoundingSphere();
         const kind = KIND_NAME[b.kind], group = GROUPS[b.g];
@@ -1094,7 +1131,10 @@
     const m4 = new T.Matrix4();
     const col = new T.Color();
     buckets.forEach((bk) => {
-      const mesh = new T.InstancedMesh(unit, materialFor(baseMat, bk.kind, bk.group), bk.items.length);
+      const geo = unit.clone(), drops = new Uint8Array(bk.items.length);
+      bk.items.forEach((it, i) => { drops[i] = Math.min(255, dropAt(it.x, it.y - it.sy / 2 + 0.5, it.z, i * 131 + it.sx * 977) + 10); });
+      geo.setAttribute("aDrop", new T.InstancedBufferAttribute(drops, 1));
+      const mesh = new T.InstancedMesh(geo, materialFor(baseMat, bk.kind, bk.group), bk.items.length);
       bk.items.forEach((it, i) => {
         m4.makeScale(it.sx, it.sy, it.sz);
         m4.setPosition(it.x + OX, it.y, it.z + OZ);
@@ -1121,7 +1161,9 @@
       const t = rippleTex.clone();
       t.needsUpdate = true;
       t.repeat.set(w / 4, d / 4);
-      const m = new T.Mesh(new T.PlaneGeometry(w, d), new T.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.5, depthWrite: false }));
+      const geo = new T.PlaneGeometry(w, d);
+      geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(4).fill(dropAt(x + w / 2, top + 0.5, z + d / 2, x * 13 + z) + 12), 1));
+      const m = new T.Mesh(geo, new T.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.5, depthWrite: false }));
       m.rotation.x = -Math.PI / 2;
       m.position.set(x + w / 2 + OX, top + 0.02, z + d / 2 + OZ);
       scene.add(m);
@@ -1129,9 +1171,137 @@
     });
 
     // disco ball
-    const disco = new T.Mesh(new T.IcosahedronGeometry(0.55, 1), new T.MeshPhongMaterial({ color: 0xdfe6ee, flatShading: true, shininess: 120, specular: 0xffffff }));
+    const discoGeo = new T.IcosahedronGeometry(0.55, 1);
+    discoGeo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(discoGeo.attributes.position.count).fill(dropAt(DANCE_CENTER[0], 7.5, DANCE_CENTER[1], 7) + 8), 1));
+    const disco = new T.Mesh(discoGeo, new T.MeshPhongMaterial({ color: 0xdfe6ee, flatShading: true, shininess: 120, specular: 0xffffff }));
     disco.position.set(DANCE_CENTER[0] + OX, 4.85, DANCE_CENTER[1] + OZ);
     scene.add(disco);
+
+    // The drop is applied in world space after instancing, in the shadow pass too, so shadows fall with the blocks.
+    const buildClock = { value: reduceMotion ? 1e4 : -1 };
+    const DROP_GLSL = [
+      "attribute float aDrop;",
+      "uniform float uBuild;",
+      "float dropOffset() {",
+      "  float t = uBuild - aDrop / " + DROP_STEP.toFixed(1) + ";",
+      "  if (t < 0.0) return 400.0;",
+      "  if (t < 0.5) { float k = 1.0 - t / 0.5; return 16.0 * k * k; }",
+      "  t -= 0.5;",
+      "  return 0.3 * exp(-7.0 * t) * sin(20.0 * t);",
+      "}",
+      ""
+    ].join("\n");
+    const DROP_PROJECT = [
+      "vec4 mvPosition = vec4( transformed, 1.0 );",
+      "#ifdef USE_INSTANCING",
+      "  mvPosition = instanceMatrix * mvPosition;",
+      "#endif",
+      "mvPosition = modelMatrix * mvPosition;",
+      "mvPosition.y += dropOffset();",
+      "mvPosition = viewMatrix * mvPosition;",
+      "gl_Position = projectionMatrix * mvPosition;"
+    ].join("\n");
+    const DROP_WORLDPOS = [
+      "#if defined( USE_ENVMAP ) || defined( DISTANCE ) || defined ( USE_SHADOWMAP )",
+      "  vec4 worldPosition = vec4( transformed, 1.0 );",
+      "  #ifdef USE_INSTANCING",
+      "    worldPosition = instanceMatrix * worldPosition;",
+      "  #endif",
+      "  worldPosition = modelMatrix * worldPosition;",
+      "  worldPosition.y += dropOffset();",
+      "#endif"
+    ].join("\n");
+    function patchDrop(mat) {
+      mat.onBeforeCompile = (sh) => {
+        sh.uniforms.uBuild = buildClock;
+        sh.vertexShader = DROP_GLSL + sh.vertexShader.replace("#include <project_vertex>", DROP_PROJECT).replace("#include <worldpos_vertex>", DROP_WORLDPOS);
+      };
+    }
+    const dropDepth = new T.MeshDepthMaterial({ depthPacking: T.RGBADepthPacking });
+    new Set([dropDepth, disco.material].concat(meshes.map((m) => m.material), waterPlanes.map((m) => m.material))).forEach(patchDrop);
+    meshes.forEach((m) => { m.customDepthMaterial = dropDepth; });
+    const BUILD_END = dropMax + 0.5 + 0.6;
+    let building = !reduceMotion, buildFrames = 0, buildLast = 0;
+
+    // ---------- night lights ----------
+    // Every point light exists from the start and is only brightened at night, so switching never recompiles shaders.
+    const nightLights = [];
+    function nightLight(x, y, z, color, power, dist) {
+      const l = new T.PointLight(color, 0, dist, 2);
+      l.position.set(x + OX, y, z + OZ);
+      l.userData.power = power;
+      scene.add(l);
+      nightLights.push(l);
+      return l;
+    }
+    [28.8, 34.2].forEach((x) => nightLight(x, 3.5, 30, 0xffc46b, 2.4, 8)); // pendants over the banquet table
+    nightLight(38.5, 4.3, 28.6, 0xffb35c, 1.2, 6.5); // Viking bar
+    const BED_WARM = new T.Color(0xffb070), BED_PINK = new T.Color(0xff3d8b);
+    const bedLights = [[15.5, 7.5], [29, 8.5], [40, 8.5], [57, 8.5]].map(([x, z]) => nightLight(x, 4.4, z, 0xffb070, 1.7, 6.5));
+    const discoLights = [0x2f7bff, 0xffd21a].map((c) => nightLight(DANCE_CENTER[0], 3.2, DANCE_CENTER[1], c, 2.4, 8.5));
+    let loveRooms = [];
+
+    // Mirror-ball dots: fixed directions off the ball, turned with it and landed on the ground plane.
+    const discoFx = new T.Group();
+    discoFx.visible = false;
+    scene.add(discoFx);
+    const BALL = [DANCE_CENTER[0], 4.85, DANCE_CENTER[1]], DOT_Y = 1.03;
+    const dotRnd = mulberry(40);
+    const dotDirs = [];
+    for (let i = 0; i < 180; i++) {
+      const el = 0.4 + dotRnd() * 1.05, az = dotRnd() * Math.PI * 2;
+      dotDirs.push([Math.cos(el) * Math.cos(az), -Math.sin(el), Math.cos(el) * Math.sin(az)]);
+    }
+    const dotGeo = new T.PlaneGeometry(1, 1);
+    dotGeo.rotateX(-Math.PI / 2);
+    const dots = new T.InstancedMesh(dotGeo, new T.MeshBasicMaterial({ transparent: true, opacity: 0.9, blending: T.AdditiveBlending, depthWrite: false }), dotDirs.length);
+    const DOT_COLORS = [new T.Color(0xffffff), new T.Color(0xfff2a0), new T.Color(0xa8ceff)];
+    dotDirs.forEach((d, i) => dots.setColorAt(i, DOT_COLORS[i % 3]));
+    dots.frustumCulled = false;
+    discoFx.add(dots);
+    // light beams: open cones with their tip at the ball
+    const beamGeo = new T.ConeGeometry(0.22, 1, 10, 1, true);
+    beamGeo.translate(0, -0.5, 0);
+    const beams = [0x2f7bff, 0xffd21a, 0xffffff, 0x2f7bff, 0xffd21a, 0xffffff, 0x2f7bff, 0xffd21a].map((c, i) => {
+      const el = 0.65 + (i % 3) * 0.2, az = (i / 8) * Math.PI * 2;
+      const m = new T.Mesh(beamGeo, new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.16, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }));
+      m.userData.dir = [Math.cos(el) * Math.cos(az), -Math.sin(el), Math.cos(el) * Math.sin(az)];
+      m.frustumCulled = false;
+      discoFx.add(m);
+      return m;
+    });
+    const dotM = new T.Matrix4(), dotQ = new T.Quaternion(), dotP = new T.Vector3(), dotS = new T.Vector3(), DOWN = new T.Vector3(0, -1, 0), beamDir = new T.Vector3();
+    function spin(d, a) { const c = Math.cos(a), s = Math.sin(a); return [d[0] * c + d[2] * s, d[1], -d[0] * s + d[2] * c]; }
+    function updateNightLights(dt, t) {
+      // someone getting busy in a bedroom turns its light pink, day or night
+      bedLights.forEach((l, i) => {
+        const love = loveRooms.indexOf(i) >= 0;
+        l.color.copy(love ? BED_PINK : BED_WARM);
+        l.intensity = love ? 2.4 + Math.sin(t * 5) * 0.7 : night ? l.userData.power : 0;
+      });
+      if (!night) return;
+      discoLights.forEach((l, i) => {
+        const a = t * (danceCrowd ? 1.9 : 1.1) + i * Math.PI;
+        l.position.set(BALL[0] + Math.cos(a) * 2.6 + OX, 3.2, BALL[2] + Math.sin(a) * 3.2 + OZ);
+        l.intensity = l.userData.power * (0.75 + 0.25 * Math.sin(t * 7 + i));
+      });
+      const turn = disco.rotation.y;
+      dotDirs.forEach((d0, i) => {
+        const d = spin(d0, turn), k = (DOT_Y - BALL[1]) / d[1];
+        dotP.set(BALL[0] + d[0] * k + OX, DOT_Y, BALL[2] + d[2] * k + OZ);
+        dotS.setScalar(0.1 + k * 0.022);
+        dotM.compose(dotP, dotQ.set(0, 0, 0, 1), dotS);
+        dots.setMatrixAt(i, dotM);
+      });
+      dots.instanceMatrix.needsUpdate = true;
+      beams.forEach((m) => {
+        const d = spin(m.userData.dir, turn * 0.6), k = (DOT_Y - BALL[1]) / d[1];
+        beamDir.set(d[0], d[1], d[2]);
+        m.position.set(BALL[0] + OX, BALL[1], BALL[2] + OZ);
+        m.quaternion.setFromUnitVectors(DOWN, beamDir);
+        m.scale.set(1 + k * 0.12, k, 1 + k * 0.12);
+      });
+    }
 
     // ---------- camera ----------
     const EL = 0.62;
@@ -1234,6 +1404,9 @@
       sun.color.set(on ? 0x9db2ff : 0xfff1d6);
       amb.intensity = on ? 0.14 : 0.18;
       baseMat.water.emissive.set(on ? 0x0b6d9f : 0x000000);
+      disco.material.emissive.set(on ? 0x39414f : 0x000000);
+      nightLights.forEach((l) => { l.intensity = on ? l.userData.power : 0; });
+      discoFx.visible = on;
       meshes.forEach((m) => {
         if (m.userData.kind === "glass") m.material.emissive.set(on ? 0x7a5520 : 0x000000);
       });
@@ -2021,7 +2194,8 @@
             });
             return best;
           },
-          onDance(n) { danceCrowd = n; }
+          onDance(n) { danceCrowd = n; },
+          onScenes(rooms) { loveRooms = rooms; }
         })
       : null;
     const actorList = [];
@@ -2413,6 +2587,13 @@
     function frame(now) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      // the build clock starts after the first frame (shader compiling) and never jumps more than 1/15 s per frame,
+      // so a slow phone sees the whole show rather than skipping to the end
+      if (building) {
+        buildClock.value = buildFrames++ ? Math.max(0, buildClock.value) + Math.min(1 / 15, (now - buildLast) / 1000) : -1;
+        buildLast = now;
+        if (buildClock.value > BUILD_END) finishBuild();
+      }
       updateParty(dt);
       const k = reduceMotion ? 1 : 1 - Math.exp(-dt * 8);
       view.az += (goal.az - view.az) * k;
@@ -2420,6 +2601,7 @@
       view.target.lerp(goal.target, k);
       applyCamera();
       updateCutaway(dt);
+      updateNightLights(dt, now / 1000);
       if (!reduceMotion) {
         waterPlanes.forEach((m, i) => {
           m.material.map.offset.x += dt * (0.03 + i * 0.01);
@@ -2441,6 +2623,7 @@
     function start(data) {
       data = data || {};
       if (typeof data.az === "number") {
+        finishBuild();
         goal.az = view.az = data.az;
         goal.fit = view.fit = clampFit(data.fit || HOME.fit);
         goal.target.set(data.tx || 0, 1, data.tz || 0);
@@ -2456,13 +2639,28 @@
       applyCamera();
       requestAnimationFrame(frame);
     }
-    enterBtn.hidden = false;
-    if (store.shared) {
-      syncGuests();
-      setInterval(syncGuests, 15000);
-      pollLive();
-      setInterval(pollLive, 2000);
+    // Once the villa has landed: show the way in and start fetching the other guests, who then drop in too.
+    let opened = false;
+    function openParty() {
+      if (opened) return;
+      opened = true;
+      enterBtn.hidden = false;
+      if (store.shared) {
+        syncGuests();
+        setInterval(syncGuests, 15000);
+        pollLive();
+        setInterval(pollLive, 2000);
+      }
     }
+    function finishBuild() {
+      building = false;
+      buildClock.value = 1e4;
+      openParty();
+    }
+    // tap, click or any key skips the build
+    canvas.addEventListener("pointerdown", () => { if (building) finishBuild(); });
+    window.addEventListener("keydown", () => { if (building) finishBuild(); });
+    if (!building) openParty();
     const hot = window.claude && window.claude.hot;
     if (hot && typeof hot.snapshot === "function") {
       hot.snapshot(() => ({ az: goal.az, fit: goal.fit, tx: goal.target.x, tz: goal.target.z, night, inside: seeInside, sel: selected ? selected.id : null }));
