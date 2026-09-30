@@ -2825,15 +2825,22 @@
     let heardMine = false;
     // one of their own lines from these categories, if they recorded any (and one is loaded); false otherwise, so
     // the phone's voice can say something instead
+    // Nobody repeats themselves: each guest says a given line at most once every 4 minutes, and leaves at least 10 s
+    // between any of their lines.
+    const saidAt = new Map();
     function voiceSay(a, cats, x, z, chance) {
       if (!cats || !VOICE || !snd || !snd.enabled || Math.random() > chance) return false;
       const v = voiceOf(a);
       if (!v) return false;
-      const ids = linesIn(v, typeof cats === "string" ? [cats] : cats);
+      const now = performance.now();
+      if (now - (saidAt.get(a.key) || -1e9) < 10000) return false;
+      const ids = linesIn(v, typeof cats === "string" ? [cats] : cats).filter((id) => now - (saidAt.get(a.key + "/" + id) || -1e9) > 240000);
       for (let n = ids.length; n > 0; n--) {
         const id = ids.splice((Math.random() * n) | 0, 1)[0], buf = clipBuffer(v.owner, id);
         if (!buf) continue;
         if (!snd.playClip(buf, x, z, { rate: v.rate })) return false;
+        saidAt.set(a.key, now);
+        saidAt.set(a.key + "/" + id, now);
         if (party) party.fx.icon(VOICE.byId.get(id).kind === "sing" ? "note" : "bubble", x, a.y + 2.7, z, { size: 0.3, vy: 0.8 });
         if (a === me && !heardMine) { // the first time: point out whose voice that was
           heardMine = true;

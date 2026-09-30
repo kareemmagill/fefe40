@@ -684,10 +684,13 @@
       if (!offline) setTimeout(() => { try { out.disconnect(); } catch (e) { /* ignore */ } }, (dur + 0.6) * 1000);
     }
 
+    const keySaid = {};
     function say(key, x, z) {
       if (!SS || !eng.enabled || !Object.prototype.hasOwnProperty.call(LINES, key)) return;
       const ms = nowMs();
       if (ms - lastSay < SAY_GAP) return;
+      if (ms - (keySaid[key] || -1e9) < 15000) return; // the same kind of line not again for a while
+      keySaid[key] = ms;
       if (ms - lastSay > 8000) queued = 0; // a line that never reported its end
       if (queued >= 2) return;
       const g = place(x, z);
