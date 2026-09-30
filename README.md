@@ -19,6 +19,10 @@ The villa builds itself as blocks drop from the sky (tap to skip). Then:
 It's an 18+ party. The outfit screen has a **Cheeky mode (18+)** switch, off by default: only guests who turn it on join the adults-only gags.
 The photo never leaves the phone: only the name, the 32 × 32 face, the outfit, the walk and (while online) the current position are shared.
 
+## Testing with a crowd
+
+Open **https://kareemmagill.github.io/fefe40/?npc** to add 20 made-up guests (Astrid, Björn, Linnea and friends) on that phone only. Nothing is saved or shared, so there is nothing to clean up: open the normal link again and they're gone. Their day and night loops are choreographed in 45-second rounds so the group scenes happen: the bathroom kiss, the car park brawl, pickleball doubles, karaoke, bedroom scenes, pool games, a conga line and more.
+
 ## Files
 
 - `index.html`: page layout and styles

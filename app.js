@@ -922,6 +922,7 @@
     // ---------- three.js scene ----------
     const OX = -36, OZ = -28;
     const renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.localClippingEnabled = true;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
@@ -1219,6 +1220,10 @@
     }
     const dropDepth = new T.MeshDepthMaterial({ depthPacking: T.RGBADepthPacking });
     new Set([dropDepth, disco.material].concat(meshes.map((m) => m.material), waterPlanes.map((m) => m.material))).forEach(patchDrop);
+    // Close-up slice: zoomed right in, the world above head height is clipped away (avatars and effects never are),
+    // so roofs, beams, umbrellas and tree tops stop hiding people. The plane always exists, it just sits high up.
+    const clipPlane = new T.Plane(new T.Vector3(0, -1, 0), 1000);
+    new Set([disco.material].concat(meshes.map((m) => m.material), waterPlanes.map((m) => m.material))).forEach((mat) => { mat.clippingPlanes = [clipPlane]; });
     meshes.forEach((m) => { m.customDepthMaterial = dropDepth; });
     const BUILD_END = dropMax + 0.5 + 0.6;
     let building = !reduceMotion, buildFrames = 0, buildLast = 0;
@@ -1264,7 +1269,7 @@
     beamGeo.translate(0, -0.5, 0);
     const beams = [0x2f7bff, 0xffd21a, 0xffffff, 0x2f7bff, 0xffd21a, 0xffffff, 0x2f7bff, 0xffd21a].map((c, i) => {
       const el = 0.65 + (i % 3) * 0.2, az = (i / 8) * Math.PI * 2;
-      const m = new T.Mesh(beamGeo, new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.16, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }));
+      const m = new T.Mesh(beamGeo, new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.16, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide, clippingPlanes: [clipPlane] }));
       m.userData.dir = [Math.cos(el) * Math.cos(az), -Math.sin(el), Math.cos(el) * Math.sin(az)];
       m.frustumCulled = false;
       discoFx.add(m);
@@ -1309,7 +1314,8 @@
     const HOME = { az: Math.PI / 4, fit: 64, x: 0, z: -1 };
     const view = { az: HOME.az, fit: HOME.fit, target: new T.Vector3(HOME.x, 1, HOME.z) };
     const goal = { az: HOME.az, fit: HOME.fit, target: new T.Vector3(HOME.x, 1, HOME.z) };
-    const clampFit = (f) => Math.max(8, Math.min(110, f));
+    // Zoom runs from the whole site down to about 2.5 m across, close enough to see faces side by side.
+    const clampFit = (f) => Math.max(2.5, Math.min(110, f));
     function clampTarget(v) {
       v.x = Math.max(-40, Math.min(40, v.x));
       v.z = Math.max(-32, Math.min(32, v.z));
@@ -1326,6 +1332,45 @@
       const d = 160, ce = Math.cos(EL);
       cam.position.set(view.target.x + Math.sin(view.az) * ce * d, view.target.y + Math.sin(EL) * d, view.target.z + Math.cos(view.az) * ce * d);
       cam.lookAt(view.target);
+    }
+    // The sun's shadow map only needs to cover what's on screen, so it tightens as you zoom in and close-ups get crisp
+    // shadows. Its size steps through a ladder and its centre snaps to whole shadow texels, so shadows don't shimmer.
+    const SUN_OFF = sun.position.clone();
+    const sunZ = SUN_OFF.clone().normalize(), sunX = new T.Vector3(0, 1, 0).cross(sunZ).normalize(), sunY = sunZ.clone().cross(sunX);
+    const SHADOW_LADDER = [7, 9, 12, 16, 21, 28, 37, 48, 62];
+    const shadowAt = new T.Vector3();
+    let shadowHalf = 62;
+    function updateShadowView() {
+      const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1, aspect = w / h;
+      const vh = aspect < 1 ? view.fit / aspect : view.fit, vw = vh * aspect;
+      const need = vw / 2 + vh * 0.86 + 5;
+      const half = SHADOW_LADDER.find((s) => s >= need) || 62;
+      if (half !== shadowHalf) {
+        shadowHalf = half;
+        const c = sun.shadow.camera;
+        c.left = c.bottom = -half;
+        c.right = c.top = half;
+        c.updateProjectionMatrix();
+      }
+      if (half >= 62) shadowAt.set(0, 0, 0);
+      else {
+        const texel = (2 * half) / sun.shadow.mapSize.x, t = view.target;
+        const a = t.dot(sunX), b = t.dot(sunY);
+        shadowAt.copy(t).addScaledVector(sunX, Math.round(a / texel) * texel - a).addScaledVector(sunY, Math.round(b / texel) * texel - b);
+      }
+      sun.target.position.copy(shadowAt);
+      sun.position.copy(shadowAt).add(SUN_OFF);
+    }
+    // The slice starts below a view about 8 m across and drops to 2.4 m above the floor you're looking at by about 4 m.
+    let sliceFloor = 1;
+    function updateSlice(dt) {
+      if (view.fit >= 8) { clipPlane.constant = 1000; return; }
+      const cx = Math.floor(view.target.x - OX), cz = Math.floor(view.target.z - OZ);
+      let floor = -Infinity;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const st = heightAt(cx + dx, cz + dz); if (st !== NONE) floor = Math.max(floor, (st + 1) / 2); }
+      if (floor === -Infinity) floor = sliceFloor;
+      sliceFloor += (floor - sliceFloor) * Math.min(1, dt * 6);
+      clipPlane.constant = sliceFloor + 2.4 + Math.max(0, view.fit - 4) * 3;
     }
     function resize() {
       renderer.setSize(app.clientWidth, app.clientHeight, false);
@@ -1478,7 +1523,7 @@
         const [u, v, w] = cell;
         if (!inGrid(u, v, w)) return null;
         const m = vMeta[vi(u, v, w)];
-        if (m) {
+        if (m && v * 0.5 < clipPlane.constant) {
           const group = GROUPS[(m >> 3) & 15];
           const b = isHideable(group) ? buildings.get(group.split(":")[0]) : null;
           if (!b || b.fade < 0.5) return { u, v, w, group };
@@ -1863,7 +1908,7 @@
       tickRecording(dt, step.moving);
       poseActor(me, dt, step.moving, step.heading);
       if (follow && (step.moving || me.drop > 0)) {
-        goal.target.set(me.x + OX, 1, me.z + OZ);
+        goal.target.set(me.x + OX, me.y + 0.9, me.z + OZ);
         clampTarget(goal.target);
       }
       heartbeat(performance.now());
@@ -2043,7 +2088,10 @@
       g.dur = nodes[nodes.length - 1][0] / 10 + 4;
       g.i = 0;
       const a = g.actor;
-      if (g.t < 0) { // new guest: join somewhere along their loop
+      if (g.npc) { // test crowd: everyone shares one clock so the group scenes line up
+        g.t = (Date.now() / 1000) % g.dur;
+        if (swapped && changed) { a.drop = 12; a.dropV = 0; }
+      } else if (g.t < 0) { // new guest: join somewhere along their loop
         g.t = Math.random() * g.dur;
         a.x = nodes[0][1] + 0.5;
         a.z = nodes[0][2] + 0.5;
@@ -2177,7 +2225,7 @@
         b.addEventListener("click", () => {
           follow = !!r.me;
           goal.fit = Math.min(goal.fit, 20);
-          goal.target.set(r.actor.x + OX, 1, r.actor.z + OZ);
+          goal.target.set(r.actor.x + OX, r.actor.y + 0.9, r.actor.z + OZ);
           clampTarget(goal.target);
           guestList.hidden = true;
           guestsBtn.setAttribute("aria-expanded", "false");
@@ -2199,7 +2247,7 @@
         const at = (id) => +idx[id] || 0;
         const ids = Object.keys(idx).filter((id) => ID_RE.test(id) && id !== myId).sort((a, b) => at(b) - at(a)).slice(0, MAX_GHOSTS);
         const keep = new Set(ids);
-        ghosts.forEach((g, id) => { if (!keep.has(id)) { removeActor(g.actor); ghosts.delete(id); } });
+        ghosts.forEach((g, id) => { if (!keep.has(id) && !g.npc) { removeActor(g.actor); ghosts.delete(id); } });
         const stale = ids.filter((id) => !ghosts.has(id) || ghosts.get(id).at !== at(id));
         for (let i = 0; i < stale.length; i += 6) {
           await Promise.all(stale.slice(i, i + 6).map(async (id) => {
@@ -2212,6 +2260,71 @@
       } catch (e) { /* offline: keep who we have */ }
       syncing = false;
       updateGuestCount();
+    }
+
+    // ---------- test crowd ----------
+    // Opening the site with ?npc adds 20 made-up guests on this phone only: nothing is saved or shared, so there is
+    // nothing to clean up. Their loops are choreographed in 45 s rounds (three by day, two by night) so the group
+    // scenes actually happen: kisses, brawls, doubles, karaoke, bedroom scenes, pool games and so on.
+    const NPCS = [
+      ["Astrid", "f", 1], ["Björn", "m", 1], ["Linnea", "f", 1], ["Oskar", "m", 0], ["Freja", "f", 0],
+      ["Nils", "m", 1], ["Saga", "f", 1], ["Erik", "m", 1], ["Maja", "f", 0], ["Viktor", "m", 1],
+      ["Elsa", "f", 1], ["Gustav", "m", 0], ["Ebba", "f", 0], ["Hugo", "m", 1], ["Alva", "f", 1],
+      ["Lukas", "m", 0], ["Tilda", "f", 0], ["Anton", "m", 1], ["Wilma", "f", 1], ["Axel", "m", 0]
+    ];
+    const ROUND = 45;
+    // each round: [cell x, cell z, ...names standing there]
+    const DAY_ROUNDS = [
+      [[16, 12, "Astrid", "Linnea"], [8, 47, "Oskar", "Gustav"], [9, 47, "Lukas"], [9, 48, "Tilda"], [55, 45, "Freja"], [58, 45, "Axel"], [56, 50, "Maja"],
+        [45, 28, "Saga", "Erik"], [47, 30, "Elsa", "Björn"], [38, 30, "Viktor"], [39, 30, "Hugo"], [16, 7, "Nils", "Alva"], [15, 8, "Anton"], [60, 20, "Wilma"], [61, 21, "Ebba"]],
+      [[27, 27, "Astrid", "Oskar"], [29, 27, "Freja", "Björn"], [22, 29, "Linnea"], [23, 29, "Gustav"], [24, 28, "Maja"], [37, 33, "Saga"], [36, 34, "Lukas", "Tilda"],
+        [27, 33, "Erik"], [31, 33, "Axel"], [55, 29, "Viktor"], [56, 29, "Elsa"], [16, 12, "Hugo", "Anton"], [28, 8, "Nils"], [30, 8, "Wilma"], [39, 48, "Alva"], [41, 48, "Ebba"]],
+      [[24, 40, "Astrid"], [25, 39, "Linnea"], [26, 40, "Saga"], [52, 44, "Oskar"], [62, 44, "Gustav"], [52, 47, "Axel"], [62, 47, "Lukas"], [55, 51, "Freja", "Maja"],
+        [6, 12, "Tilda"], [7, 12, "Ebba"], [7, 17, "Björn"], [8, 17, "Erik"], [22, 34, "Viktor"], [23, 34, "Elsa", "Alva"], [70, 30, "Hugo"], [38, 30, "Nils"], [39, 30, "Anton", "Wilma"]]
+    ];
+    const NIGHT_ROUNDS = [
+      [[45, 28, "Astrid", "Björn"], [47, 30, "Saga", "Erik"], [48, 31, "Elsa", "Viktor"], [60, 20, "Linnea", "Nils"], [61, 21, "Alva"], [40, 8, "Hugo", "Wilma"], [39, 8, "Anton"],
+        [38, 30, "Oskar", "Gustav"], [39, 30, "Lukas", "Axel"], [37, 33, "Freja"], [36, 34, "Maja", "Tilda"], [40, 34, "Ebba"]],
+      [[57, 9, "Astrid", "Björn"], [16, 12, "Saga", "Elsa"], [8, 47, "Erik", "Viktor"], [9, 47, "Nils"], [55, 29, "Linnea"], [35, 21, "Alva"], [27, 27, "Oskar", "Gustav"],
+        [29, 27, "Lukas", "Axel"], [22, 29, "Freja"], [45, 28, "Maja", "Tilda"], [47, 30, "Ebba", "Wilma"], [46, 31, "Anton"], [70, 30, "Hugo"]]
+    ];
+    function npcTrack(rounds, name) {
+      const stops = rounds.map((round) => {
+        const spot = round.find((e) => e.indexOf(name, 2) >= 2) || [30, 50];
+        const c = inMap(spot[0], spot[1]) && reach[cellIdx(spot[0], spot[1])] ? [spot[0], spot[1]] : nearestReachable(spot[0], spot[1]) || SPAWN[0];
+        return c;
+      });
+      const nodes = [[0, stops[0][0], stops[0][1]]];
+      let pos = stops[0];
+      for (let k = 1; k < stops.length; k++) {
+        let t = k * ROUND;
+        nodes.push([Math.round(t * 10), pos[0], pos[1]]);
+        const path = findPath(pos[0], pos[1], stops[k][0], stops[k][1]) || [pos, stops[k]];
+        for (let i = 1; i < path.length; i++) {
+          t += Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]) / SPEED;
+          nodes.push([Math.round(t * 10), path[i][0], path[i][1]]);
+        }
+        pos = stops[k];
+      }
+      nodes.push([Math.round(stops.length * ROUND * 10), pos[0], pos[1]]);
+      return nodes.map((n) => n.join(",")).join(";");
+    }
+    function addTestCrowd() {
+      NPCS.forEach(([name, body, cheeky], i) => {
+        const id = "npc" + String(i).padStart(4, "0");
+        const record = { name, body, outfit: (i * 7) % FefeAvatar.OUTFITS.length, skin: ["#E8C4A0", "#D9A57E", "#B97A56", "#8D5A3B"][i % 4], hair: ["#E3C16F", "#4A3020", "#2B1B12", "#B5651D", "#1A1A1A"][i % 5], face: "", cheeky, track: npcTrack(DAY_ROUNDS, name), trackN: npcTrack(NIGHT_ROUNDS, name), at: 1 };
+        const clean = sanitize(record);
+        if (!clean) return;
+        upsertGhost(id, clean, 1);
+        const g = ghosts.get(id);
+        g.npc = true;
+        setGhostTrack(g, false);
+      });
+      updateGuestCount();
+      hint.textContent = "Test crowd: 20 made-up guests, on this phone only";
+      hint.classList.remove("gone");
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(dismissHint, 6000);
     }
 
     const tagV = new T.Vector3();
@@ -2571,7 +2684,7 @@
       clearSelection();
       follow = true;
       goal.fit = 22;
-      goal.target.set(me.x + OX, 1, me.z + OZ);
+      goal.target.set(me.x + OX, me.y + 0.9, me.z + OZ);
       clampTarget(goal.target);
       hint.textContent = coarse ? "Tap anywhere to walk there" : "Click anywhere to walk there";
       hint.classList.remove("gone");
@@ -2584,13 +2697,13 @@
       if (!me) return;
       follow = true;
       goal.fit = Math.min(goal.fit, 22);
-      goal.target.set(me.x + OX, 1, me.z + OZ);
+      goal.target.set(me.x + OX, me.y + 0.9, me.z + OZ);
       clampTarget(goal.target);
     }
     findBtn.addEventListener("click", findMe);
     window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, dayNodes: recs && recs.day ? recs.day.nodes.length : 0, nightNodes: recs && recs.night ? recs.night.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
-      look(x, z, fit) { follow = false; goal.target.set(x + OX, 1, z + OZ); goal.fit = fit || 14; } };
+      look(x, z, fit, y) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; } };
 
     // ---------- per-frame updates ----------
     function updateCutaway(dt) {
@@ -2648,6 +2761,8 @@
       view.fit = Math.exp(Math.log(view.fit) + (Math.log(goal.fit) - Math.log(view.fit)) * k);
       view.target.lerp(goal.target, k);
       applyCamera();
+      updateShadowView();
+      updateSlice(dt);
       updateCutaway(dt);
       updateNightLights(dt, now / 1000);
       if (!reduceMotion) {
@@ -2693,6 +2808,7 @@
       if (opened) return;
       opened = true;
       enterBtn.hidden = false;
+      if (/[?&]npc\b/.test(location.search)) addTestCrowd();
       if (store.shared) {
         syncGuests();
         setInterval(syncGuests, 15000);
