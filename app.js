@@ -1888,8 +1888,10 @@
         rec.idle = 0;
         recNode(x, z);
         scheduleSave(800);
+        lastBeat = 0; // tell everyone straight away which time of day we're live in
       }
       ghosts.forEach((g) => setGhostTrack(g, true));
+      updateGuestCount();
     }
     function tickRecording(dt, moving) {
       if (!rec) return;
@@ -2057,7 +2059,7 @@
     // dropping back in at their start each time round.
     function updateGhost(g, id, dt) {
       const a = g.actor, now = liveMap[id];
-      if (isLive(id)) {
+      if (liveHere(id)) {
         const cell = now.x + "," + now.z;
         if (!g.live) {
           g.live = true;
@@ -2118,13 +2120,15 @@
     const LIVE_MS = 20000;
     let liveMap = {}, lastBeat = 0, lastBeatCell = "";
     const isLive = (id) => !!(liveMap[id] && Date.now() - liveMap[id].t < LIVE_MS);
+    // Live is per time of day: someone playing at night is live for night viewers, while day viewers see their day loop.
+    const liveHere = (id) => isLive(id) && liveMap[id].n === (night ? 1 : 0);
     function heartbeat(now) {
       if (!me || !store.shared || me.drop > 0 || document.visibilityState === "hidden") return;
       const x = Math.floor(me.x), z = Math.floor(me.z), cell = x + "," + z;
       if (now - lastBeat < 1500 || (cell === lastBeatCell && now - lastBeat < 8000)) return;
       lastBeat = now;
       lastBeatCell = cell;
-      Promise.resolve(store.beat(myId, { t: Date.now(), x, z })).catch(() => {});
+      Promise.resolve(store.beat(myId, { t: Date.now(), x, z, n: night ? 1 : 0 })).catch(() => {});
     }
     let polling = false;
     async function pollLive() {
@@ -2137,10 +2141,10 @@
           const l = data[id];
           if (!ID_RE.test(id) || !l || typeof l !== "object") return;
           const t = +l.t, x = Math.floor(+l.x), z = Math.floor(+l.z);
-          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z };
+          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0 };
         });
         liveMap = clean;
-        if (Object.keys(clean).some((id) => id !== myId && isLive(id) && !ghosts.has(id))) syncGuests();
+        if (Object.keys(clean).some((id) => id !== myId && liveHere(id) && !ghosts.has(id))) syncGuests();
       } catch (e) { /* keep the last known positions */ }
       polling = false;
       updateGuestCount();
@@ -2149,7 +2153,7 @@
     function guestRows() {
       const rows = [];
       if (me) rows.push({ name: myName, live: true, actor: me, me: true });
-      ghosts.forEach((g, id) => rows.push({ name: g.actor.name, live: isLive(id), actor: g.actor }));
+      ghosts.forEach((g, id) => rows.push({ name: g.actor.name, live: liveHere(id), actor: g.actor }));
       return rows.sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0) || (b.live ? 1 : 0) - (a.live ? 1 : 0) || a.name.localeCompare(b.name));
     }
     function updateGuestCount() {

@@ -19,7 +19,7 @@
         ".read": true,
         "$id": {
           ".write": true,
-          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['t', 'x', 'z']) && newData.child('t').isNumber() && newData.child('x').isNumber() && newData.child('z').isNumber()"
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['t', 'x', 'z']) && newData.child('t').isNumber() && newData.child('x').isNumber() && newData.child('z').isNumber() && (!newData.child('n').exists() || newData.child('n').isNumber())"
         }
       }
     }
