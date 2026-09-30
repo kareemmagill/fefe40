@@ -261,6 +261,8 @@
 
   function planDance(ms, env) {
     const t = env.t, n = ms.length;
+    // nobody dances until someone starts the DJ decks: they hang about and chat
+    if (!env.music) return ms.map(() => ({ act: n > 1 ? "chat" : "idle" }));
     env.danceCount = n;
     if (n === 1) {
       const a = ms[0];
@@ -1441,6 +1443,7 @@
       heightAt: ctx.heightAt,
       nearestWater: ctx.nearestWater,
       get night() { return ctx.isNight(); },
+      get music() { return ctx.isMusic ? ctx.isMusic() : true; },
       get lastDrop() { return lastDrop; },
       drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 60)); }, // wears off a level a minute
       scene(room, count) { scenes.push({ room, count }); },

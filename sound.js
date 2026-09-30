@@ -76,6 +76,7 @@
     let lastSay = -1e9, svVoice = null, enVoice = null, voicesSeen = 0, queued = 0, speechUnlocked = false;
     let clips = [], lastClip = -1e9;
     const spot = { x: FLOOR_X, z: FLOOR_Z }; // where the music comes from
+    let club = false;
 
     // ---------- building blocks ----------
     const hz = (f) => clamp(f * pm, 10, nyq);
@@ -466,7 +467,7 @@
     }
     function schedule(s, t) {
       const b = s & 15, ch = CH[(s >> 4) & 3], mel = MEL[s], e = energy;
-      if (b === 0) barNight = night; // day/night switches on the next bar
+      if (b === 0) barNight = night || club; // day/night switches on the next bar; the DJ decks are always club
       const sd = stepDur();
       if (barNight) {
         if ((b & 3) === 0) kick(t, 0.75);
@@ -688,7 +689,8 @@
       return true;
     }
     // The original loop (not anyone's song) as a backing track, e.g. for the karaoke singalong at (x, z).
-    function setMusic(on, x, z) {
+    function setMusic(on, x, z, asClub) {
+      club = !!asClub;
       if (typeof x === "number" && isFinite(x)) spot.x = x;
       if (typeof z === "number" && isFinite(z)) spot.z = z;
       if (!!on === musicOn) return;

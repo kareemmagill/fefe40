@@ -927,7 +927,7 @@
     // rect is [x0, z0, x1, z1] in the design grid; at is the label anchor [x, y, z]; b is the building whose roof lifts.
     const ZONES = [
       { id: "pool", name: "Pool", level: 1, rect: [51, 15, 69, 33], at: [60, 3, 23], fit: 30, time: "From 13:00", text: "Socials, pool and garden party. Bring your swimsuit and towel; towels are also available at the resort. The corner nearest the loungers is shallow for kids, and the pool is not heated." },
-      { id: "dance", name: "Dance floor", level: 1, rect: [43, 24, 50, 34], at: [47, 8.5, 29], fit: 20, time: "All day", text: "Blue and yellow light-up floor with a DJ booth and a disco ball, right between the pavilion and the pool. Karaoke is in the pavilion lounge." },
+      { id: "dance", name: "Dance floor", level: 1, rect: [43, 24, 50, 34], at: [47, 8.5, 29], fit: 20, time: "All day", text: "Blue and yellow light-up floor with a DJ booth and a disco ball, right between the pavilion and the pool. Tap the DJ decks to start the music. Karaoke is in the pavilion lounge." },
       { id: "kitchen", name: "Kitchen", level: 2, b: "pavilion", rect: [20, 25, 25, 30], at: [22.5, 4.5, 27.5], fit: 14, time: "13:00", text: "Whine and Dine: a full lunch buffet drops at 13:00, served from the counter next to the kitchen hatch." },
       { id: "bedroom", name: "Bedroom", level: 2, b: "mainVilla", rect: [13, 5, 18, 9], at: [15.5, 4.5, 7], fit: 14, text: "Main Villa bedroom with a queen bed and a bunk bed, sleeping 5. The loft upstairs sleeps 4 more." },
       { id: "bathroom", name: "Bathroom", level: 2, b: "mainVilla", rect: [13, 11, 18, 14], at: [15.5, 4.5, 12.5], fit: 14, text: "Main Villa bathroom with a walk-in shower. Guest restrooms are also next to the pavilion kitchen." },
@@ -1576,6 +1576,7 @@
       }
       pendingCar = null;
       if (tapTV(cx, cy)) return; // the karaoke TV while its video plays
+      if (tapDecks(cx, cy)) return; // the DJ decks: music on or off
       const hit = pickVoxel(cx, cy);
       if (me) {
         if (!hit) return;
@@ -2673,6 +2674,7 @@
       ? FefeActions.create({
           T, scene, OX, OZ, heightAt, trees: TREES, candy: CANDY_RING,
           isNight: () => night,
+          isMusic: () => dj.on,
           // the middle of the nearest deep-water cell and its floor height, for pushing someone in
           nearestWater(x, z) {
             let best = null, bd = 36;
@@ -2825,8 +2827,8 @@
         if (sung.length) voiced.push({ a, v, sung });
       });
       const near = Math.hypot(view.target.x - OX - LOUNGE[0], view.target.z - OZ - LOUNGE[1]) < 24;
-      const music = voiced.length > 0 && near && !(jb && jb.playing);
-      if (music !== choir.on) { choir.on = music; snd.setMusic(music, LOUNGE[0], LOUNGE[1]); choir.next = 0; }
+      const music = voiced.length > 0 && near && !(jb && jb.playing) && !dj.on; // the DJ's music wins
+      if (music !== choir.on) { choir.on = music; if (!dj.on) snd.setMusic(music, LOUNGE[0], LOUNGE[1]); choir.next = 0; }
       if (!voiced.length || !near) return;
       const t = snd.now();
       if (t < choir.next) return;
@@ -3083,7 +3085,7 @@
       if (!snd) return;
       if (!snd.enabled && lsGet("fefe40.sound") !== "0") setSound(true);
       if (!snd.enabled) return;
-      if (id === "dance" || id === "lounge") startJukebox();
+      if (id === "lounge") startJukebox();
       const keys = ZONE_SOUNDS[id] || [], cx = view.target.x - OX, cz = view.target.z - OZ;
       clearTimeout(zoneLineTimer);
       if (keys[0]) snd.say(keys[0], cx, cz);
@@ -3104,7 +3106,7 @@
     const jbList = () => (night ? SHM_VIDEOS : ABBA_VIDEOS);
     // the TV screen with its thin pink rim, in metres (the painted screen is 2.56 x 1.26), and the player's size in pixels
     const TV = { x: 39, y: 3.35, z: 32.365, w: 2.6, h: 1.3, pw: 406, ph: 200 };
-    const jbPlayBtn = document.getElementById("jb-play"), tvLayer = document.getElementById("tv-layer"), tvVideo = document.getElementById("tv-video");
+    const tvLayer = document.getElementById("tv-layer"), tvVideo = document.getElementById("tv-video");
     const jb = { player: null, ready: false, on: false, playing: false, blocked: false, next: 0, loading: false, night: false, asked: 0, stuck: 0, vol: -1 };
     const tv = { view: false, shown: false, m: "", clip: "" };
     // the hole: transparent black written straight into the canvas (no blending), so the player underneath shows
@@ -3126,7 +3128,6 @@
     }
     function startJukebox() {
       jb.on = true;
-      jbPlayBtn.hidden = true;
       if (jb.player) return; // updateTV plays it whenever the TV is in view
       loadYouTube(() => {
         if (jb.player) return;
@@ -3150,18 +3151,35 @@
       jb.on = false;
       if (jb.ready) jb.player.pauseVideo();
     }
-    jbPlayBtn.addEventListener("click", () => {
-      if (snd && !snd.enabled) setSound(true); // asking for music switches sound on too
-      startJukebox();
-    });
+    // The DJ decks on the dance floor: a tap starts the club music (our own house loop, nobody else's song) and gets
+    // the dance floor dancing; another tap stops it and everyone goes back to chatting.
+    const dj = { on: false };
+    // the booth with its speakers, as a box to hit (it's made of props, which voxel picking doesn't see)
+    const deckBox = new T.Box3(new T.Vector3(44 + OX, 1, 24.9 + OZ), new T.Vector3(50 + OX, 2.6, 26.1 + OZ)), deckHit = new T.Vector3();
+    function tapDecks(cx, cy) {
+      setRay(cx, cy);
+      if (!raycaster.ray.intersectBox(deckBox, deckHit)) return false;
+      if (snd && !snd.enabled) setSound(true);
+      dj.on = !dj.on;
+      if (snd) snd.setMusic(dj.on, DANCE_CENTER[0], DANCE_CENTER[1], true);
+      if (party) party.fx.icon(dj.on ? "note" : "bang", 47, 3, 25.5, { size: 0.5, vy: 1 });
+      hint.textContent = dj.on ? "The DJ's on! Everyone on the dance floor is dancing." : "Music off. Tap the decks to start it again.";
+      hint.classList.remove("gone");
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(dismissHint, 4000);
+      clearSelection();
+      return true;
+    }
     // a page in the background hides the video as well
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && jb.ready) jb.player.pauseVideo(); });
     // Tapping the TV while its video shows skips to the next song; a joined guest who isn't in the lounge walks over.
     function tapTV(cx, cy) {
-      if (!tv.shown) return false;
+      if (!tv.view) return false;
       setRay(cx, cy);
       if (!raycaster.intersectObject(karaoke.mesh).length) return false;
-      if (jb.playing) jb.player.nextVideo();
+      if (snd && !snd.enabled) setSound(true);
+      if (!jb.on || !jb.ready) startJukebox(); // the first tap on the TV starts the music
+      else if (jb.playing) jb.player.nextVideo();
       else jb.player.playVideo();
       const lounge = byId.lounge, r = lounge.rect;
       if (me && !(me.x >= r[0] && me.x < r[2] + 1 && me.z >= r[1] && me.z < r[3] + 1)) {
@@ -3221,8 +3239,6 @@
     function updateJukebox(t) {
       if (t < jb.next) return;
       jb.next = t + 0.25;
-      jbPlayBtn.hidden = jb.on || !tv.view;
-      jbPlayBtn.textContent = night ? "\u25B6 Swedish House Mafia" : "\u25B6 Play ABBA";
       if (!jb.ready) return;
       if (!tv.shown) { // out of sight: YouTube mustn't play hidden
         if (jb.playing || jb.player.getPlayerState() === 3) jb.player.pauseVideo();
@@ -4209,6 +4225,9 @@
     findBtn.addEventListener("click", findMe);
     window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, dayNodes: recs && recs.day ? recs.day.nodes.length : 0, nightNodes: recs && recs.night ? recs.night.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live, g.car ? (g.car.clone ? "copy" : "car") + g.car.idx : ""]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
+      pick: (x, y) => { const h = pickVoxel(x, y); return h && [h.u / 2, h.v / 2, h.w / 2, h.group]; },
+      dj: () => dj.on,
+      screenOf: (x, y, z) => { const v = new T.Vector3(x + OX, y, z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
       speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
       cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car, !!c.fogged, +c.g.rotation.z.toFixed(3), +c.g.position.y.toFixed(3)]),
@@ -4285,7 +4304,7 @@
       updateTV(now / 1000);
       if (snd && snd.enabled) {
         snd.setListener(view.target.x - OX, view.target.z - OZ, view.fit);
-        snd.setMusicLevel(choir.on ? 0.45 : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
+        snd.setMusicLevel(choir.on ? 0.45 : dj.on ? Math.max(0.65, Math.min(1, danceCrowd / 6)) : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
         snd.update(dt);
       }
       updateFeed(now / 1000);
