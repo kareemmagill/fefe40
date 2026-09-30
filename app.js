@@ -1308,7 +1308,10 @@
         l.color.copy(love ? BED_PINK : BED_WARM);
         l.intensity = love ? 2.4 + Math.sin(t * 5) * 0.7 : night ? l.userData.power : 0;
       });
+      // the disco's beams, spots and coloured lights only come on once everything has landed
+      discoFx.visible = night && !building;
       if (!night) return;
+      if (building) { discoLights.forEach((l) => { l.intensity = 0; }); return; }
       discoLights.forEach((l, i) => {
         const a = t * (danceCrowd ? 1.9 : 1.1) + i * Math.PI;
         l.position.set(BALL[0] + Math.cos(a) * 2.6 + OX, 3.2, BALL[2] + Math.sin(a) * 3.2 + OZ);
