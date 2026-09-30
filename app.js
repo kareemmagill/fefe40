@@ -2482,7 +2482,37 @@
       if (me) actorList.push(me);
       ghosts.forEach((g) => actorList.push(g.actor));
       party.update(dt, actorList, Date.now() - PARTY_EPOCH);
+      separate(dt);
       actorList.forEach((a) => faceCamera(a, dt));
+    }
+    // Nobody stands inside anybody else: bodies closer than 0.62 m are eased apart (on screen only, so walking and
+    // recording are untouched), unless they're in an act that's meant to be that close.
+    const SEP = 0.62;
+    function separate(dt) {
+      const n = actorList.length;
+      for (let i = 0; i < n; i++) { const a = actorList[i]; a.sepWx = 0; a.sepWz = 0; }
+      for (let i = 0; i < n; i++) {
+        const a = actorList[i], ra = a.av.root;
+        if (!ra.visible || a.drop > 0 || party.close(a)) continue;
+        for (let j = i + 1; j < n; j++) {
+          const b = actorList[j], rb = b.av.root;
+          if (!rb.visible || b.drop > 0 || party.close(b) || Math.abs(ra.position.y - rb.position.y) > 1.2) continue;
+          let dx = rb.position.x - ra.position.x, dz = rb.position.z - ra.position.z, d = Math.hypot(dx, dz);
+          if (d >= SEP) continue;
+          const push = (SEP - d) / 2;
+          if (d < 1e-3) { const k = ((i * 7 + j * 13) % 8) * (Math.PI / 4); dx = Math.cos(k); dz = Math.sin(k); } else { dx /= d; dz /= d; }
+          a.sepWx -= dx * push; a.sepWz -= dz * push;
+          b.sepWx += dx * push; b.sepWz += dz * push;
+        }
+      }
+      const k = Math.min(1, dt * 6);
+      for (let i = 0; i < n; i++) {
+        const a = actorList[i];
+        a.sepX = (a.sepX || 0) + (a.sepWx - (a.sepX || 0)) * k;
+        a.sepZ = (a.sepZ || 0) + (a.sepWz - (a.sepZ || 0)) * k;
+        a.av.root.position.x += a.sepX;
+        a.av.root.position.z += a.sepZ;
+      }
     }
     // Heads turn towards the viewer (up to 90°) and tip up a little, so faces show from most angles. Not when we're
     // looking at someone's back, when they're lying or tumbling, or when their act aims the head itself.
@@ -2863,6 +2893,7 @@
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
       trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
       speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
+      roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; } };
 
     // ---------- per-frame updates ----------

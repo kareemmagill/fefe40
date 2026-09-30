@@ -114,13 +114,18 @@
     const parts = [];
     const sticky = new Map();
     const litMats = {};
-    const litMat = (color) => litMats[color] || (litMats[color] = new T.MeshLambertMaterial({ color }));
+    const litMat = (color, opacity) => {
+      const k = color + (opacity || 1);
+      return litMats[k] || (litMats[k] = new T.MeshLambertMaterial({ color, transparent: !!opacity && opacity < 1, opacity: opacity || 1 }));
+    };
     const MAX = 500;
     function add(obj, x, y, z, o) {
       if (parts.length >= MAX) { const old = parts.shift(); scene.remove(old.obj); }
       obj.position.set(x + OX, y, z + OZ);
       scene.add(obj);
-      parts.push(Object.assign({ obj, vx: 0, vy: 0, vz: 0, g: 0, life: 1, max: 1, size: 0.4, spin: 0 }, o));
+      const p = Object.assign({ obj, vx: 0, vy: 0, vz: 0, g: 0, life: 1, max: 1, size: 0.4, spin: 0, delay: 0 }, o);
+      if (p.delay > 0) obj.visible = false; // waits its turn (the second ball of a billiards shot)
+      parts.push(p);
     }
     return {
       // floating pixel icon; overlay icons stay visible through roofs (used for the bedroom)
@@ -139,10 +144,10 @@
         add(m, x, y, z, Object.assign({ life: 0.8, max: 0.8, size, g: 9 }, o));
       },
       // a ball or thrown thing flying from a to b in `dur` seconds, peaking `h` metres up
-      arc(color, a, b, dur, h, size) {
+      arc(color, a, b, dur, h, size, delay) {
         const m = new T.Mesh(boxGeo, boxMat(color));
         m.scale.setScalar(size || 0.16);
-        add(m, a[0], a[1], a[2], { life: dur, max: dur, size: size || 0.16, path: { a, b, h }, g: 0 });
+        add(m, a[0], a[1], a[2], { life: dur, max: dur, size: size || 0.16, path: { a, b, h }, g: 0, delay: delay || 0 });
       },
       // a sign or icon that stays while it keeps being refreshed every frame
       keep(key, type, x, y, z, size) {
@@ -158,11 +163,11 @@
         s.seen = 0;
       },
       // a shaded box (a duvet) that stays while it keeps being refreshed every frame
-      keepBox(key, color, x, y, z, sx, sy, sz) {
+      keepBox(key, color, x, y, z, sx, sy, sz, opacity) {
         let s = sticky.get(key);
         if (!s) {
-          s = { obj: new T.Mesh(boxGeo, litMat(color)), seen: 0 };
-          s.obj.castShadow = true;
+          s = { obj: new T.Mesh(boxGeo, litMat(color, opacity)), seen: 0 };
+          s.obj.castShadow = !opacity;
           scene.add(s.obj);
           sticky.set(key, s);
         }
@@ -173,6 +178,7 @@
       update(dt) {
         for (let i = parts.length - 1; i >= 0; i--) {
           const p = parts[i];
+          if (p.delay > 0) { p.delay -= dt; if (p.delay > 0) continue; p.obj.visible = true; }
           p.life -= dt;
           if (p.life <= 0) { scene.remove(p.obj); parts.splice(i, 1); continue; }
           if (p.path) {
@@ -206,6 +212,11 @@
     { rect: [27, 5, 31, 12], beds: [[28.5, 6.7, 0.76], [29.5, 6.7, 0.76]], door: [29.5, 13.9], win: [29.0, 4.0, 0, -1] },
     { rect: [38, 5, 42, 12], beds: [[40.5, 6.7, 0.76], [41.5, 6.7, 0.76]], door: [40.5, 13.9], win: [40.0, 4.0, 0, -1] },
     { rect: [54, 6, 60, 11], beds: [[56.5, 7.6, 0.76], [57.5, 7.6, 0.76], [58.5, 7.6, 0.76]], door: [59.5, 12.9], win: [56.5, 5.0, 0, -1] }
+  ];
+  // showers: the stall, the shower head, and where clothes get dropped outside the glass
+  const SHOWERS = [
+    { rect: [13, 11, 14, 12], head: [13.5, 11.45], pile: [15.5, 12.3] },
+    { rect: [33, 5, 34, 6], head: [33.5, 5.45], pile: [35.5, 6.3] }
   ];
   const STOOLS = [[37.5, 29.5], [38.5, 29.5], [39.5, 29.5], [40.5, 29.5]];
   const LOUNGERS = [[53.5, 31.0], [56.5, 31.0], [59.5, 31.0]];
@@ -424,6 +435,10 @@
     const queue = (i) => { const q = room.queue[Math.min(i, room.queue.length - 1)]; return { spot: [q[0], q[1]], heading: q[2] }; };
     if (n === 1) {
       const a = ms[0], u = (t + hashStr(a.key) * 16) % 16, round = Math.floor((t + hashStr(a.key) * 16) / 16);
+      if (cheeky(a) && env.drunk(a) >= 2 && a.idleT < 14) { // kneeling at the bowl
+        const tl = room.toilets[0], h = tl[2];
+        return [{ act: "toiletpuke", spot: [tl[0] + Math.sin(h) * 0.62, tl[1] + Math.cos(h) * 0.62], heading: h + PI }];
+      }
       if (u > 12) return [Object.assign({ act: "wash" }, mirror)];
       if (male(a)) return [Object.assign({ act: "paper" }, toilet(0))];
       return [round % 2 ? Object.assign({ act: "toilet" }, toilet(0)) : Object.assign({ act: "makeup" }, mirror)];
@@ -441,6 +456,15 @@
     return ms.map((a, i) => {
       if (i < room.toilets.length) return Object.assign({ act: male(a) ? "paper" : "toilet" }, toilet(i));
       return Object.assign({ act: n >= 3 ? "gottago" : "queue" }, queue(q++));
+    });
+  }
+
+  function planShower(ms, env, area) {
+    const sh = area.shower, n = ms.length, together = n >= 2 && ms.every(cheeky);
+    return ms.map((a, i) => {
+      const ang = (i / n) * TAU + 0.8;
+      const spot = n === 1 ? [sh.head[0] + 0.45, sh.head[1] + 0.55] : [sh.head[0] + 0.55 + Math.cos(ang) * 0.38, sh.head[1] + 0.6 + Math.sin(ang) * 0.38];
+      return { act: "shower", spot, heading: PI / 4, sh, bare: cheeky(a), i, together };
     });
   }
 
@@ -564,7 +588,7 @@
       const buddy = ms.find((b) => b !== a && Math.hypot(b.x - a.x, b.z - a.z) < 3);
       if (buddy) return { act: "chat", face: [buddy.x, buddy.z] };
       const lv = env.drunk(a);
-      if (cheeky(a) && lv >= 3 && a.idleT < 6) return { act: "puke" };
+      if (cheeky(a) && lv >= 2 && a.idleT < 9) return { act: "puke" };
       if (a.idleT > 14) return { act: "nap", drunkNap: cheeky(a) && lv >= 2 };
       return { act: choose(a, ["idle", "smell", "selfie", "idle"], t, 9, "garden") };
     });
@@ -581,6 +605,7 @@
     { id: "billiards", rect: [26, 32, 31, 35], plan: planBilliards },
     { id: "grazing", rect: [32, 32, 35, 34], plan: planGrazing },
     { id: "dining", rect: [26, 25, 35, 31], plan: planDining },
+    ...SHOWERS.map((sh, i) => ({ id: "shower" + i, rect: sh.rect, shower: sh, plan: planShower })),
     { id: "bath", rect: [13, 11, 18, 14], room: BATH_MAIN, plan: planBath },
     { id: "restroom", rect: [21, 32, 24, 35], room: BATH_REST, plan: planBath }
   ].concat(BEDROOMS.map((room, i) => ({ id: "bed" + i, rect: room.rect, room, plan: planBed })), [
@@ -899,7 +924,14 @@
       p.rig[1] = -0.15;
       p.armR = [-1.2 + (m.T % 4 > 3.6 ? -0.3 : wave(m.T, 3) * 0.08), 0, 0.2];
       p.armL = [-1.6, 0, -0.3];
-      if (m.T % 4 < m.dt * 1.01 && m.t > 1) m.fx.arc("#FFFFFF", [29.0, m.y + 0.95, 33.7], [30.4, m.y + 0.95, 34.3], 0.8, 0, 0.14);
+      // each shot: the white rolls across the felt into a coloured ball, which rolls into a pocket
+      if (m.T % 4 >= 3.6 && m.T % 4 < 3.6 + m.dt * 1.01 && m.t > 1) {
+        const dir = Math.sin(m.h) >= 0 ? 1 : -1, fy = m.y + 0.97, n = Math.floor(m.T / 4);
+        const start = [29.5 - dir * 1.05, fy, 33.95], hit = [29.5 + dir * 0.35 + ((n * 37) % 5 - 2) * 0.06, fy, 33.75 + ((n * 13) % 5) * 0.1];
+        const pocket = [[28.2, 33.2], [30.8, 33.2], [28.2, 34.8], [30.8, 34.8], [29.5, 33.12], [29.5, 34.88]][(n * 7) % 6];
+        m.fx.arc("#FFFFFF", start, hit, 0.45, 0, 0.13);
+        m.fx.arc(["#E23D3D", "#FECC02", "#2F6FD1", "#1E8C3A", "#7A2BC2"][n % 5], hit, [pocket[0], fy, pocket[1]], 0.7, 0, 0.13, 0.45);
+      }
       return { pose: p, R: "cue" };
     },
     leancue(m) { const p = base(); p.armR = [-0.4, 0, 0.2]; p.rig[5] = 0.05; return { pose: p, R: "cue" }; },
@@ -1027,8 +1059,8 @@
     gaming(m) {
       const p = sit(0.45);
       p.rig[3] = 0.15 + wave(m.T, 3) * 0.05;
-      p.armR = [-1.1 + wave(m.T, 18) * 0.05, 0, 0.25];
-      p.armL = [-1.1, 0, -0.25];
+      p.armR = [-1.5 + wave(m.T, 18) * 0.05, 0, 0.3]; // controller held up at chest height
+      p.armL = [-1.5, 0, -0.3];
       return { pose: p, R: "controller" };
     },
     movie(m) {
@@ -1147,12 +1179,53 @@
       if (k < 0.1 && m.every(1.2)) m.fx.icon("puff", m.x, m.y + 2.3, m.z, { size: 0.35, vy: 0.6 });
       return { pose: p, R: "cig" };
     },
+    // bent double, hands on knees, in waves: a chunky green stream and a puddle
     puke(m) {
-      const p = base();
-      p.rig[3] = 0.75;
-      p.armR = [-0.9, 0, 0.2];
-      p.armL = [-0.9, 0, -0.2];
-      if (m.every(0.08)) m.fx.block(Math.random() < 0.5 ? "#8BC34A" : "#B5D86A", m.x + Math.sin(m.h) * 1.1, m.y + 1.3, m.z + Math.cos(m.h) * 1.1, { vx: Math.sin(m.h) * 1.5, vz: Math.cos(m.h) * 1.5, vy: -0.5, size: 0.12, life: 0.6, max: 0.6 });
+      const p = base(), u = m.t % 3.2, heave = u < 1.6;
+      p.rig[3] = heave ? 0.85 : 0.55;
+      p.rig[1] = heave ? -0.12 : -0.05;
+      p.armR = [-0.7, 0, 0.3];
+      p.armL = [-0.7, 0, -0.3];
+      p.legR = [-0.35, 0, 0];
+      p.legL = [-0.35, 0, 0];
+      p.head = [heave ? 0.2 : -0.1, 0, 0];
+      const sx = Math.sin(m.h), sz = Math.cos(m.h);
+      if (heave && m.every(0.05)) m.fx.block(["#8BC34A", "#B5D86A", "#C8B84A"][Math.floor(Math.random() * 3)], m.x + sx * 0.75, m.y + 1.45, m.z + sz * 0.75, { vx: sx * 1.6 + (Math.random() - 0.5) * 0.4, vz: sz * 1.6 + (Math.random() - 0.5) * 0.4, vy: 0.3, g: 9, size: 0.14, life: 0.55, max: 0.55 });
+      if (heave && m.every(0.5)) m.fx.block("#9DBF4A", m.x + sx * 1.35, m.y + 0.02, m.z + sz * 1.35, { g: 0, size: 0.5, life: 6, max: 6, flat: true });
+      if (!heave && m.every(1.6)) m.fx.icon("drop", m.x, m.y + 2.8, m.z, { size: 0.3 });
+      return { pose: p };
+    },
+    toiletpuke(m) {
+      const p = base(), heave = m.t % 3 < 1.4;
+      p.rig[1] = -0.5;
+      p.rig[3] = heave ? 0.7 : 0.45;
+      p.legR = [-HALF, 0, 0];
+      p.legL = [-HALF, 0, 0];
+      p.armR = [-1.2, 0, 0.35];
+      p.armL = [-1.2, 0, -0.35];
+      if (heave && m.every(0.06)) m.fx.block(Math.random() < 0.5 ? "#8BC34A" : "#B5D86A", m.x + Math.sin(m.h) * 0.55, m.y + 0.95, m.z + Math.cos(m.h) * 0.55, { vx: Math.sin(m.h) * 0.8, vz: Math.cos(m.h) * 0.8, vy: 0, g: 9, size: 0.12, life: 0.3, max: 0.3 });
+      if (!heave && m.every(2)) m.fx.icon("drop", m.x, m.y + 2.2, m.z, { size: 0.3 });
+      return { pose: p };
+    },
+    // hair washing under the shower head, water and steam; in Cheeky mode the clothes land in a pile outside the glass
+    // and a column of steam covers them up to the neck
+    shower(m) {
+      const sh = m.asg.sh, p = base();
+      p.armR = [-2.7 + Math.sin(m.T * 7) * 0.3, 0, -0.5];
+      p.armL = [-2.7 - Math.sin(m.T * 7) * 0.3, 0, 0.5];
+      p.head = [-0.2, 0, Math.sin(m.T * 2) * 0.12];
+      if (m.every(0.03)) m.fx.block("#9FD8FF", sh.head[0] + (Math.random() - 0.5) * 0.6, m.y + 2.4, sh.head[1] + (Math.random() - 0.5) * 0.6, { vy: -1.5, g: 9, size: 0.06, life: 0.35, max: 0.35 });
+      if (m.every(0.45)) m.fx.icon("puff", m.x + (Math.random() - 0.5) * 0.9, m.y + 1.7, m.z + (Math.random() - 0.5) * 0.9, { size: 0.55, vy: 0.45, life: 2, max: 2 });
+      if (m.every(2.6)) m.fx.icon(m.asg.together ? "heart" : "note", m.x, m.y + 3.1, m.z, { size: 0.35 });
+      if (m.asg.bare) {
+        const k = m.a.key, sc = m.a.av.scale || 1, neck = 24 * (window.FefeAvatar ? FefeAvatar.P : 0.069) * sc - 0.04;
+        m.fx.keepBox("steam" + k, "#F4F8FF", m.x, m.y + neck / 2, m.z, 0.95, neck, 0.95, 0.94);
+        const c = outfitColors(m.a.look), px = sh.pile[0], pz = sh.pile[1] + m.asg.i * 0.55, fy = m.y + 0.02;
+        m.fx.keepBox("pants" + k, c.leg, px, fy + 0.05, pz, 0.5, 0.1, 0.4);
+        m.fx.keepBox("shirt" + k, c.shirt, px + 0.03, fy + 0.14, pz - 0.02, 0.44, 0.08, 0.34);
+        m.fx.keepBox("shoe1" + k, c.shoe, px + 0.4, fy + 0.06, pz + 0.12, 0.14, 0.12, 0.26);
+        m.fx.keepBox("shoe2" + k, c.shoe, px + 0.58, fy + 0.06, pz - 0.05, 0.14, 0.12, 0.26);
+      }
       return { pose: p };
     },
     // up the trunk (following a palm's lean), a look around from the top, a jump down with a poof
@@ -1220,7 +1293,19 @@
     },
     smell(m) { const p = base(); p.rig[3] = 0.45; p.rig[1] = -0.2; p.legR = [-0.5, 0, 0]; p.legL = [-0.5, 0, 0]; if (m.every(2.5)) m.fx.icon("heart", m.x, m.y + 1.8, m.z, { size: 0.3 }); return { pose: p }; }
   };
-  const HEAD_LOCKED = new Set(["kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
+  // the main colours of an outfit, for a pile of clothes
+  function outfitColors(look) {
+    const O = window.FefeAvatar && FefeAvatar.OUTFITS[(look && look.outfit) | 0];
+    const pick = (f, d) => { try { return (O && f && f()) || d; } catch (e) { return d; } };
+    return {
+      shirt: pick(O && (() => O.shirt(2, 4, "front")), "#FFFFFF"),
+      leg: pick(O && (() => O.leg(1, 4, "front", 0)), "#23252B"),
+      shoe: pick(O && (() => O.leg(1, 11, "front", 0)), "#23252B")
+    };
+  }
+  // acts where people are meant to be this close, so they aren't nudged apart
+  const CLOSE_ACTS = new Set(["kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
+  const HEAD_LOCKED = new Set(["toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
   function discoPose(T, side) {
     const p = base(), s = (Math.sin(T * 2.2 * PI) + 1) / 2;
     p.armR = [lerp(-0.6, -2.8, s), 0, lerp(0.7, -0.4, s)];
@@ -1296,6 +1381,7 @@
     return {
       fx,
       actOf(a) { const s = states.get(a); return s ? s.act : null; },
+      close(a) { const s = states.get(a); return !!(s && s.act && CLOSE_ACTS.has(s.act)); },
       update(dt, actors, nowMs) {
         const t = nowMs / 1000;
         env.t = t;
@@ -1349,6 +1435,10 @@
         s.t0 = env.t;
         s.fxAt = {};
         if (area.id === "bar") { s.bar += 1; s.barAt = env.t; }
+      }
+      if (area.id === "bar") { // every 15 s of drinking is another level, up to 5
+        s.barTime = (s.barTime || 0) + dt;
+        if (s.barTime > 15) { s.barTime = 0; s.bar = Math.min(5, s.bar + 1); s.barAt = env.t; }
       }
       if (s.vx === undefined) { s.vx = a.x; s.vz = a.z; s.h = a.heading; }
       const tx = asg.spot ? asg.spot[0] : a.x, tz = asg.spot ? asg.spot[1] : a.z;
