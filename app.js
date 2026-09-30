@@ -2181,6 +2181,8 @@
     }
     function saveMe(leaving) {
       if (!me) return;
+      // this phone remembers who you are, so next time you go straight in as yourself (see openJoin)
+      if (!myLook.face || typeof myLook.face === "string") lsSet("fefe40.look", JSON.stringify({ name: myName, look: myLook }));
       const record = {
         name: myName,
         body: myLook.body,
@@ -3931,6 +3933,19 @@
     }
     function updateMake() { makeBtn.disabled = !nameIn.value.trim(); }
     function openJoin() {
+      // been here before on this phone: no photo or outfit again, straight into the party as last time
+      if (!me) {
+        let saved = null;
+        try { saved = JSON.parse(lsGet("fefe40.look") || "null"); } catch (e) { saved = null; }
+        if (saved && typeof saved.name === "string" && saved.name.trim() && saved.look && typeof saved.look === "object") {
+          myName = saved.name.trim().slice(0, 20);
+          draft = Object.assign({}, saved.look);
+          clearSelection();
+          dismissHint();
+          enterParty();
+          return;
+        }
+      }
       joinEl.hidden = false;
       setDressMode("join");
       showStep("photo");
