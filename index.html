@@ -412,6 +412,10 @@ body.driving .dock { display: none; }
   touch-action: manipulation;
 }
 .guests-btn::after { content: " ▾"; }
+.brand-row { display: flex; gap: 6px; pointer-events: none; }
+.exit-btn { border: 0; color: var(--yellow); font-family: var(--font-body); cursor: pointer; pointer-events: auto; touch-action: manipulation; }
+.exit-btn:focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
+.invite-btn { background: var(--yellow); color: var(--blue-deep); font-weight: 700; }
 .guest-list {
   display: grid;
   width: min(260px, calc(100vw - 120px));
@@ -441,6 +445,7 @@ body.driving .dock { display: none; }
 .guest span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { flex: none; color: var(--sky-bottom); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .badge.live { color: var(--white); }
+#sound[aria-pressed="false"] .waves { opacity: 0.25; }
 
 @media (min-width: 720px) {
   .logo { font-size: 2.125rem; }
@@ -459,8 +464,11 @@ body.driving .dock { display: none; }
 
   <div class="brand">
     <p class="logo">FEFE40</p>
-    <p class="meta">Filip's 40th · Casa Anahao, Tanauan · 10 Oct, 13:00</p>
-    <button type="button" class="meta guests-btn" id="guests" aria-expanded="false" aria-controls="guest-list" hidden></button>
+    <div class="brand-row">
+      <button type="button" class="meta guests-btn" id="guests" aria-expanded="false" aria-controls="guest-list" hidden></button>
+      <button type="button" class="meta exit-btn invite-btn" id="invite">Invite</button>
+      <button type="button" class="meta exit-btn" id="exit" hidden>Exit</button>
+    </div>
     <div class="guest-list" id="guest-list" hidden></div>
   </div>
 
@@ -476,6 +484,9 @@ body.driving .dock { display: none; }
     </button>
     <button type="button" class="tool" id="night" aria-pressed="false" aria-label="Night party lights" title="Night (N)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+    </button>
+    <button type="button" class="tool" id="sound" aria-pressed="false" aria-label="Sound and music" title="Sound (M)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="waves" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/></svg>
     </button>
     <button type="button" class="tool" id="find-me" aria-label="Find my avatar" title="Find me (F)" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><rect x="8" y="2" width="8" height="8"/><path d="M6 22v-8h12v8"/></svg>
@@ -578,6 +589,7 @@ body.driving .dock { display: none; }
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="avatar.js"></script>
+<script src="sound.js"></script>
 <script src="actions.js"></script>
 <script src="app.js"></script>
 </body>

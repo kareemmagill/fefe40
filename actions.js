@@ -1214,6 +1214,7 @@
       if (heave && m.every(0.05)) m.fx.block(["#8BC34A", "#B5D86A", "#C8B84A"][Math.floor(Math.random() * 3)], m.x + sx * 0.75, m.y + 1.45, m.z + sz * 0.75, { vx: sx * 1.6 + (Math.random() - 0.5) * 0.4, vz: sz * 1.6 + (Math.random() - 0.5) * 0.4, vy: 0.3, g: 9, size: 0.14, life: 0.55, max: 0.55 });
       if (heave && m.every(0.5)) m.fx.block("#9DBF4A", m.x + sx * 1.35, m.y + 0.02, m.z + sz * 1.35, { g: 0, size: 0.5, life: 6, max: 6, flat: true });
       if (!heave && m.every(1.6)) m.fx.icon("drop", m.x, m.y + 2.8, m.z, { size: 0.3 });
+      if (m.t > 6.3) m.s.bar = 0; // two good heaves and they're sober again
       return { pose: p };
     },
     toiletpuke(m) {
@@ -1226,6 +1227,7 @@
       p.armL = [-1.2, 0, -0.35];
       if (heave && m.every(0.06)) m.fx.block(Math.random() < 0.5 ? "#8BC34A" : "#B5D86A", m.x + Math.sin(m.h) * 0.55, m.y + 0.95, m.z + Math.cos(m.h) * 0.55, { vx: Math.sin(m.h) * 0.8, vz: Math.cos(m.h) * 0.8, vy: 0, g: 9, size: 0.12, life: 0.3, max: 0.3 });
       if (!heave && m.every(2)) m.fx.icon("drop", m.x, m.y + 2.2, m.z, { size: 0.3 });
+      if (m.t > 5.9) m.s.bar = 0;
       return { pose: p };
     },
     // wolfing down pick-and-mix, then spinning out on the sugar
@@ -1344,6 +1346,28 @@
       shoe: pick(O && (() => O.leg(1, 11, "front", 0)), "#23252B")
     };
   }
+  // Sounds: [effect, seconds between repeats, optional Swedish line said now and then]. Played through ctx.sound / ctx.say.
+  const SOUNDS = {
+    disco: ["clap", 3.5], discomirror: ["clap", 3.5], robot: ["boing", 4], airguitar: ["cheer", 6], pole: ["cheer", 5],
+    leadspin: ["whoosh", 3], spin: ["whoosh", 3], slowdance: ["kiss", 6, "alskar"], line: ["clap", 2.5], wild: ["cheer", 4, "heja"],
+    clap: ["clap", 1.2], conga: ["laugh", 5, "kul"], surf: ["cheer", 3, "heja"], carry: ["cheer", 4],
+    paddle: ["splash", 3], swim: ["splash", 1.6], float: ["splash", 6], bomb: ["cannonball", 4, "oj"], splash: ["splash", 0.9, "nej"], ball: ["splash", 1.6, "kul"],
+    sunbathe: ["zzz", 9], nap: ["zzz", 4], hangover: ["burp", 7], facedown: ["zzz", 4], chat: ["laugh", 7, "hej"], selfie: ["pop", 5],
+    huddle: ["laugh", 5], shove: ["bonk", 12, "nej"], pushed: ["splash", 12],
+    sip: ["clink", 5], horn: ["chug", 5, "skal"], skal: ["clink", 5, "skal"], chug: ["chug", 2.5, "skal"], helan: ["cheer", 8, "helan"],
+    cook: ["pop", 4], snack: ["pop", 5], chop: ["clack", 0.6], highfive: ["clap", 8], taste: ["pop", 3, "jattebra"], smokewave: ["laugh", 4],
+    sing: ["cheer", 7], sway: ["clap", 5], blow: ["cheer", 6, "grattis"], bdaysing: ["cheer", 5, "grattis"],
+    cue: ["clack", 4], leancue: null, cheer: ["cheer", 4, "heja"], nibble: ["pop", 4], eat: ["clink", 6], toast: ["clink", 4, "skal"],
+    raiseglass: ["clink", 4], cheersit: ["cheer", 4, "heja"], tabledance: ["cheer", 3], pong: ["pok", 3],
+    paper: ["fart", 6], toilet: ["pee", 9], makeup: ["kiss", 7], wash: ["splash", 5], queue: ["nej", 0], gottago: ["nej", 0],
+    kiss: ["kiss", 1.6, "alskar"], snus: ["sniff", 6], sleep: ["zzz", 3], jumpbed: ["boing", 0.7], pillow: ["pillow", 1], sleepover: ["giggle", 4],
+    scene: ["boing", 0.5, "oj"], tv: ["laugh", 12], gaming: ["pop", 3], movie: ["laugh", 10], fan: ["whoosh", 4], fika: ["clink", 6, "fika"], cards: ["laugh", 8],
+    serve: ["pok", 3], hoops: ["bonk", 3], rally: ["pok", 1.2], watch: ["clap", 5], swing: ["whoosh", 2.9], seesaw: ["boing", 3.2], run: ["laugh", 4],
+    photo: ["pop", 4], peace: ["laugh", 8], phone: ["pop", 7], fetch: ["clink", 8], wave: ["wave", 5, "hej"], brawl: ["bonk", 0.6, "nej"],
+    smoke: ["sniff", 6], puke: ["vomit", 3.2], toiletpuke: ["vomit", 3], smell: ["sniff", 5], climb: ["whoosh", 6, "heja"],
+    pee: ["pee", 14], shower: ["shower", 3], candy: ["sparkle", 1.5, "jattebra"], idle: null
+  };
+  const SOBERING = new Set(["swim", "float", "bomb", "splash", "ball", "paddle", "shower", "rally", "serve", "hoops", "run"]);
   // acts where people are meant to be this close, so they aren't nudged apart
   const CLOSE_ACTS = new Set(["kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
   const HEAD_LOCKED = new Set(["candy", "toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
@@ -1380,7 +1404,7 @@
       nearestWater: ctx.nearestWater,
       get night() { return ctx.isNight(); },
       get lastDrop() { return lastDrop; },
-      drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 150)); },
+      drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 60)); }, // wears off a level a minute
       scene(room, count) { scenes.push({ room, count }); },
       atCandy(a) { return (ctx.candy || []).some(([x, z]) => Math.floor(a.x) === x && Math.floor(a.z) === z); },
       treeNear(a) {
@@ -1417,7 +1441,10 @@
         a.av.parts.armR.rotation.set(-env.t * 14, 0, -0.3);
         a.av.parts.armL.rotation.set(-env.t * 14 + PI, 0, 0.3);
         a.av.rig.position.y = Math.abs(Math.sin(env.t * 12)) * 0.25;
-        if (Math.random() < dt * 2) fx.icon(Math.random() < 0.5 ? "star" : "heart", a.x, a.y + 2.8, a.z, { size: 0.3 });
+        if (Math.random() < dt * 2) {
+          fx.icon(Math.random() < 0.5 ? "star" : "heart", a.x, a.y + 2.8, a.z, { size: 0.3 });
+          if (ctx.sound && Math.random() < 0.4) ctx.sound("sparkle", a.x, a.z);
+        }
       }
       if (buzz) {
         a.av.parts.armR.rotation.set(-2.9 + Math.sin(env.t * 14) * 0.25, 0, -0.35);
@@ -1428,7 +1455,10 @@
       a.av.hold("head", shame ? "messy" : null);
       if (lv >= 2 && a.look && a.look.cheeky) {
         a.av.rig.rotation.z = Math.sin(env.t * 3.2) * 0.06 * lv;
-        if (Math.random() < dt * 0.8) fx.icon("bubble", a.x, a.y + 2.5, a.z, { size: 0.25 });
+        if (Math.random() < dt * 0.8) {
+          fx.icon("bubble", a.x, a.y + 2.5, a.z, { size: 0.25 });
+          if (ctx.sound) ctx.sound(Math.random() < 0.8 ? "hiccup" : "burp", a.x, a.z);
+        }
       }
     }
     return {
@@ -1487,7 +1517,9 @@
         s.area = area.id;
         s.t0 = env.t;
         s.fxAt = {};
+        s.sndAt = env.t + 0.3 + hashStr(a.key + asg.act) * 0.8;
         if (area.id === "bar") { s.bar += 1; s.barAt = env.t; }
+        if (SOBERING.has(asg.act)) { s.bar = 0; s.barTime = 0; } // a swim, a shower or some sport sobers you up
       }
       if (area.id === "bar") { // every 15 s of drinking is another level, up to 5
         s.barTime = (s.barTime || 0) + dt;
@@ -1534,6 +1566,15 @@
         }
       };
       const out = (ACTS[asg.act] || ACTS.idle)(m) || {};
+      const snd = SOUNDS[asg.act];
+      if (snd && env.t >= s.sndAt) {
+        if (snd[1] > 0) {
+          s.sndAt = env.t + snd[1] * (0.8 + Math.random() * 0.4);
+          if (ctx.sound) ctx.sound(snd[0], m.x, m.z);
+        } else s.sndAt = Infinity;
+        if (snd[2] && ctx.say && Math.random() < (snd[1] > 0 ? 0.25 : 1)) ctx.say(snd[2], m.x, m.z);
+        if (!(snd[1] > 0) && ctx.say) ctx.say(snd[0], m.x, m.z);
+      }
       a.av.hold("R", out.R || null);
       a.av.hold("L", out.L || null);
       a.av.hold("head", out.head || out.headL || null);

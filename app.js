@@ -1473,6 +1473,7 @@
       nightLights.forEach((l) => { l.intensity = on ? l.userData.power : 0; });
       discoFx.visible = on;
       nightChanged();
+      if (typeof snd !== "undefined" && snd && snd.enabled) snd.setNight(on);
       meshes.forEach((m) => {
         if (m.userData.kind === "glass") m.material.emissive.set(on ? 0x7a5520 : 0x000000);
       });
@@ -1675,6 +1676,7 @@
       else if (k === "-" || k === "_") goal.fit = clampFit(goal.fit * 1.25);
       else if (k === "r") setInside(!seeInside);
       else if (k === "n") setNight(!night);
+      else if (k === "m") soundBtn.click();
       else if (k === "h") goHome();
       else if (k === "f") findMe();
       else if (k === "escape") clearSelection();
@@ -1891,7 +1893,7 @@
       if (a.drop > 0) {
         a.dropV += 30 * dt;
         a.drop -= a.dropV * dt;
-        if (a.drop <= 0) { a.drop = 0; a.dropV = 0; poof(a.x, a.y, a.z); }
+        if (a.drop <= 0) { a.drop = 0; a.dropV = 0; poof(a.x, a.y, a.z); if (typeof sfx === "function") sfx("pop", a.x, a.z); }
       }
       if (moving) a.phase += dt * 10;
       a.moving = !!moving && a.drop === 0;
@@ -2345,7 +2347,7 @@
 
     // ---------- test crowd ----------
     // Opening the site with ?npc adds 20 made-up guests on this phone only: nothing is saved or shared, so there is
-    // nothing to clean up. Their loops are choreographed in 45 s rounds (three by day, two by night) so the group
+    // nothing to clean up. Their loops are choreographed in 45 s rounds (four by day, two by night) so the group
     // scenes actually happen: kisses, brawls, doubles, karaoke, bedroom scenes, pool games and so on.
     const NPCS = [
       ["Astrid", "f", 1], ["Björn", "m", 1], ["Linnea", "f", 1], ["Oskar", "m", 0], ["Freja", "f", 0],
@@ -2359,9 +2361,12 @@
       [[16, 12, "Astrid", "Linnea"], [8, 47, "Oskar", "Gustav"], [9, 47, "Lukas"], [9, 48, "Tilda"], [55, 45, "Freja"], [58, 45, "Axel"], [56, 50, "Maja"],
         [45, 28, "Saga", "Erik"], [47, 30, "Elsa", "Björn"], [38, 30, "Viktor"], [39, 30, "Hugo"], [16, 7, "Nils", "Alva"], [15, 8, "Anton"], [60, 20, "Wilma"], [61, 21, "Ebba"]],
       [[27, 27, "Astrid", "Oskar"], [29, 27, "Freja", "Björn"], [22, 29, "Linnea"], [23, 29, "Gustav"], [24, 28, "Maja"], [37, 33, "Saga"], [36, 34, "Lukas", "Tilda"],
-        [27, 33, "Erik"], [31, 33, "Axel"], [55, 29, "Viktor"], [56, 29, "Elsa"], [16, 12, "Hugo", "Anton"], [28, 8, "Nils"], [30, 8, "Wilma"], [39, 48, "Alva"], [41, 48, "Ebba"]],
+        [27, 33, "Erik"], [31, 33, "Axel"], [35, 21, "Viktor"], [56, 29, "Elsa"], [16, 12, "Hugo", "Anton"], [28, 8, "Nils"], [30, 8, "Wilma"], [39, 48, "Alva"], [41, 48, "Ebba"]],
       [[24, 40, "Astrid"], [25, 39, "Linnea"], [26, 40, "Saga"], [52, 44, "Oskar"], [62, 44, "Gustav"], [52, 47, "Axel"], [62, 47, "Lukas"], [55, 51, "Freja", "Maja"],
-        [6, 12, "Tilda"], [7, 12, "Ebba"], [7, 17, "Björn"], [8, 17, "Erik"], [22, 34, "Viktor"], [23, 34, "Elsa", "Alva"], [70, 30, "Hugo"], [38, 30, "Nils"], [39, 30, "Anton", "Wilma"]]
+        [6, 12, "Tilda"], [7, 12, "Ebba"], [7, 17, "Björn"], [8, 17, "Erik"], [22, 34, "Viktor"], [23, 34, "Elsa", "Alva"], [70, 30, "Hugo"], [38, 30, "Nils"], [39, 30, "Anton", "Wilma"]],
+      [[13, 12, "Saga"], [14, 11, "Erik"], [7, 8, "Maja"], [9, 9, "Lukas"], [27, 45, "Björn"], [1, 28, "Linnea"], [64, 29, "Freja"], [67, 29, "Oskar"],
+        [38, 30, "Viktor"], [39, 30, "Hugo"], [27, 33, "Gustav"], [31, 33, "Axel"], [55, 9, "Astrid"], [57, 9, "Nils"], [45, 28, "Tilda"], [46, 29, "Ebba"],
+        [47, 30, "Wilma"], [48, 31, "Anton"], [37, 33, "Alva"], [60, 20, "Elsa"]]
     ];
     const NIGHT_ROUNDS = [
       [[45, 28, "Astrid", "Björn"], [47, 30, "Saga", "Erik"], [48, 31, "Elsa", "Viktor"], [60, 20, "Linnea", "Nils"], [61, 21, "Alva"], [40, 8, "Hugo", "Wilma"], [39, 8, "Anton"],
@@ -2423,6 +2428,25 @@
     const deepCells = [];
     for (let x = X0; x <= X1; x++) for (let z = Z0; z <= Z1; z++) if (heightAt(x, z) < -1 && reach[cellIdx(x, z)]) deepCells.push([x, z]);
     let danceCrowd = 0;
+    // ---------- sound (sound.js): synthesised effects, a disco loop and Swedish voice lines ----------
+    // Off until the speaker button is tapped (phones only allow sound after a tap); the choice is remembered.
+    const snd = window.FefeSound ? FefeSound.create() : null;
+    const soundBtn = document.getElementById("sound");
+    const sfx = (name, x, z, o) => { if (snd && snd.enabled) snd.play(name, x, z, o); };
+    function setSound(on) {
+      if (!snd) return;
+      if (on) snd.enable(); else snd.disable();
+      if (on) snd.setNight(night);
+      soundBtn.setAttribute("aria-pressed", String(!!snd.enabled));
+      lsSet("fefe40.sound", snd.enabled ? "1" : "0");
+    }
+    soundBtn.hidden = !snd;
+    soundBtn.addEventListener("click", () => setSound(!(snd && snd.enabled)));
+    // remembered "on": switch back on at the first tap anywhere
+    if (snd && lsGet("fefe40.sound") === "1") {
+      const wake = () => { window.removeEventListener("pointerdown", wake, true); if (!snd.enabled) setSound(true); };
+      window.addEventListener("pointerdown", wake, true);
+    }
     const CANDY_RING = [[7, 8], [8, 8], [9, 9], [9, 10], [7, 11], [8, 11]];
     const TREES = trees.map(([x, z, t]) => ({ x: x + 0.5, z: z + 0.5, palm: t.palm, h: t.h, top: t.top, tx: t.tx, tz: t.tz }));
     // a tapped leaf high up, or any tapped bit of trunk, means that tree
@@ -2450,6 +2474,8 @@
             return best;
           },
           onDance(n) { danceCrowd = n; },
+          sound: sfx,
+          say(key, x, z) { if (snd && snd.enabled) snd.say(key, x, z); },
           onScenes(rooms) { loveRooms = rooms; }
         })
       : null;
@@ -2508,6 +2534,7 @@
     function crash(c, hit, speed) {
       const fx = party && party.fx, hard = Math.abs(speed), y = c.y + 0.9;
       c.speed = -speed * 0.3;
+      sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
       if (!fx) return;
       if (hit.what === "person") { fx.icon("bang", hit.px, y + 1.6, hit.pz, { size: 0.45 }); c.speed = 0; return; }
       if (hard < 2.5) { fx.icon("bang", hit.px, y + 1, hit.pz, { size: 0.3 }); return; }
@@ -2542,6 +2569,8 @@
           else if (drive.gas < 0) acc = c.speed > 0.2 ? -16 : -5;
         }
         c.speed += acc * dt;
+        if (driving && acc > 0 && t > (c.revAt || 0)) { c.revAt = t + 0.55; sfx("engine", c.x, c.z, { pitch: 0.8 + Math.abs(c.speed) / 10 }); }
+        if (driving && drive.steer && Math.abs(c.speed) > 6 && t > (c.skidAt || 0)) { c.skidAt = t + 0.7; sfx("skid", c.x, c.z); }
         const friction = driving && drive.gas ? 0.5 : 4;
         c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), friction * dt);
         c.speed = Math.max(-5, Math.min(11, c.speed));
@@ -3195,6 +3224,7 @@
       startRecording(sx, sz);
       enterBtn.hidden = true;
       findBtn.hidden = false;
+      exitBtn.hidden = false;
       clearSelection();
       follow = true;
       goal.fit = 22;
@@ -3207,6 +3237,59 @@
       updateGuestCount();
       saveMe(false); // replaces this device's earlier record, so the recorded walk starts over
     }
+    // Leaving: your walk is saved and keeps looping for everyone else; tap Enter the party to come back as someone new.
+    const exitBtn = $("exit");
+    function exitParty() {
+      if (!me) return;
+      if (me.inCar) getOut();
+      saveMe(false);
+      store.leave(myId).catch(() => {});
+      lastBeat = 0;
+      lastBeatCell = "";
+      poof(me.x, me.y, me.z);
+      removeActor(me);
+      me = null;
+      myPath = [];
+      pendingWalk = null;
+      pendingCar = null;
+      follow = false;
+      enterBtn.hidden = false;
+      findBtn.hidden = true;
+      exitBtn.hidden = true;
+      wardrobeBtn.hidden = true;
+      hint.textContent = coarse ? "Drag to explore · Pinch to zoom · Tap a place" : "Drag to explore · Scroll to zoom · Q / E to rotate · Click a place";
+      updateGuestCount();
+    }
+    exitBtn.addEventListener("click", exitParty);
+    // Invite: copy the party's link (never the ?npc test link) so it can be pasted to friends
+    const INVITE_URL = "https://kareemmagill.github.io/fefe40/";
+    function toast(msg, ms) {
+      hint.textContent = msg;
+      hint.classList.remove("gone");
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(dismissHint, ms || 6000);
+    }
+    function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+      return new Promise((resolve, reject) => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        ta.remove();
+        if (ok) resolve(); else reject(new Error("copy"));
+      });
+    }
+    $("invite").addEventListener("click", () => {
+      copyText(INVITE_URL)
+        .then(() => toast("Link copied! Paste it to whoever you want to invite to the party."))
+        .catch(() => toast("Copy this link and send it to whoever you want to invite: " + INVITE_URL, 12000));
+    });
     function findMe() {
       if (!me) return;
       follow = true;
@@ -3285,6 +3368,11 @@
       updateCutaway(dt);
       updateNightLights(dt, now / 1000);
       updateKaraoke(now / 1000);
+      if (snd && snd.enabled) {
+        snd.setListener(view.target.x - OX, view.target.z - OZ, view.fit);
+        snd.setMusicLevel(Math.min(1, danceCrowd / 6));
+        snd.update(dt);
+      }
       updateFeed(now / 1000);
       if (!reduceMotion) {
         waterPlanes.forEach((m, i) => {
