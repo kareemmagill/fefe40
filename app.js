@@ -417,6 +417,11 @@
       box(6, fy + 0.01, 10, 5, 0.05, 1, C.yellow, { j: false });
       sofa(5, 8, 1, 5, fy, C.woodLight, "W");
       box(7.2, fy, 9.3, 1.6, 0.45, 1.4, C.woodDark);
+      // a bowl of Swedish pick-and-mix (lösgodis) on the coffee table: tap it for a sugar high
+      box(7.7, fy + 0.45, 9.7, 0.6, 0.14, 0.6, C.white, { j: false });
+      ["#FF3B6B", "#FEFE40", "#3BE36B", "#FF8A1F", "#2F6FD1", "#FF6FB5", "#FFFFFF", "#E23D3D", "#7A2BC2", "#FEFE40", "#3BE36B", "#FF3B6B"].forEach((c, i) => {
+        box(7.74 + (i % 4) * 0.12, fy + 0.59 + ((i * 7) % 3) * 0.035, 9.76 + (i >> 2) * 0.15, 0.1, 0.07, 0.1, c, { j: false });
+      });
       box(10.6, fy, 8.8, 0.8, 0.5, 2.4, C.woodDark);
       box(11.4, fy + 0.5, 8.9, 0.15, 1.2, 2.2, C.black);
       box(11.33, fy + 0.6, 9.0, 0.05, 1.0, 2.0, C.screen, glow);
@@ -1004,7 +1009,9 @@
     const meshes = [];
     const buildings = new Map();
     const groupMats = new Map();
-    const isHideable = (group) => group !== "base" && group !== "cabana:roof";
+    const isHideable = (group) => group !== "base";
+    // roofs of structures that aren't a place of their own still lift away when you're under them
+    const CUT_RECTS = { cabana: [62, 28, 69, 34] };
     function register(mesh, kind, group) {
       mesh.userData = { kind, group };
       mesh.castShadow = kind === "solid" || kind === "glass";
@@ -1541,8 +1548,16 @@
       const hit = pickVoxel(cx, cy);
       if (me) {
         if (!hit) return;
+        // the candy bowl: tapping the coffee table walks you round to it
+        const tx = hit.u / 2, tz = hit.w / 2;
+        if (tx >= 7 && tx < 9 && tz >= 9 && tz < 11 && hit.v / 2 < 3.5) {
+          const ring = CANDY_RING.slice().sort((p, q) => Math.hypot(p[0] - me.x, p[1] - me.z) - Math.hypot(q[0] - me.x, q[1] - me.z));
+          if (walkTo(ring[0][0], ring[0][1])) follow = true;
+          clearSelection();
+          return;
+        }
         const tree = treeAtHit(hit);
-        if (tree) { // go and stand right by the trunk: actions.js takes it from there (climb, or pee in Cheeky mode)
+        if (tree && Math.hypot(tree.x - me.x, tree.z - me.z) > 1.7) { // go and stand right by the trunk: actions.js takes it from there (climb, or pee in Cheeky mode)
           const at = nearestReachable(Math.floor(tree.x), Math.floor(tree.z));
           if (at && walkTo(at[0], at[1])) follow = true;
           clearSelection();
@@ -1859,7 +1874,13 @@
         a.heading += d * Math.min(1, dt * 12);
       }
       a.y += (worldY(Math.floor(a.x), Math.floor(a.z)) - a.y) * Math.min(1, dt * 14);
-      a.av.root.position.set(a.x + OX, a.y + a.drop, a.z + OZ);
+      // after an act drew someone away from their cell, ease them back over a fraction of a second
+      if (a.blendX || a.blendZ) {
+        const f = Math.exp(-dt * 7);
+        a.blendX = Math.abs(a.blendX * f) < 0.01 ? 0 : a.blendX * f;
+        a.blendZ = Math.abs(a.blendZ * f) < 0.01 ? 0 : a.blendZ * f;
+      }
+      a.av.root.position.set(a.x + OX + (a.blendX || 0), a.y + a.drop, a.z + OZ + (a.blendZ || 0));
       a.av.root.rotation.y = a.heading;
       a.av.setPose(a.phase, moving && a.drop === 0);
     }
@@ -2357,6 +2378,7 @@
     const deepCells = [];
     for (let x = X0; x <= X1; x++) for (let z = Z0; z <= Z1; z++) if (heightAt(x, z) < -1 && reach[cellIdx(x, z)]) deepCells.push([x, z]);
     let danceCrowd = 0;
+    const CANDY_RING = [[7, 8], [8, 8], [9, 9], [9, 10], [7, 11], [8, 11]];
     const TREES = trees.map(([x, z, t]) => ({ x: x + 0.5, z: z + 0.5, palm: t.palm, h: t.h, top: t.top, tx: t.tx, tz: t.tz }));
     // a tapped leaf high up, or any tapped bit of trunk, means that tree
     function treeAtHit(hit) {
@@ -2371,7 +2393,7 @@
     }
     const party = window.FefeActions
       ? FefeActions.create({
-          T, scene, OX, OZ, heightAt, trees: TREES,
+          T, scene, OX, OZ, heightAt, trees: TREES, candy: CANDY_RING,
           isNight: () => night,
           // the middle of the nearest deep-water cell and its floor height, for pushing someone in
           nearestWater(x, z) {
@@ -2464,6 +2486,71 @@
       }
       karaoke.tex.needsUpdate = true;
     }
+    // ---------- living room TV: a live feed from the bedroom next door ----------
+    // A small camera in the corner of the main villa bedroom renders onto the TV, about 15 times a second, but only
+    // while the living room is on screen (roof cut away and zoomed in near it).
+    const feed = (() => {
+      const W = 192, H = 96;
+      const rt = new T.WebGLRenderTarget(W, H, { minFilter: T.LinearFilter, magFilter: T.LinearFilter });
+      const cam2 = new T.PerspectiveCamera(62, W / H, 0.1, 40);
+      cam2.position.set(18.6 + OX, 4.55, 9.55 + OZ);
+      cam2.lookAt(15.2 + OX, 2.7, 6.6 + OZ);
+      const drop = (geo) => geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(geo.attributes.position.count).fill(dropAt(11.3, 3.2, 10, 3) + 14), 1));
+      const geo = new T.PlaneGeometry(1.94, 0.94);
+      drop(geo);
+      const mat = new T.MeshBasicMaterial({ map: rt.texture, color: 0xdddddd });
+      patchDrop(mat);
+      const screen = new T.Mesh(geo, mat);
+      screen.rotation.y = -Math.PI / 2;
+      screen.position.set(11.3 + OX, 3.1, 10.0 + OZ);
+      scene.add(screen);
+      // "REC" overlay with scanlines
+      const c = document.createElement("canvas");
+      c.width = W;
+      c.height = H;
+      const otex = new T.CanvasTexture(c);
+      const ogeo = new T.PlaneGeometry(1.94, 0.94);
+      drop(ogeo);
+      const omat = new T.MeshBasicMaterial({ map: otex, transparent: true, depthWrite: false });
+      patchDrop(omat);
+      const over = new T.Mesh(ogeo, omat);
+      over.rotation.y = -Math.PI / 2;
+      over.position.set(11.29 + OX, 3.1, 10.0 + OZ);
+      scene.add(over);
+      return { rt, cam2, c, g: c.getContext("2d"), otex, next: 0, blink: -1 };
+    })();
+    function updateFeed(t) {
+      if (t < feed.next) return;
+      feed.next = t + 1 / 15;
+      const villa = buildings.get("mainVilla");
+      const dx = view.target.x - (9 + OX), dz = view.target.z - (9 + OZ);
+      if (!villa || villa.fade < 0.3 || view.fit > 32 || dx * dx + dz * dz > 16 * 16) return;
+      const blink = Math.floor(t * 2) % 2;
+      if (blink !== feed.blink) {
+        feed.blink = blink;
+        const g = feed.g, W = feed.c.width, H = feed.c.height;
+        g.clearRect(0, 0, W, H);
+        g.fillStyle = "rgba(0,0,0,0.12)";
+        for (let y = 0; y < H; y += 3) g.fillRect(0, y, W, 1);
+        g.font = "bold 12px 'Pixelify Sans', 'Courier New', monospace";
+        g.textBaseline = "top";
+        if (blink) { g.fillStyle = "#FF2A2A"; g.beginPath(); g.arc(12, 11, 5, 0, Math.PI * 2); g.fill(); }
+        g.fillStyle = "#FFFFFF";
+        g.fillText("REC  BEDROOM CAM", 22, 5);
+        feed.otex.needsUpdate = true;
+      }
+      // render the bedroom without redrawing shadows or the close-up slice
+      const auto = renderer.shadowMap.autoUpdate, clip = clipPlane.constant;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = false;
+      clipPlane.constant = 1000;
+      renderer.setRenderTarget(feed.rt);
+      renderer.render(scene, feed.cam2);
+      renderer.setRenderTarget(null);
+      renderer.shadowMap.autoUpdate = auto;
+      clipPlane.constant = clip;
+    }
+
     // repainted a few times a second, and only when the lounge is close enough to see
     function updateKaraoke(t) {
       if (t < karaoke.next) return;
@@ -2894,14 +2981,13 @@
       trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
       speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
-      look(x, z, fit, y) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; } };
+      look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
 
     // ---------- per-frame updates ----------
     function updateCutaway(dt) {
       const tx = view.target.x - OX, tz = view.target.z - OZ;
       buildings.forEach((b, bid) => {
-        const zn = byId[bid];
-        const r = zn.rect;
+        const r = byId[bid] ? byId[bid].rect : CUT_RECTS[bid];
         const over = tx >= r[0] && tx <= r[2] + 1 && tz >= r[1] && tz <= r[3] + 1;
         const mine = me && me.drop === 0 && me.x >= r[0] && me.x <= r[2] + 1 && me.z >= r[1] && me.z <= r[3] + 1;
         const want = seeInside || mine || (selected && selected.b === bid) || (over && view.fit <= 30) ? 1 : 0;
@@ -2957,6 +3043,7 @@
       updateCutaway(dt);
       updateNightLights(dt, now / 1000);
       updateKaraoke(now / 1000);
+      updateFeed(now / 1000);
       if (!reduceMotion) {
         waterPlanes.forEach((m, i) => {
           m.material.map.offset.x += dt * (0.03 + i * 0.01);

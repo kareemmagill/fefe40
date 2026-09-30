@@ -325,7 +325,7 @@
     const t = env.t, n = ms.length;
     if (n === 1) {
       const a = ms[0], lv = env.drunk(a);
-      const l = LOUNGERS[Math.floor(hashStr(a.key) * LOUNGERS.length)];
+      const l = LOUNGERS.slice().sort((p, q) => Math.hypot(p[0] - a.x, p[1] - a.z) - Math.hypot(q[0] - a.x, q[1] - a.z))[0];
       const onLounger = { spot: l.slice(), heading: 0 };
       if (cheeky(a) && lv >= 3) return [Object.assign({ act: "facedown" }, onLounger)];
       if (cheeky(a) && lv >= 2) return [Object.assign({ act: "hangover" }, onLounger)];
@@ -459,6 +459,15 @@
     });
   }
 
+  // the cabana's daybed: napping or sunbathing side by side, anyone extra sits on the edge chatting
+  function planCabana(ms, env) {
+    const t = env.t, beds = [[64.9, 31.2], [66.1, 31.2], [67.2, 31.2]];
+    return ms.map((a, i) => {
+      if (i < beds.length) return { act: choose(a, ["sunbathe", "nap"], t, 18, "cabana"), spot: beds[i].slice(), heading: 0, bedH: 0.5 };
+      return { act: "chat", spot: [63.6 + (i - 3) * 0.7, 32.5], face: [65.5, 31.2] };
+    });
+  }
+
   function planShower(ms, env, area) {
     const sh = area.shower, n = ms.length, together = n >= 2 && ms.every(cheeky);
     return ms.map((a, i) => {
@@ -490,6 +499,14 @@
         return Object.assign({ act: "pillow" }, pr[i]);
       }
       return Object.assign({ act: "sleepover" }, bed(i));
+    });
+  }
+
+  // round the coffee table: at the candy bowl
+  function planCandy(ms) {
+    return ms.map((a) => {
+      const cx = Math.floor(a.x) + 0.5, cz = Math.floor(a.z) + 0.5, dx = 8 - cx, dz = 10 - cz, d = Math.hypot(dx, dz) || 1;
+      return { act: "candy", spot: [cx + (dx / d) * 0.25, cz + (dz / d) * 0.25], face: [8, 10] };
     });
   }
 
@@ -598,6 +615,7 @@
     { id: "pool", test: (a, env) => { const h = env.heightAt(Math.floor(a.x), Math.floor(a.z)); return h > -50 && h < 1; }, plan: planPool },
     { id: "dance", rect: [44, 26, 49, 33], plan: planDance },
     { id: "smoke", rect: [69, 28, 72, 35], plan: planSmoke },
+    { id: "cabana", rect: [63, 29, 68, 33], plan: planCabana },
     { id: "deck", rect: [51, 15, 69, 33], plan: planDeck },
     { id: "bar", rect: [36, 29, 41, 31], plan: planBar },
     { id: "kitchen", rect: [21, 26, 24, 29], plan: planKitchen },
@@ -609,6 +627,7 @@
     { id: "bath", rect: [13, 11, 18, 14], room: BATH_MAIN, plan: planBath },
     { id: "restroom", rect: [21, 32, 24, 35], room: BATH_REST, plan: planBath }
   ].concat(BEDROOMS.map((room, i) => ({ id: "bed" + i, rect: room.rect, room, plan: planBed })), [
+    { id: "candy", test: (a, env) => env.atCandy(a), plan: planCandy },
     { id: "living", rect: [5, 5, 11, 14], plan: planLiving },
     { id: "lanai", rect: [4, 16, 19, 20], seats: LANAI_SEATS, plan: planLanai },
     { id: "lanai2", rect: [26, 14, 43, 18], seats: LANAI2_SEATS, plan: planLanai },
@@ -756,9 +775,9 @@
       return { pose: p, skinny: m.asg.skinny };
     },
 
-    sunbathe(m) { const p = lie(0.42); p.armR = [-2.9, 0, 0.5]; p.armL = [-2.9, 0, -0.5]; return { pose: p, head: "shades" }; },
+    sunbathe(m) { const p = lie(m.asg.bedH || 0.42); p.armR = [-2.9, 0, 0.5]; p.armL = [-2.9, 0, -0.5]; return { pose: p, head: "shades" }; },
     nap(m) {
-      const p = m.asg.spot ? lie(0.42) : lie(0);
+      const p = m.asg.spot ? lie(m.asg.bedH || 0.42) : lie(0);
       if (m.every(1.3)) m.fx.icon("zzz", m.x, m.y + 0.9, m.z, { size: 0.35 });
       if (!m.asg.spot && m.every(14) && m.t > 3) {
         m.fx.arc("#6B4A2A", [m.x + 0.2, m.y + 6, m.z - 1], [m.x, m.y + 0.4, m.z - 1], 0.6, 0, 0.3);
@@ -1207,6 +1226,26 @@
       if (!heave && m.every(2)) m.fx.icon("drop", m.x, m.y + 2.2, m.z, { size: 0.3 });
       return { pose: p };
     },
+    // wolfing down pick-and-mix, then spinning out on the sugar
+    candy(m) {
+      const u = m.t % 12, p = base();
+      if (u < 4) {
+        const k = toMouth(m.T, 0.7, 0);
+        p.rig[3] = 0.25;
+        p.armR = [lerp(-1.0, -2.3, k), 0, 0.3];
+        p.armL = [lerp(-2.3, -1.0, k), 0, -0.3];
+        if (m.every(0.25)) m.fx.block(["#FF3B6B", "#FEFE40", "#3BE36B", "#FF8A1F", "#2F6FD1"][Math.floor(Math.random() * 5)], 8, m.y + 0.62, 10, { vx: (m.x - 8) * 1.5, vz: (m.z - 10) * 1.5, vy: 3.2, g: 7, size: 0.08, life: 0.45, max: 0.45 });
+        return { pose: p };
+      }
+      p.rig[4] = m.T * 11;
+      p.rig[1] = Math.abs(Math.sin(m.T * 9)) * 0.5;
+      p.armR = [-2.8 + Math.sin(m.T * 17) * 0.6, 0, -0.5];
+      p.armL = [-2.8 - Math.sin(m.T * 17) * 0.6, 0, 0.5];
+      p.legR = [Math.sin(m.T * 13) * 0.5, 0, 0];
+      p.legL = [-Math.sin(m.T * 13) * 0.5, 0, 0];
+      if (m.every(0.3)) m.fx.icon(["star", "bang", "heart", "note"][Math.floor(Math.random() * 4)], m.x + (Math.random() - 0.5), m.y + 2.8, m.z + (Math.random() - 0.5), { size: 0.35, vx: (Math.random() - 0.5) * 2, vy: 2 });
+      return { pose: p };
+    },
     // hair washing under the shower head, water and steam; in Cheeky mode the clothes land in a pile outside the glass
     // and a column of steam covers them up to the neck
     shower(m) {
@@ -1305,7 +1344,7 @@
   }
   // acts where people are meant to be this close, so they aren't nudged apart
   const CLOSE_ACTS = new Set(["kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
-  const HEAD_LOCKED = new Set(["toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
+  const HEAD_LOCKED = new Set(["candy", "toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
   function discoPose(T, side) {
     const p = base(), s = (Math.sin(T * 2.2 * PI) + 1) / 2;
     p.armR = [lerp(-0.6, -2.8, s), 0, lerp(0.7, -0.4, s)];
@@ -1341,6 +1380,7 @@
       get lastDrop() { return lastDrop; },
       drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 150)); },
       scene(room, count) { scenes.push({ room, count }); },
+      atCandy(a) { return (ctx.candy || []).some(([x, z]) => Math.floor(a.x) === x && Math.floor(a.z) === z); },
       treeNear(a) {
         let best = null, bd = 1.55;
         (ctx.trees || []).forEach((tr) => { const d = Math.hypot(tr.x - a.x, tr.z - a.z); if (d < bd) { bd = d; best = tr; } });
@@ -1355,17 +1395,28 @@
       a.av.root.visible = true;
       a.hiddenAct = false;
       a.headLocked = false;
+      // the body was drawn at the act's spot: let app.js ease it back to where the guest really is
+      if (s.vx !== undefined && !(a.drop > 0)) { a.blendX = s.vx - a.x; a.blendZ = s.vz - a.z; }
       if (s.act === "scene") s.shameUntil = env.t + 25;
       if (s.act === "snus") s.buzzUntil = env.t + 30;
+      if (s.act === "candy") s.sugarUntil = env.t + 30;
       s.act = null;
       s.vx = undefined;
     }
     function walkingExtras(a, s, dt) {
       const lv = env.drunk(a);
       const shame = s.shameUntil > env.t;
+      // on a sugar high: sprinting and hopping, arms windmilling
+      const sugar = s.sugarUntil > env.t;
       // fresh out of the bathroom after snus: running faster with both hands in the air
-      const buzz = s.buzzUntil > env.t;
-      a.speedMul = buzz ? 1.6 : 1;
+      const buzz = !sugar && s.buzzUntil > env.t;
+      a.speedMul = sugar ? 1.9 : buzz ? 1.6 : 1;
+      if (sugar) {
+        a.av.parts.armR.rotation.set(-env.t * 14, 0, -0.3);
+        a.av.parts.armL.rotation.set(-env.t * 14 + PI, 0, 0.3);
+        a.av.rig.position.y = Math.abs(Math.sin(env.t * 12)) * 0.25;
+        if (Math.random() < dt * 2) fx.icon(Math.random() < 0.5 ? "star" : "heart", a.x, a.y + 2.8, a.z, { size: 0.3 });
+      }
       if (buzz) {
         a.av.parts.armR.rotation.set(-2.9 + Math.sin(env.t * 14) * 0.25, 0, -0.35);
         a.av.parts.armL.rotation.set(-2.9 - Math.sin(env.t * 14) * 0.25, 0, 0.35);
@@ -1392,7 +1443,7 @@
         actors.forEach((a) => {
           const s = st(a);
           if (a.drop > 0) {
-            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
+            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
           } else s.dropping = false;
           s.on = false;
           if (a.drop > 0 || a.idleT < 0.35) return;
@@ -1442,6 +1493,24 @@
       }
       if (s.vx === undefined) { s.vx = a.x; s.vz = a.z; s.h = a.heading; }
       const tx = asg.spot ? asg.spot[0] : a.x, tz = asg.spot ? asg.spot[1] : a.z;
+      const gx = tx - s.vx, gz = tz - s.vz, gap = Math.hypot(gx, gz);
+      if (gap > 0.35) { // walk over to the act's spot rather than sliding there
+        const step = Math.min(gap, 3.4 * dt);
+        s.vx += (gx / gap) * step;
+        s.vz += (gz / gap) * step;
+        const hh = Math.atan2(gx, gz);
+        s.h += Math.atan2(Math.sin(hh - s.h), Math.cos(hh - s.h)) * Math.min(1, dt * 10);
+        s.walk = (s.walk || 0) + dt * 10;
+        a.av.hold("R", null);
+        a.av.hold("L", null);
+        a.av.setPose(s.walk, true);
+        a.av.root.position.set(s.vx + OX, a.y, s.vz + OZ);
+        a.av.root.rotation.y = s.h;
+        a.av.root.visible = true;
+        a.hiddenAct = false;
+        a.headLocked = false;
+        return;
+      }
       const k = Math.min(1, dt * 6);
       s.vx += (tx - s.vx) * k;
       s.vz += (tz - s.vz) * k;
