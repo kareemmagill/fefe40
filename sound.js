@@ -623,8 +623,43 @@
     }
 
     // Effects are spoken: the synthesised versions didn't sound good enough, so each maps to a voice line (see SPOKEN).
+    // (the car's noises stay real sounds: a horn, tyres, a crunch)
+    const CAR_FX = { horn: 1, crash: 1, skid: 1, bonk: 1 };
     function play(name, x, z, o) {
+      if (CAR_FX[name]) { playSynth(name, x, z, o); return; }
+      if (name === "engine") return; // the running engine is its own sound (setEngine)
       if (Object.prototype.hasOwnProperty.call(SPOKEN, name)) say(SPOKEN[name], x, z);
+    }
+    // The car you're driving: a low two-oscillator growl that climbs with the speed, fading out when you get out.
+    let motor = null;
+    function setEngine(on, speed, x, z) {
+      if (!ctx || !eng.enabled || !running()) return;
+      const t = ctx.currentTime, s = Math.min(12, Math.abs(+speed || 0));
+      if (on && !motor) {
+        const g = ctx.createGain(), fl = ctx.createBiquadFilter(), a = ctx.createOscillator(), b = ctx.createOscillator(), wob = ctx.createOscillator(), wg = ctx.createGain();
+        g.gain.value = 0;
+        fl.type = "lowpass";
+        fl.frequency.value = 300;
+        a.type = "sawtooth";
+        b.type = "square";
+        wob.frequency.value = 9; // the idle's lumpy throb
+        wg.gain.value = 4;
+        wob.connect(wg); wg.connect(a.frequency); wg.connect(b.frequency);
+        a.connect(fl); b.connect(fl); fl.connect(g); g.connect(fxBus);
+        [a, b, wob].forEach((o) => o.start(t));
+        motor = { g, fl, a, b, wob };
+      }
+      if (!motor) return;
+      const f = 34 + s * 7;
+      motor.a.frequency.setTargetAtTime(f, t, 0.12);
+      motor.b.frequency.setTargetAtTime(f * 1.5, t, 0.12);
+      motor.fl.frequency.setTargetAtTime(260 + s * 110, t, 0.12);
+      motor.g.gain.setTargetAtTime(on ? (0.09 + s * 0.012) * Math.max(0.3, place(x, z)) : 0, t, 0.15);
+      if (!on) {
+        const m = motor;
+        motor = null;
+        setTimeout(() => { try { [m.a, m.b, m.wob].forEach((o) => o.stop()); m.g.disconnect(); } catch (e) { /* gone */ } }, 800);
+      }
     }
     function playSynth(name, x, z, o) {
       if (!eng.enabled || !ctx || !Object.prototype.hasOwnProperty.call(FX, name)) return;
@@ -800,6 +835,7 @@
       playClip: safe(playClip),
       setMusic: safe(setMusic),
       setLove: safe(setLove),
+      setEngine: safe(setEngine),
       setMusicArea: safe((g) => { musicArea = typeof g === "number" && isFinite(g) ? clamp(g, -1, 1) : -1; }),
       nextBar: safe(nextBar)
     };

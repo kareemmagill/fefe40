@@ -3200,7 +3200,8 @@
     function crash(c, hit, speed) {
       const fx = party && party.fx, hard = Math.abs(speed), y = c.y + 0.9;
       c.speed = -speed * 0.3;
-      if (!(c === drive.car && me && hard > 2.5 && voiceSay(me, ["drive", "react"], hit.px, hit.pz, 0.8))) sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
+      sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
+      if (c === drive.car && me && hard > 2.5) setTimeout(() => voiceSay(me, ["drive", "react"], hit.px, hit.pz, 0.8), 500); // and what the driver has to say about it
       if (!fx) return;
       if (hit.what === "person") { fx.icon("bang", hit.px, y + 1.6, hit.pz, { size: 0.45 }); c.speed = 0; return; }
       if (hard < 2.5) { fx.icon("bang", hit.px, y + 1, hit.pz, { size: 0.3 }); return; }
@@ -4747,6 +4748,7 @@
       updateTV(now / 1000);
       if (snd && snd.enabled) {
         snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
+        snd.setEngine(!!(me && me.inCar), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);
         // a bedroom scene nearby: the slow jam, from the nearest one
         let loveAt = null, loveD = Infinity;
         loveRooms.forEach((i) => { const l = bedLights[i]; if (!l) return; const d = me ? Math.hypot(l.position.x - OX - me.x, l.position.z - OZ - me.z) : Infinity; if (d < loveD) { loveD = d; loveAt = l.position; } });
