@@ -7,7 +7,8 @@
    still use old skin pixels (P metres), a voxel is half of one.
    Extras: faceFromImage(img, box, opts), decodeFace(str), FACE_N, FACE_MAX, V (metres per voxel).
 
-   look = { body: "m" | "f", outfit, skin: "#rrggbb", hair: "#rrggbb", face, faceL, faceR, faceT, h, wt }
+   look = { body: "m" | "f", outfit, skin: "#rrggbb", hair: "#rrggbb", face, faceL, faceR, faceT, h, wt, strip }
+   strip "swim" (swimwear) or "bare" (plain skin under a pixel mosaic) is worn in place of the outfit: clothes off.
    face / faceL / faceR / faceT may each be
      - a face string from faceFromImage(): "J:" + base64 JPEG or "W:" + base64 WebP (<= 4200 characters), decoded
        asynchronously (the head shows skin with a drawn face for the few milliseconds until it is ready),
@@ -848,9 +849,98 @@
     return out;
   }
 
+  // ---------- clothes off: swimwear, or bare under a pixel mosaic ----------
+  // Painters in place of an outfit, on the HD grids: the torso is 16 x 24 from the shoulders (row 0) to just below the
+  // hips (23), and a leg's rows 0-1 sit inside the hips, so its first row that shows is 2.
+  const skinOnly = () => null;
+  const UNDRESSED = {
+    // Swedish-blue trunks with a yellow waistband
+    trunks: {
+      shirtHD: (x, y, side) => (side === "bottom" ? SB : side === "top" || y < 16 ? null : y < 18 ? SY : SB),
+      sleeveHD: skinOnly,
+      legHD: (x, y) => (y <= 7 ? SB : null)
+    },
+    // a blue swimsuit with yellow trim round the neckline and the legs, and straps over the shoulders
+    swimsuit: {
+      shirtHD: (x, y, side) => {
+        if (side === "bottom") return SB;
+        const strap = side !== "left" && side !== "right" && (x === 3 || x === 4 || x === 11 || x === 12);
+        if (side === "top") return strap ? SB : null;
+        const neck = side === "front" ? 4 : side === "back" ? 7 : 5; // scooped at the front, lower at the back
+        if (y < neck) return strap ? SB : null;
+        return y === neck ? SY : SB;
+      },
+      sleeveHD: skinOnly,
+      legHD: (x, y) => (y <= 1 ? SB : y <= 3 ? SY : null)
+    },
+    // Cheeky mode: plain skin all over, with the mosaic below on top
+    bare: { shirtHD: skinOnly, sleeveHD: skinOnly, legHD: skinOnly }
+  };
+  // Sims-style censoring for "bare": chunky squares of skin, beige and grey standing a little proud of the body, right
+  // round the hips, and across the chest for women. In old skin pixels on the torso, whose pivot is at the hips.
+  function mosaic(add, sk, slim) {
+    const tones = [sk, shade(sk, 1.12), shade(sk, 0.84), mix(sk, 0xc9b28c, 0.5), 0xd9c4a3, 0xb8a384, 0xc4c4c4, 0x9a9a9a, 0x7d7d7d];
+    // squares of about one old pixel over the named faces of a box, each sunk into the body and sticking out a bit
+    const panel = (x0, y0, z0, x1, y1, z1, faces, seed) => {
+      const ny = Math.max(1, Math.round((y1 - y0) / 0.9)), dy = (y1 - y0) / ny;
+      faces.forEach((f, k) => {
+        const len = f === "front" || f === "back" ? x1 - x0 : z1 - z0, n = Math.max(1, Math.round(len / 0.9)), du = len / n;
+        for (let j = 0; j < ny; j++) for (let i = 0; i < n; i++) {
+          const c = tones[Math.floor(noise(i * 3 + k * 17, j * 7, seed) * tones.length)];
+          const out = 0.15 + noise(i + k * 5, j, seed + 1) * 0.3, t = 0.7 + out, y = y0 + j * dy, u = i * du;
+          if (f === "front") add(x0 + u, y, z1 - 0.7, du, dy, t, c);
+          else if (f === "back") add(x0 + u, y, z0 - out, du, dy, t, c);
+          else if (f === "left") add(x1 - 0.7, y, z0 + u, t, dy, du, c);
+          else add(x0 - out, y, z0 + u, t, dy, du, c);
+        }
+      });
+    };
+    panel(-3.6, -1.7, -2.1, 3.6, 2.1, 2.1, ["front", "back", "left", "right"], 3);
+    if (slim) panel(-3.6, 6.1, 0.2, 3.6, 9.5, 2.1, ["front", "left", "right"], 9);
+  }
+  // An outfit's main colours, for a pile of its clothes: the commonest colour on the front of its top, of its skirt (or
+  // its trousers) and of its shoes, and of its hat (null when it has none). HD painters count when there are any.
+  function clothesColors(i) {
+    const o = OUTFITS[((i % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
+    const commonest = (w, h, fn, d) => {
+      const count = new Map();
+      let best = d, most = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let c;
+        try { c = hexInt(fn(x, y)); } catch (e) { c = undefined; }
+        if (c === undefined) continue; // bare skin
+        const n = (count.get(c) || 0) + 1;
+        count.set(c, n);
+        if (n > most) { most = n; best = toHex(c); }
+      }
+      return best;
+    };
+    const top = o.shirtHD ? commonest(16, 24, (x, y) => o.shirtHD(x, y, "front", 16, false), WHITE) : commonest(8, 12, (x, y) => o.shirt(x, y, "front"), WHITE);
+    const sk = o.skirt;
+    const bottom = sk ? (sk.fnHD ? commonest(20, sk.len * 2, (x, y) => sk.fnHD(x, y, "front"), top) : commonest(8, sk.len, (x, y) => sk.fn(x, y), top))
+      : o.legHD ? commonest(6, 22, (x, y) => o.legHD(x, y, "front", 0), top) : commonest(4, 11, (x, y) => o.leg(x, y, "front", 0), top);
+    const shoe = o.legHD ? commonest(6, 2, (x, y) => o.legHD(x, y + 22, "front", 0), BLACK) : commonest(4, 1, (x) => o.leg(x, 11, "front", 0), BLACK);
+    let hat = null;
+    const hatFn = o.hatHD || o.hat;
+    if (hatFn) {
+      const vol = new Map();
+      let most = 0;
+      try {
+        hatFn((x, y, z, w, h, d, color) => {
+          const c = hexInt(color);
+          if (c === undefined) return;
+          const v = (vol.get(c) || 0) + w * h * d;
+          vol.set(c, v);
+          if (v > most) { most = v; hat = toHex(c); }
+        });
+      } catch (e) { hat = null; }
+    }
+    return { top, bottom, shoe, hat };
+  }
+
   // ---------- build ----------
   function build(T, look) {
-    const outfit = OUTFITS[((look.outfit % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
+    const outfit = look.strip === "bare" ? UNDRESSED.bare : look.strip === "swim" ? UNDRESSED[look.body === "f" ? "swimsuit" : "trunks"] : OUTFITS[((look.outfit % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
     const slim = look.body === "f";
     const aw = slim ? 3 : 4;
     const sk = hexInt(look.skin, 0xd9a57e), hr = hexInt(look.hair, 0x4a3020);
@@ -945,6 +1035,7 @@
     blocksOn(head, outfit.hatHD || outfit.hat);
     blocksOn(rig, outfit.extrasHD || outfit.extras);
     blocksOn(armR, outfit.heldHD || outfit.held);
+    if (look.strip === "bare") blocksOn(torso, (add) => mosaic(add, sk, slim));
     fitShape(rig, head, shape);
 
     // Things held in a hand ("R", "L"), worn on the head ("head") or round the waist ("body"), swapped by the party.
@@ -982,6 +1073,7 @@
       hold,
       holding: () => Object.fromEntries(Object.entries(held).map(([k, v]) => [k, v.kind])),
       moustache,
+      hasMoustache: () => tache,
       // phase advances with distance walked; moving blends between walking and standing
       setPose(phase, moving) {
         const a = moving ? Math.sin(phase) * 0.75 : 0;
@@ -1183,6 +1275,7 @@
 
   window.FefeAvatar = {
     OUTFITS, build, P, V, bodyShape, HEIGHT, WEIGHT, faceFromImage, decodeFace, isFaceString, FACE_N, FACE_MAX,
+    clothesColors,
     reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = (32 + 8 * (HEAD - 1)) * P * sh.s; av.scale = sh.s; }
   };
 })();

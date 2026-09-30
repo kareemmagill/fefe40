@@ -1570,9 +1570,12 @@
     }
     function handleTap(cx, cy) {
       if (me && me.inCar) return; // driving: the pedals do the work
+      pendingPile = null;
       if (me && me.drop === 0) {
         const c = carFromTap(cx, cy);
         if (c) { goToCar(c); clearSelection(); return; }
+        const pile = pileFromTap(cx, cy); // a pile of clothes: go and put it on
+        if (pile) { goToPile(pile); clearSelection(); return; }
       }
       pendingCar = null;
       if (tapTV(cx, cy)) return; // the karaoke TV while its video plays
@@ -1909,6 +1912,7 @@
       scene.remove(a.av.root);
       a.av.dispose();
       a.tag.remove();
+      forgetClothes(a);
     }
     function poseActor(a, dt, moving, heading) {
       if (a.drop > 0) {
@@ -2250,6 +2254,12 @@
     }
     function upsertGhost(id, clean, at) {
       let g = ghosts.get(id);
+      if (g && g.key !== clean.key && sameButClothes(g, clean)) { // new clothes only: change them where they are
+        g.actor.wear = wearOf(g.actor); // (what they have on now, before their record changes)
+        g.key = clean.key;
+        g.actor.look = clean.look;
+        if (!g.live && !g.actor.undressed) wear(g.actor, clean.look.outfit, true);
+      }
       if (g && g.key !== clean.key) { dropGhost(id, g); g = null; }
       const day = clean.nodes.length ? clean.nodes : clean.nodesN.length ? clean.nodesN : [[0, SPAWN[0][0], SPAWN[0][1]]];
       if (!g) {
@@ -2467,6 +2477,7 @@
       lastBeatCell = cell;
       const beat = { t: Date.now(), x, z, n: night ? 1 : 0 };
       if (me.inCar) { beat.c = me.inCar.idx + 1; beat.h = hdg64(me.inCar.h); } // which car they're driving, and which way
+      clothesBeat(beat); // what I'm wearing, and where my clothes are while they're off
       Promise.resolve(store.beat(myId, beat)).catch(() => {});
     }
     let polling = false;
@@ -2483,6 +2494,7 @@
           const t = +l.t, x = Math.floor(+l.x), z = Math.floor(+l.z);
           const c = l.c | 0;
           if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64 };
+          if (clean[id]) cleanWear(clean[id], l); // what they're wearing, and where their clothes are
         });
         liveMap = clean;
         if (Object.keys(clean).some((id) => id !== myId && liveHere(id) && !ghosts.has(id))) syncGuests();
@@ -2743,6 +2755,8 @@
           say(key, x, z, a) { if (!(a && voiceSay(a, LINE_VOICE[key], x, z, 0.6)) && snd && snd.enabled) snd.say(key, x, z); },
           voice(a, act, x, z) { return voiceAct(a, act, x, z); },
           onScenes(rooms) { loveRooms = rooms; },
+          onUndress: undress,
+          onRedress: redress,
           nearestCar: nearestParkedCar,
           onSteamy(cars) { steamyCars = cars.slice(); }
         })
@@ -2895,6 +2909,231 @@
         const id = sung.indexOf(top) >= 0 ? top : sung[(Math.random() * sung.length) | 0], buf = clipBuffer(v.owner, id);
         if (buf && snd.playClip(buf, a.x, a.z, { rate: v.rate, choir: true, at, vol: 1.2 })) party.fx.icon("note", a.x, a.y + 2.8, a.z, { size: 0.35, vy: 1 });
       });
+    }
+
+    // ---------- clothes: off for the pool and for bed with company, left in piles anyone can pick up ----------
+    // actions.js says when someone's clothes come off (and where they land) and when the act is over. Replays dress
+    // again as soon as it is, and their pile goes; I stay undressed until I tap a pile of clothes, mine or anyone's, and
+    // put it on. Live guests look however their own phone says: the w in their heartbeat (see liveClothes).
+    const piles = [];
+    let pendingPile = null, myPile = null;
+    const isStrip = (k) => k === "swim" || k === "bare";
+    const wearOf = (a) => (a.wear === undefined ? a.look.outfit : a.wear); // an outfit number, "swim" or "bare"
+    const stripFor = (look) => (look.cheeky ? "bare" : "swim");
+    // The heartbeat says what I'm wearing, w: an outfit, or -1 swimwear and -2 bare (my record keeps the clothes I last
+    // wore, so my replay stays dressed), and while they're off, where my clothes are (px, pz)
+    function clothesBeat(beat) {
+      const k = wearOf(me);
+      beat.w = k === "bare" ? -2 : k === "swim" ? -1 : k;
+      if (me.undressed && piles.indexOf(myPile) >= 0) { beat.px = Math.round(myPile.x * 10) / 10; beat.pz = Math.round(myPile.z * 10) / 10; }
+    }
+    // the same from someone else's heartbeat (pollLive), cleaned up
+    function cleanWear(to, l) {
+      to.w = Number.isInteger(l.w) && l.w >= -2 && l.w < FefeAvatar.OUTFITS.length ? l.w : null;
+      const px = +l.px, pz = +l.pz;
+      to.pile = Number.isFinite(px) && Number.isFinite(pz) && inMap(Math.floor(px), Math.floor(pz)) ? [px, pz] : null;
+    }
+    // Each guest keeps the last few looks they wore, so going in and out of the pool doesn't rebuild their avatar
+    // every time; the new look takes the old one's place, pose, props and moustache.
+    function wear(a, key, puff) {
+      const cur = wearOf(a), old = a.av;
+      if (cur === key) return;
+      a.avs = a.avs || new Map();
+      a.avs.delete(cur);
+      a.avs.set(cur, old); // the Map runs from the look worn longest ago to the latest
+      let av = a.avs.get(key);
+      a.avs.delete(key);
+      if (!av) {
+        av = FefeAvatar.build(T, Object.assign({}, a.look, isStrip(key) ? { strip: key } : { outfit: key, strip: null }));
+        av.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      }
+      a.avs.set(key, av);
+      av.root.position.copy(old.root.position);
+      av.root.rotation.copy(old.root.rotation);
+      av.root.visible = old.root.visible;
+      av.rig.position.copy(old.rig.position);
+      av.rig.rotation.copy(old.rig.rotation);
+      Object.keys(av.parts).forEach((k) => { av.parts[k].position.copy(old.parts[k].position); av.parts[k].rotation.copy(old.parts[k].rotation); });
+      const held = old.holding();
+      ["R", "L", "head", "body"].forEach((s) => { av.hold(s, held[s] || null); old.hold(s, null); });
+      av.moustache(old.hasMoustache());
+      scene.remove(old.root);
+      scene.add(av.root);
+      a.av = av;
+      a.wear = key;
+      a.undressed = isStrip(key);
+      for (const [k, v] of a.avs) { if (a.avs.size <= 3) break; if (v !== av) { v.dispose(); a.avs.delete(k); } }
+      if (puff) poof(av.root.position.x - OX, av.root.position.y, av.root.position.z - OZ);
+    }
+    // the wardrobe or leaving: every other look this guest had is out of date
+    function forgetLooks(a) {
+      if (a.avs) a.avs.forEach((v) => { if (v !== a.av) v.dispose(); });
+      a.avs = null;
+    }
+    // a guest goes: their looks, and the clothes they left lying about (mine stay where I left them)
+    function forgetClothes(a) {
+      forgetLooks(a);
+      if (a !== me) piles.filter((p) => p.owner === a).forEach((p) => removePile(p, false));
+    }
+    // A folded pile: the trousers (or the skirt) under the top, the shoes in front, the hat on top if there is one
+    function pileMesh(outfit) {
+      const c = FefeAvatar.clothesColors(outfit), g = new T.Group();
+      const part = (x, y, z, w, h, d, color, turn) => {
+        const m = new T.Mesh(carBox, carMat(color, "solid"));
+        m.scale.set(w, h, d);
+        m.position.set(x, y + h / 2, z);
+        m.rotation.y = turn || 0;
+        m.castShadow = true;
+        g.add(m);
+      };
+      part(0, 0, 0, 0.56, 0.11, 0.4, c.bottom);
+      part(0.02, 0.11, -0.02, 0.48, 0.1, 0.34, c.top, 0.16);
+      part(-0.12, 0, 0.34, 0.14, 0.12, 0.26, c.shoe, 0.25);
+      part(0.1, 0, 0.36, 0.14, 0.12, 0.26, c.shoe, -0.1);
+      if (c.hat) part(0, 0.21, -0.02, 0.28, 0.12, 0.28, c.hat, 0.6);
+      return g;
+    }
+    function addPile(owner, outfit, x, z) {
+      // clothes don't land on other clothes: the nearest free bit of floor close by
+      const free = (px, pz) => piles.every((p) => Math.hypot(p.x - px, p.z - pz) > 0.7);
+      let at = [x, z];
+      if (!free(x, z)) {
+        let bd = Infinity;
+        for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+          const cx = Math.floor(x) + dx, cz = Math.floor(z) + dz, d = dx * dx + dz * dz;
+          if (d < bd && heightAt(cx, cz) >= 1 && reach[cellIdx(cx, cz)] && free(cx + 0.5, cz + 0.5)) { bd = d; at = [cx + 0.5, cz + 0.5]; }
+        }
+      }
+      const p = { owner, outfit, x: at[0], z: at[1], y: worldY(Math.floor(at[0]), Math.floor(at[1])), g: pileMesh(outfit), drop: 0.8, dropV: 0, bob: Math.random() * 6, spark: 0 };
+      p.g.rotation.y = Math.random() * Math.PI * 2;
+      p.g.position.set(p.x + OX, p.y + p.drop, p.z + OZ);
+      scene.add(p.g);
+      piles.push(p);
+      if (piles.length > 30) { const q = piles.find((o) => o.owner !== me); if (q) removePile(q, false); } // tidy away the oldest
+      return p;
+    }
+    function removePile(p, puff) {
+      const i = piles.indexOf(p);
+      if (i < 0) return;
+      piles.splice(i, 1);
+      scene.remove(p.g);
+      if (puff) poof(p.x, p.y, p.z);
+      if (pendingPile === p) pendingPile = null;
+    }
+    // Piles are small on a phone, so a tap anywhere near one counts; not under a roof that's showing, though
+    const pileV = new T.Vector3();
+    function pileFromTap(cx, cy) {
+      const r = canvas.getBoundingClientRect();
+      let best = null, bd = Math.max(30, (0.7 * r.width) / (cam.right - cam.left));
+      piles.forEach((p) => {
+        for (const [bid, b] of buildings) {
+          const rr = byId[bid] ? byId[bid].rect : CUT_RECTS[bid];
+          if (b.fade < 0.5 && rr && p.x >= rr[0] && p.x <= rr[2] + 1 && p.z >= rr[1] && p.z <= rr[3] + 1) return;
+        }
+        pileV.set(p.x + OX, p.y + 0.15, p.z + OZ).project(cam);
+        const d = Math.hypot(r.left + ((pileV.x + 1) / 2) * r.width - cx, r.top + ((1 - pileV.y) / 2) * r.height - cy);
+        if (d < bd) { bd = d; best = p; }
+      });
+      return best;
+    }
+    function goToPile(p) {
+      pendingCar = null;
+      pendingPile = p;
+      if (walkTo(Math.floor(p.x), Math.floor(p.z))) follow = true;
+    }
+    // Put on a pile of clothes, mine or anyone's: it's gone from here, and if I was dressed mine lie where it was
+    function takePile(p) {
+      const was = wearOf(me);
+      if (was === p.outfit) { toast("You're wearing those already", 3000); return; }
+      removePile(p, false);
+      if (!isStrip(was)) addPile(me, was, p.x, p.z);
+      wear(me, p.outfit, true);
+      myLook.outfit = p.outfit;
+      sfx("pop", me.x, me.z);
+      saveMe(false); // my record, and so my replay and everyone else's view of me, wears them now
+      lastBeat = 0; // and live viewers hear straight away
+      toast("You put on the " + FefeAvatar.OUTFITS[p.outfit].name, 4000);
+    }
+    // actions.js: someone's clothes come off for the pool or for bed, into a pile at (x, z)
+    function undress(a, x, z) {
+      if (a === me) {
+        if (me.undressed) return; // already out of them (in the pool first, say)
+        myPile = addPile(me, wearOf(me), x, z);
+        wear(me, stripFor(myLook), true);
+        lastBeat = 0;
+        toast("Your clothes are in a pile where you got in. Tap any pile of clothes to get dressed", 6000);
+        return;
+      }
+      const g = ghosts.get(a.key);
+      if (!g || g.live) return; // live guests look however their own phone says
+      if (!g.pile || piles.indexOf(g.pile) < 0) g.pile = addPile(a, a.look.outfit, x, z);
+      wear(a, stripFor(a.look), true);
+    }
+    // actions.js: the act is over. Replays dress again and their pile goes; I stay as I am until I pick up a pile.
+    function redress(a) {
+      if (a === me) {
+        if (me.undressed) toast("Tap any pile of clothes to get dressed", 5000);
+        return;
+      }
+      const g = ghosts.get(a.key);
+      if (!g) return;
+      if (g.pile) { removePile(g.pile, true); g.pile = null; }
+      if (!g.live) wear(a, a.look.outfit, true);
+    }
+    // What a live guest's phone says they wear: an outfit, or -1 swimwear and -2 bare (only if they're Cheeky)
+    function liveWear(id, look) {
+      const w = liveMap[id] ? liveMap[id].w : null;
+      if (typeof w !== "number") return look.outfit;
+      return w >= 0 ? w : w === -2 && look.cheeky ? "bare" : "swim";
+    }
+    // Live guests wear exactly that. When it changes their clothes come off into a pile, or they've put on a pile: the
+    // nearest one of those clothes goes, and if they were dressed theirs lie in its place. Replays wear their record.
+    function liveClothes(g, id) {
+      const a = g.actor, live = !!g.live, now = liveMap[id];
+      if (live !== !!g.wasLive) { // coming online (their clothes, if off, lie where they say) or going (back to the replay)
+        g.wasLive = live;
+        if (g.pile) { removePile(g.pile, false); g.pile = null; }
+        if (!live) piles.filter((p) => p.owner === a).forEach((p) => removePile(p, true));
+        const want = live ? liveWear(id, a.look) : a.look.outfit;
+        if (isStrip(want) && now && now.pile) addPile(a, a.look.outfit, now.pile[0], now.pile[1]);
+        wear(a, want, false);
+        return;
+      }
+      if (!live) return;
+      const want = liveWear(id, a.look), was = wearOf(a);
+      if (want === was) return;
+      if (isStrip(want)) {
+        if (!isStrip(was)) { const at = now && now.pile ? now.pile : party ? party.pileSpot(a) : [a.x, a.z]; addPile(a, was, at[0], at[1]); }
+      } else { // (near where their phone says they are: the ghost may still be on its way there)
+        const hx = now ? now.x + 0.5 : a.x, hz = now ? now.z + 0.5 : a.z;
+        let took = null, bd = 3;
+        piles.forEach((p) => { const d = Math.hypot(p.x - hx, p.z - hz); if (p.outfit === want && d < bd) { bd = d; took = p; } });
+        if (took) { removePile(took, false); if (!isStrip(was)) addPile(a, was, took.x, took.z); }
+      }
+      wear(a, want, true);
+    }
+    // Every frame: putting on the pile I walked over to, live guests' clothes, and piles landing, bobbing and sparkling
+    function updateClothes(dt) {
+      if (pendingPile && me && me.drop === 0 && !me.inCar && !myPath.length) {
+        const p = pendingPile;
+        pendingPile = null;
+        if (piles.indexOf(p) >= 0 && Math.hypot(p.x - me.x, p.z - me.z) < 1.6) takePile(p);
+      }
+      ghosts.forEach(liveClothes);
+      const t = performance.now() / 1000;
+      piles.forEach((p) => {
+        if (p.drop > 0) { p.dropV += 14 * dt; p.drop = Math.max(0, p.drop - p.dropV * dt); }
+        p.g.position.y = p.y + p.drop + 0.03 + Math.sin(t * 2.4 + p.bob) * 0.03;
+        if (party && !p.drop && t > p.spark) {
+          p.spark = t + 1.6 + Math.random() * 1.8;
+          party.fx.icon("star", p.x + (Math.random() - 0.5) * 0.5, p.y + 0.5, p.z + (Math.random() - 0.5) * 0.5, { size: 0.22, vy: 0.6, life: 0.8, max: 0.8 });
+        }
+      });
+    }
+    // a guest's record changed only in what they wear (a pile picked up, or the wardrobe): no need to drop them in again
+    function sameButClothes(g, clean) {
+      const cut = (key, name, look) => { const pre = name + "|" + look.body + "|"; return key.indexOf(pre + look.outfit + "|") === 0 ? pre + key.slice(pre.length + String(look.outfit).length + 1) : key; };
+      return cut(g.key, g.actor.name, g.actor.look) === cut(clean.key, clean.name, clean.look);
     }
 
     // ---------- cars: tap one to get in, drive it about, crash it ----------
@@ -3511,6 +3750,7 @@
       updateMe(dt);
       ghosts.forEach((g, id) => updateGhost(g, id, dt));
       updatePuffs(dt);
+      updateClothes(dt);
       if (!party) return;
       actorList.length = 0;
       if (me) actorList.push(me);
@@ -4129,11 +4369,15 @@
       me.look = myLook; // the acts read Cheeky from here
       scene.remove(me.av.root);
       me.av.dispose();
+      forgetLooks(me);
       me.av = FefeAvatar.build(T, myLook);
+      me.wear = myLook.outfit; // dressed again, if I was out of my clothes
+      me.undressed = false;
       me.av.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       scene.add(me.av.root);
       poof(me.x, me.y, me.z);
       saveMe(false);
+      lastBeat = 0;
     }
     const BEDROOMS = [[13, 5, 18, 9], [27, 5, 31, 12], [38, 5, 42, 12], [54, 6, 60, 11]];
     const wardrobeBtn = $("wardrobe");
@@ -4335,6 +4579,18 @@
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
     window.fefeDebug.tv = tvState;
+
+    // test hooks for clothes: walk me somewhere, who's wearing what (and how many looks they keep), the piles, where a
+    // pile is on screen, and the test crowd's clock (seconds into their loop, 45 s a round)
+    Object.assign(window.fefeDebug, {
+      walkMe: (x, z) => { const ok = walkTo(x, z); follow = true; return ok; },
+      putMe: (x, z) => { myPath = []; me.x = x + 0.5; me.z = z + 0.5; me.y = worldY(x, z); },
+      wearing: () => actorList.map((a) => [a.name, wearOf(a), a.avs ? a.avs.size : 1, !!a.undressed]),
+      piles: () => piles.map((p) => [p.owner.name, p.outfit, +p.x.toFixed(2), +p.z.toFixed(2), +p.y.toFixed(2)]),
+      pileScreen: (i) => { const p = piles[i], v = new T.Vector3(p.x + OX, p.y + 0.15, p.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
+      npcClock: (t) => ghosts.forEach((g) => { if (g.npc) { g.t = t % g.dur; g.i = 0; g.actor.drop = 12; g.actor.dropV = 0; } }),
+      view: () => [+view.fit.toFixed(2), +(view.target.x - OX).toFixed(2), +(view.target.z - OZ).toFixed(2)]
+    });
 
     // ---------- per-frame updates ----------
     function updateCutaway(dt) {

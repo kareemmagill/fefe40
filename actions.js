@@ -1302,11 +1302,13 @@
       if (m.asg.bare) {
         const k = m.a.key, sc = m.a.av.scale || 1, neck = 24 * (window.FefeAvatar ? FefeAvatar.P : 0.069) * sc - 0.04;
         m.fx.keepBox("steam" + k, "#F4F8FF", m.x, m.y + neck / 2, m.z, 0.95, neck, 0.95, 0.94);
-        const c = outfitColors(m.a.look), px = sh.pile[0], pz = sh.pile[1] + m.asg.i * 0.55, fy = m.y + 0.02;
-        m.fx.keepBox("pants" + k, c.leg, px, fy + 0.05, pz, 0.5, 0.1, 0.4);
-        m.fx.keepBox("shirt" + k, c.shirt, px + 0.03, fy + 0.14, pz - 0.02, 0.44, 0.08, 0.34);
-        m.fx.keepBox("shoe1" + k, c.shoe, px + 0.4, fy + 0.06, pz + 0.12, 0.14, 0.12, 0.26);
-        m.fx.keepBox("shoe2" + k, c.shoe, px + 0.58, fy + 0.06, pz - 0.05, 0.14, 0.12, 0.26);
+        if (!m.a.undressed) { // (someone who came in with their clothes already off has none to drop)
+          const c = outfitColors(m.a.look), px = sh.pile[0], pz = sh.pile[1] + m.asg.i * 0.55, fy = m.y + 0.02;
+          m.fx.keepBox("pants" + k, c.leg, px, fy + 0.05, pz, 0.5, 0.1, 0.4);
+          m.fx.keepBox("shirt" + k, c.shirt, px + 0.03, fy + 0.14, pz - 0.02, 0.44, 0.08, 0.34);
+          m.fx.keepBox("shoe1" + k, c.shoe, px + 0.4, fy + 0.06, pz + 0.12, 0.14, 0.12, 0.26);
+          m.fx.keepBox("shoe2" + k, c.shoe, px + 0.58, fy + 0.06, pz - 0.05, 0.14, 0.12, 0.26);
+        }
       }
       return { pose: p };
     },
@@ -1411,6 +1413,9 @@
   // acts where people are meant to be this close, so they aren't nudged apart
   const CLOSE_ACTS = new Set(["steamy", "kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
   const HEAD_LOCKED = new Set(["candy", "toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
+  // Clothes come off in the pool, and in a bedroom with company: app.js swaps the look (swimwear, or bare under a pixel
+  // mosaic in Cheeky mode) and leaves the clothes in a pile (ctx.onUndress), then dresses replays again (ctx.onRedress).
+  const undresses = (area, ms) => area.id === "pool" || (/^bed\d$/.test(area.id) && ms.length >= 2);
   function discoPose(T, side) {
     const p = base(), s = (Math.sin(T * 2.2 * PI) + 1) / 2;
     p.armR = [lerp(-0.6, -2.8, s), 0, lerp(0.7, -0.4, s)];
@@ -1531,10 +1536,35 @@
         }
       }
     }
+    // Where clothes land: on the floor where they stand (by the bed), else the poolside where they just got in, else the
+    // nearest dry floor to the pool edge
+    function pileSpot(a, s) {
+      const cx = Math.floor(a.x), cz = Math.floor(a.z);
+      if (env.heightAt(cx, cz) >= 1) return [cx + 0.5, cz + 0.5];
+      if (env.t - s.dryT < 60 && Math.abs(s.dryX - cx) + Math.abs(s.dryZ - cz) <= 16) return [s.dryX + 0.5, s.dryZ + 0.5];
+      let best = [a.x, a.z], bd = Infinity;
+      for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) {
+        const d = dx * dx + dz * dz;
+        if (d < bd && env.heightAt(cx + dx, cz + dz) >= 1) { bd = d; best = [cx + dx + 0.5, cz + dz + 0.5]; }
+      }
+      return best;
+    }
+    // Every frame: note the last dry floor they stood on, and once they're out of the pool or the bed tell app.js to
+    // dress them again (not while they're still in the water, walking to another spot in the pool)
+    function clothes(a, s) {
+      const cx = Math.floor(a.x), cz = Math.floor(a.z), h = env.heightAt(cx, cz), wet = h > -50 && h < 1;
+      if (a.drop > 0 || a.inCar) s.dryT = -Infinity; // dropping in somewhere new, or driving off
+      else if (h >= 1) { s.dryX = cx; s.dryZ = cz; s.dryT = env.t; }
+      if (s.stripped && !(s.on && s.stripOn) && !(wet && a.drop === 0 && !a.inCar)) {
+        s.stripped = false;
+        if (ctx.onRedress) ctx.onRedress(a);
+      }
+    }
     return {
       fx,
       actOf(a) { const s = states.get(a); return s ? s.act : null; },
       close(a) { const s = states.get(a); return !!(s && s.act && CLOSE_ACTS.has(s.act)); },
+      pileSpot(a) { return pileSpot(a, st(a)); }, // where their clothes would land now (for live guests)
       update(dt, actors, nowMs) {
         const t = nowMs / 1000;
         env.t = t;
@@ -1557,6 +1587,7 @@
         groups.forEach(({ area, members }) => {
           members.sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : 0));
           const plan = area.plan(members, env, area);
+          if (undresses(area, members)) plan.forEach((p) => { if (p) p.strip = true; });
           members.forEach((a, i) => run(a, plan[i] || { act: "idle" }, area, dt));
         });
         actors.forEach((a) => {
@@ -1564,6 +1595,7 @@
           if (!s.on && s.act) stop(a, s);
           if (!s.on && a.moving) walkingExtras(a, s, dt);
           towel(a, s);
+          clothes(a, s);
         });
         scenes.forEach(({ room, count }) => {
           const [bx, bz] = room.beds[0];
@@ -1604,6 +1636,17 @@
         s.sndAt = env.t + 0.3 + hashStr(a.key + asg.act) * 0.8;
         if (area.id === "bar") { s.bar += 1; s.barAt = env.t; }
         if (SOBERING.has(asg.act)) { s.bar = 0; s.barTime = 0; } // a swim, a shower or some sport sobers you up
+      }
+      s.stripOn = !!asg.strip;
+      if (asg.strip && s.stripped && s.stripArea !== area.id) { // somewhere else all of a sudden: that act is over
+        s.stripped = false;
+        if (ctx.onRedress) ctx.onRedress(a);
+      }
+      if (asg.strip && !s.stripped) { // off come the clothes, into a pile where they got in
+        s.stripped = true;
+        s.stripArea = area.id;
+        const at = pileSpot(a, s);
+        if (ctx.onUndress) ctx.onUndress(a, at[0], at[1]);
       }
       if (area.id === "bar") { // every 15 s of drinking is another level, up to 5
         s.barTime = (s.barTime || 0) + dt;
