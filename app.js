@@ -456,6 +456,9 @@
       toilet(18, 14, fy, "E");
       box(15.1, fy, 14.25, 1.8, 0.9, 0.7, C.woodLight);
       box(15.5, fy + 0.9, 14.35, 1, 0.12, 0.5, C.white);
+      // a tin of snus on the counter
+      box(15.16, fy + 0.9, 14.3, 0.22, 0.07, 0.22, "#1F3C88", { j: false });
+      box(15.15, fy + 0.97, 14.29, 0.24, 0.03, 0.24, "#E8E8E8", { j: false });
       box(15.3, fy + 1.35, 14.93, 1.4, 1, 0.05, C.mirror, glow);
       box(13, fy, 12.95, 2, 2.2, 0.08, C.clearGlass, { kind: "clear", j: false });
       box(14.95, fy, 11, 0.08, 2.2, 2, C.clearGlass, { kind: "clear", j: false });
@@ -583,6 +586,8 @@
       // restrooms
       box(21.1, fy, 32.1, 3.8, 0.9, 0.6, C.white);
       box(21.1, fy + 1.3, 32.1, 3.8, 0.9, 0.05, C.mirror, glow);
+      box(22.4, fy + 0.9, 32.35, 0.22, 0.07, 0.22, "#1F3C88", { j: false }); // snus tin
+      box(22.39, fy + 0.97, 32.34, 0.24, 0.03, 0.24, "#E8E8E8", { j: false });
       toilet(21, 35, fy, "S");
       toilet(23, 35, fy, "S");
       box(22.45, fy, 34.2, 0.1, 2, 1.8, C.woodLight);
@@ -2101,6 +2106,8 @@
         skin: myLook.skin,
         hair: myLook.hair,
         face: myLook.face ? toB64(myLook.face) : "",
+        faceL: myLook.faceL ? toB64(myLook.faceL) : "",
+        faceR: myLook.faceR ? toB64(myLook.faceR) : "",
         cheeky: myLook.cheeky ? 1 : 0,
         h: FefeAvatar.bodyShape(myLook).h,
         wt: FefeAvatar.bodyShape(myLook).wt,
@@ -2121,13 +2128,17 @@
     function sanitize(r) {
       if (!r || typeof r !== "object") return null;
       const hex = (c, d) => (typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : d);
-      let face = null;
-      if (typeof r.face === "string" && r.face.length <= 4200) {
+      const photo = (str) => {
+        if (typeof str !== "string" || !str || str.length > 4200) return null;
         try {
-          const b = atob(r.face);
-          if (b.length === 768 || b.length === 3072) { face = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) face[i] = b.charCodeAt(i); }
-        } catch (e) { face = null; }
-      }
+          const b = atob(str);
+          if (b.length !== 768 && b.length !== 3072) return null;
+          const px = new Uint8Array(b.length);
+          for (let i = 0; i < b.length; i++) px[i] = b.charCodeAt(i);
+          return px;
+        } catch (e) { return null; }
+      };
+      const face = photo(r.face), faceL = photo(r.faceL), faceR = photo(r.faceR);
       const parse = (track) => {
         const nodes = [];
         if (typeof track !== "string" || track.length > 30000) return nodes;
@@ -2141,11 +2152,11 @@
       };
       const nodes = parse(r.track), nodesN = parse(r.trackN);
       const name = String(r.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest";
-      const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, cheeky: r.cheeky === 1 };
+      const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, faceL, faceR, cheeky: r.cheeky === 1 };
       const sh = FefeAvatar.bodyShape({ body: look.body, h: +r.h || 0, wt: +r.wt || 0 }); // clamps to sensible sizes
       look.h = sh.h;
       look.wt = sh.wt;
-      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, typeof r.face === "string" ? r.face : ""].join("|") };
+      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -2763,8 +2774,9 @@
       const W = 192, H = 96;
       const rt = new T.WebGLRenderTarget(W, H, { minFilter: T.LinearFilter, magFilter: T.LinearFilter });
       const cam2 = new T.PerspectiveCamera(62, W / H, 0.1, 40);
-      cam2.position.set(18.6 + OX, 4.55, 9.55 + OZ);
-      cam2.lookAt(15.2 + OX, 2.7, 6.6 + OZ);
+      // low in the south-west corner, clear of the wardrobe, looking across at the beds
+      cam2.position.set(13.35 + OX, 3.85, 9.65 + OZ);
+      cam2.lookAt(15.8 + OX, 2.55, 6.3 + OZ);
       const drop = (geo) => geo.setAttribute("aDrop", new T.BufferAttribute(new Uint8Array(geo.attributes.position.count).fill(dropAt(11.3, 3.2, 10, 3) + 14), 1));
       const geo = new T.PlaneGeometry(1.94, 0.94);
       drop(geo);
@@ -2980,13 +2992,47 @@
       stopCamera();
       updateMake();
     }
-    snapBtn.addEventListener("click", () => { if (video.videoWidth) setPhoto(video, video.videoWidth, video.videoHeight, true); });
-    retakeBtn.addEventListener("click", () => { photo = null; startCamera(); });
+    // Head scan: straight on, then turned right and left, so the sides of the block head get ears and hair too.
+    // Frames are mirrored like the preview; turning right shows the left side of the head, turning left the right side.
+    const scanMsg = $("scan-msg");
+    let sides = null;
+    function grabFrame() {
+      const vw = video.videoWidth, vh = video.videoHeight, sz = Math.min(vw, vh), c = document.createElement("canvas");
+      c.width = c.height = shot.width;
+      const g = c.getContext("2d");
+      g.translate(c.width, 0);
+      g.scale(-1, 1);
+      g.drawImage(video, (vw - sz) / 2, (vh - sz) / 2, sz, sz, 0, 0, c.width, c.height);
+      return c;
+    }
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+    let scanning = false;
+    async function scanHead() {
+      if (!video.videoWidth || scanning) return;
+      scanning = true;
+      snapBtn.disabled = true;
+      const frames = [];
+      for (const text of ["Look straight at the camera", "Turn your head to the right \u2192", "Now slowly to the left \u2190"]) {
+        for (let n = 3; n >= 1; n--) {
+          if (joinEl.hidden || !stream) { scanMsg.hidden = true; scanning = false; return; }
+          scanMsg.textContent = text + "   " + n;
+          scanMsg.hidden = false;
+          await pause(frames.length ? 550 : 650);
+        }
+        frames.push(grabFrame());
+      }
+      scanMsg.hidden = true;
+      scanning = false;
+      sides = [frames[1], frames[2]];
+      setPhoto(frames[0], frames[0].width, frames[0].height, false);
+    }
+    snapBtn.addEventListener("click", scanHead);
+    retakeBtn.addEventListener("click", () => { photo = null; sides = null; startCamera(); });
     fileIn.addEventListener("change", () => {
       const f = fileIn.files && fileIn.files[0];
       if (!f) return;
       const img = new Image();
-      img.onload = () => { setPhoto(img, img.naturalWidth, img.naturalHeight, false); URL.revokeObjectURL(img.src); };
+      img.onload = () => { sides = null; setPhoto(img, img.naturalWidth, img.naturalHeight, false); URL.revokeObjectURL(img.src); };
       img.onerror = () => noCamera("That photo couldn't be opened. Try another one.");
       img.src = URL.createObjectURL(f);
       fileIn.value = "";
@@ -3033,21 +3079,29 @@
       size = Math.min(size, W, H);
       cx = Math.max(size / 2, Math.min(W - size / 2, cx));
       cy = Math.max(size / 2, Math.min(H - size / 2, cy));
-      const c = document.createElement("canvas");
-      c.width = c.height = FACE;
-      const g = c.getContext("2d");
-      g.imageSmoothingEnabled = true;
-      g.imageSmoothingQuality = "high";
-      g.drawImage(src, cx - size / 2, cy - size / 2, size, size, 0, 0, FACE, FACE);
-      const d = g.getImageData(0, 0, FACE, FACE).data;
-      const face = new Uint8Array(FACE * FACE * 3);
-      for (let i = 0; i < FACE * FACE; i++) {
-        const r = d[i * 4], gr = d[i * 4 + 1], b = d[i * 4 + 2];
-        const L = 0.3 * r + 0.59 * gr + 0.11 * b;
-        [r, gr, b].forEach((v, k) => {
-          const c2 = (L + (v - L) * 1.25 - 128) * 1.12 + 128; // a little more colour and contrast
-          face[i * 3 + k] = Math.max(0, Math.min(255, Math.round(c2 / 10) * 10)); // lightly posterised for the blocky look
-        });
+      // crop a square to FACE×FACE head pixels: a little more colour and contrast, lightly posterised for the blocky look
+      const pixels = (img, x0, y0, flip) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = FACE;
+        const g = c.getContext("2d");
+        g.imageSmoothingEnabled = true;
+        g.imageSmoothingQuality = "high";
+        if (flip) { g.translate(FACE, 0); g.scale(-1, 1); }
+        g.drawImage(img, x0, y0, size, size, 0, 0, FACE, FACE);
+        const d = g.getImageData(0, 0, FACE, FACE).data, px = new Uint8Array(FACE * FACE * 3);
+        for (let i = 0; i < FACE * FACE; i++) {
+          const r = d[i * 4], gr = d[i * 4 + 1], b = d[i * 4 + 2];
+          const L = 0.3 * r + 0.59 * gr + 0.11 * b;
+          [r, gr, b].forEach((v, k) => { px[i * 3 + k] = Math.max(0, Math.min(255, Math.round(((L + (v - L) * 1.25 - 128) * 1.12 + 128) / 10) * 10)); });
+        }
+        return px;
+      };
+      const face = pixels(src, cx - size / 2, cy - size / 2, false);
+      // side shots use the same square, nudged towards the back of the head, and unmirrored to wrap round the block
+      if (sides) {
+        const nudge = (dir) => Math.max(0, Math.min(W - size, cx - size / 2 + dir * size * 0.12));
+        out.faceL = pixels(sides[0], nudge(-1), cy - size / 2, true);
+        out.faceR = pixels(sides[1], nudge(1), cy - size / 2, true);
       }
       const avg = (x0, y0, x1, y1) => {
         const s = [0, 0, 0];
@@ -3070,7 +3124,7 @@
       showStep("wait");
       const res = await analyse(photo);
       if (joinEl.hidden) return;
-      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, cheeky: lsGet("fefe40.cheeky") === "1" };
+      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, faceL: res.faceL || null, faceR: res.faceR || null, cheeky: lsGet("fefe40.cheeky") === "1" };
       // height and weight come back from last time, otherwise they follow the body until moved
       sizeSet = !!lsGet("fefe40.h");
       draft.h = +lsGet("fefe40.h") || FefeAvatar.HEIGHT[draft.body];

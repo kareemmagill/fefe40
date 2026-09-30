@@ -207,8 +207,8 @@
   }
 
   // ---------- places ----------
-  const BATH_MAIN = { toilets: [[18.5, 14.5, -HALF]], mirror: [16.0, 13.35, 0], queue: [[11.4, 13.5, HALF], [10.4, 13.5, HALF], [9.4, 13.5, HALF], [10.4, 12.5, HALF]] };
-  const BATH_REST = { toilets: [[21.5, 35.4, PI], [23.5, 35.4, PI]], mirror: [22.5, 33.0, PI], queue: [[26.5, 34.5, -HALF], [27.5, 34.5, -HALF], [27.5, 33.5, -HALF], [28.5, 34.5, -HALF]] };
+  const BATH_MAIN = { tin: [15.27, 14.41], toilets: [[18.5, 14.5, -HALF]], mirror: [16.0, 13.35, 0], queue: [[11.4, 13.5, HALF], [10.4, 13.5, HALF], [9.4, 13.5, HALF], [10.4, 12.5, HALF]] };
+  const BATH_REST = { tin: [22.51, 32.46], toilets: [[21.5, 35.4, PI], [23.5, 35.4, PI]], mirror: [22.5, 33.0, PI], queue: [[26.5, 34.5, -HALF], [27.5, 34.5, -HALF], [27.5, 33.5, -HALF], [28.5, 34.5, -HALF]] };
   const BEDROOMS = [
     { rect: [13, 5, 18, 9], beds: [[14.5, 6.7, 0.76], [15.5, 6.7, 0.76], [18.5, 6.8, 0.7]], door: [12.5, 7.5], win: [15.5, 4.0, 0, -1] },
     { rect: [27, 5, 31, 12], beds: [[28.5, 6.7, 0.76], [29.5, 6.7, 0.76]], door: [29.5, 13.9], win: [29.0, 4.0, 0, -1] },
@@ -447,9 +447,9 @@
     }
     if (n === 2 && cheeky(ms[0]) && cheeky(ms[1])) {
       const mx = room.mirror[0], mz = room.mirror[1];
-      if (male(ms[0]) && male(ms[1])) {
-        const sideways = Math.abs(Math.sin(room.mirror[2])) < 0.5;
-        return ms.map((a, i) => ({ act: "snus", spot: sideways ? [mx - 0.45 + i * 0.9, mz] : [mx, mz - 0.45 + i * 0.9], heading: room.mirror[2] }));
+      if (male(ms[0]) && male(ms[1])) { // side by side at the counter, taking turns at the tin
+        const h = room.mirror[2], tz = room.tin[1] - Math.cos(h) * 0.75;
+        return ms.map((a, i) => ({ act: "snus", spot: [room.tin[0] - 0.3 + i * 0.75, tz], heading: h, tin: room.tin, turn: i }));
       }
       const pr = pair({ x: mx - 0.5, z: mz - 0.4 }, { x: mx + 0.5, z: mz - 0.4 }, 0.5);
       return pr.map((p) => Object.assign({ act: "kiss" }, p));
@@ -1029,12 +1029,27 @@
       if (m.every(0.7)) m.fx.icon("heart", m.x, m.y + 2.5, m.z, {});
       return { pose: p };
     },
+    // lean over to the tin on the counter, take a pouch, tuck it under the lip, then the buzz
     snus(m) {
-      const p = base(), u = (m.T + m.seed * 6) % 6;
-      p.armL = [-0.9, 0, -0.2];
-      if (u < 1) { p.armR = [-2.2, 0, 0.4]; p.head = [-0.15, 0, 0]; }
-      else if (u < 3) { p.head = [0, 0, wave(m.T, 4) * 0.1]; if (m.every(3)) m.fx.icon("star", m.x, m.y + 2.6, m.z, { size: 0.3 }); }
-      return { pose: p, L: "snus" };
+      const p = base(), u = (m.T + (m.asg.turn || 0) * 3.5) % 7;
+      let R = null;
+      if (u < 1.1) {
+        p.rig[3] = 0.28;
+        p.head = [0.35, 0, 0];
+        const side = m.asg.tin ? Math.sign((m.asg.tin[0] - m.x) * Math.cos(m.h)) : 0; // tin to the left or right
+        p.armR = [-1.05, 0, side * 0.25];
+        if (u > 0.7) R = "pouch";
+      } else if (u < 2.1) {
+        const k = ease((u - 1.1) / 0.6);
+        p.armR = [lerp(-1.05, -2.35, k), 0, lerp(0, 0.4, k)];
+        p.head = [-0.2 * k, 0, 0];
+        if (u < 1.9) R = "pouch";
+      } else if (u < 4.6) {
+        p.head = [0, 0, wave(m.T, 4) * 0.12];
+        p.armL = [-0.6, 0, -0.2];
+        if (m.every(1.1)) m.fx.icon("star", m.x, m.y + 2.6, m.z, { size: 0.3 });
+      } else p.armR = [-0.5, 0, 0.1];
+      return { pose: p, R };
     },
 
     sleep(m) { const p = lie(m.asg.bed || 0.76); if (m.every(1.3)) m.fx.icon("zzz", m.x, m.y + 1.3, m.z - 0.8, { size: 0.35 }); return { pose: p }; },

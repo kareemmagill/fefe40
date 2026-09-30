@@ -318,6 +318,7 @@
     phone: (add) => { add(-0.8, -13.6, 1.6, 1.6, 2.8, 0.4, "#23252B"); add(-0.6, -13.4, 2.05, 1.2, 2.4, 0.1, "#7FD8FF", true); },
     plate: (add) => { add(-2.5, -10.6, -0.5, 5, 0.4, 5, "#F7F7F4"); add(-1.2, -10.2, 0.7, 2.4, 0.9, 2.4, "#F2A33A"); },
     snus: (add) => { add(-1.1, -11.4, 0.9, 2.2, 0.9, 2.2, "#1F3C88"); add(-1.2, -10.6, 0.8, 2.4, 0.3, 2.4, "#E8E8E8"); },
+    pouch: (add) => { add(-0.6, -11.3, 0.4, 1.2, 0.4, 1.8, "#F4F4F0"); },
     cig: (add) => { add(-0.2, -10.6, 2, 0.4, 0.4, 3, "#FFFFFF"); add(-0.25, -10.65, 5, 0.5, 0.5, 0.5, "#FF5A36", true); },
     pillow: (add) => { add(-3, -16, 0, 6, 4, 3, "#FFFFFF"); },
     cue: (add) => { add(-0.3, -11, -10, 0.6, 0.6, 22, "#C79560"); add(-0.35, -11.05, 11.5, 0.7, 0.7, 0.6, "#E8F6FF"); },
@@ -404,6 +405,19 @@
       px(1, 4, WHITE); px(2, 4, "#3A2A20"); px(5, 4, "#3A2A20"); px(6, 4, WHITE);
       px(3, 6, "#9E4A3A"); px(4, 6, "#9E4A3A");
     }
+    // the sides of the head from the head scan (ears and hair), when there is one
+    [[look.faceL, "left"], [look.faceR, "right"]].forEach(([data, side]) => {
+      const m = data ? Math.round(Math.sqrt(data.length / 3)) : 0;
+      if (m < 8 || m * m * 3 !== data.length) return;
+      const [sx, sy] = faceRects(0, 0, 8, 8, 8)[side];
+      const tmp = document.createElement("canvas");
+      tmp.width = tmp.height = m;
+      const tg = tmp.getContext("2d"), img = tg.createImageData(m, m);
+      for (let i = 0; i < m * m; i++) { img.data[i * 4] = data[i * 3]; img.data[i * 4 + 1] = data[i * 3 + 1]; img.data[i * 4 + 2] = data[i * 3 + 2]; img.data[i * 4 + 3] = 255; }
+      tg.putImageData(img, 0, 0);
+      g.imageSmoothingEnabled = false;
+      g.drawImage(tmp, sx * S, sy * S, 8 * S, 8 * S);
+    });
     part(R.body, (x, y, side) => outfit.shirt(x, y, side));
     part(R.armR, (x, y, side, w) => outfit.sleeve(x, y, side, 0, w));
     part(R.armL, (x, y, side, w) => outfit.sleeve(x, y, side, 1, w));

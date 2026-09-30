@@ -297,6 +297,19 @@ body.driving .dock { display: none; }
   opacity: 0.8;
   pointer-events: none;
 }
+.scan-msg {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--scrim);
+  color: var(--yellow);
+  font: 700 1.05rem/1.25 var(--font-body);
+  text-align: center;
+}
 .frame-msg { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 18px; font-weight: 600; line-height: 1.4; text-align: center; }
 .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .row.end { justify-content: flex-end; }
@@ -525,10 +538,11 @@ body.driving .dock { display: none; }
           <video id="cam" playsinline muted autoplay></video>
           <canvas id="shot" width="480" height="480" hidden></canvas>
           <p class="frame-msg" id="cam-msg" hidden></p>
+          <p class="scan-msg" id="scan-msg" aria-live="assertive" hidden></p>
           <div class="frame-guide" id="guide" aria-hidden="true"></div>
         </div>
         <div class="row">
-          <button type="button" class="btn primary" id="snap" disabled>Take photo</button>
+          <button type="button" class="btn primary" id="snap" disabled>Scan my head</button>
           <button type="button" class="btn" id="retake" hidden>Retake</button>
           <label class="btn" for="file">Use a photo</label>
           <input type="file" id="file" accept="image/*" capture="user" hidden>
