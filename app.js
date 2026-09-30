@@ -1634,13 +1634,29 @@
         pinch = null;
       }
     }
+    // On a computer: drag with the right or middle mouse button (or hold Shift and drag, for trackpads) to turn the view; it
+    // snaps to the nearest quarter turn on letting go, like the two-finger twist on a phone.
+    let turnDrag = null;
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && (e.button === 2 || e.button === 1 || e.shiftKey)) { // right or middle button
+        e.preventDefault(); // (no scrolling mode from the middle button)
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        turnDrag = { id: e.pointerId, x: e.clientX, az: goal.az };
+        tap = null;
+        return;
+      }
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       tap = pointers.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
       resetPinch();
     });
     canvas.addEventListener("pointermove", (e) => {
+      if (turnDrag && e.pointerId === turnDrag.id) {
+        goal.az = view.az = turnDrag.az + ((e.clientX - turnDrag.x) / Math.max(200, canvas.clientWidth)) * Math.PI * 1.5;
+        applyCamera();
+        return;
+      }
       const prev = pointers.get(e.pointerId);
       if (!prev) return;
       const cur = { x: e.clientX, y: e.clientY };
@@ -1663,6 +1679,11 @@
       }
     });
     function endPointer(e) {
+      if (turnDrag && e.pointerId === turnDrag.id) { // snap to the nearest quarter turn
+        goal.az = turnDrag.az + Math.round((goal.az - turnDrag.az) / (Math.PI / 2)) * (Math.PI / 2);
+        turnDrag = null;
+        return;
+      }
       if (!pointers.has(e.pointerId)) return;
       pointers.delete(e.pointerId);
       if (tap && pointers.size === 0 && e.type === "pointerup" && performance.now() - tap.t < 500) handleTap(e.clientX, e.clientY);
@@ -4616,7 +4637,24 @@
     }
     function stopPreview() { if (pv) cancelAnimationFrame(pv.raf); }
 
+    // One name, one guest: joining with the name of a guest who's already at the party (not online right now) makes
+    // you that guest again, so the same person on a second browser, or from the home-screen icon, isn't doubled up.
+    const sameName = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+    function claimName(name) {
+      for (const [id, g] of ghosts) {
+        if (g.npc || id === myId || isLive(id) || !sameName(g.actor.name, name)) continue;
+        dropGhost(id, g);
+        const old = myId;
+        myId = id;
+        lsSet("fefe40.me", id);
+        if (store.shared) ["guests", "index", "live", "voices"].forEach((k) => fetch(DB_URL + "/fefe40/" + k + "/" + old + ".json", { method: "DELETE" }).catch(() => {})); // this phone's own old guest goes
+        myVoiceUp.clear(); // my clips go up again, under this guest
+        keepMyVoice();
+        return;
+      }
+    }
     function enterParty() {
+      claimName(myName);
       if (me) removeActor(me);
       const open = SPAWN.filter(([x, z]) => reach[cellIdx(x, z)]);
       const [sx, sz] = open.length ? open[(Math.random() * open.length) | 0] : SPAWN[0];
@@ -4845,6 +4883,32 @@
     // One-off clean slate for the organiser: opening the site with #wipe-everything (and saying yes) deletes every
     // guest, walk, live position and voice clip from the shared database, one guest at a time (the rules only let
     // single guests be written), switches the DJ off, and forgets this phone's own guest.
+    // #remove-duplicates: for every name there's more than one guest of, keep the one seen most recently and delete the
+    // rest (their walks and voice clips too).
+    async function removeDuplicates() {
+      if (!store.shared) return;
+      let idx = {};
+      try { idx = await store.index(); } catch (e) { alert("Couldn't reach the party database."); return; }
+      const byName = new Map();
+      for (const id of Object.keys(idx)) {
+        if (!ID_RE.test(id)) continue;
+        let r = null;
+        try { r = await store.get(id); } catch (e) { r = null; }
+        const name = r && typeof r.name === "string" ? r.name.trim().toLowerCase() : "";
+        if (!name) continue;
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name).push({ id, at: +idx[id] || 0, name: r.name.trim() });
+      }
+      const extra = [];
+      byName.forEach((list) => { list.sort((p, q) => q.at - p.at); extra.push(...list.slice(1)); });
+      if (!extra.length) { alert("No duplicates: every guest's name is only there once."); location.replace(location.pathname); return; }
+      if (!confirm("Delete " + extra.length + " older duplicate" + (extra.length > 1 ? "s" : "") + ": " + extra.map((e) => e.name).join(", ") + "? The newest of each name stays.")) { location.replace(location.pathname); return; }
+      for (const e of extra) {
+        await Promise.all(["guests", "index", "live", "voices"].map((k) => fetch(DB_URL + "/fefe40/" + k + "/" + e.id + ".json", { method: "DELETE" }).catch(() => {})));
+      }
+      alert("Done: " + extra.length + " duplicate" + (extra.length > 1 ? "s" : "") + " removed.");
+      location.replace(location.pathname);
+    }
     async function wipeEverything() {
       if (!store.shared || !confirm("Delete every guest, walk and voice clip at the party? This can't be undone.")) return;
       const ids = new Set([myId]);
@@ -4865,6 +4929,7 @@
       data = data || {};
       if (lsGet("fefe40.night") === "1") setNight(true); // been here past the first 4 minutes: it's night
       if (location.hash === "#wipe-everything") setTimeout(wipeEverything, 500);
+      if (location.hash === "#remove-duplicates") setTimeout(removeDuplicates, 500);
       if (typeof data.az === "number") {
         finishBuild();
         goal.az = view.az = data.az;
