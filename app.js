@@ -3561,10 +3561,13 @@
     // 1 zoomed in, down to 0.45 fully zoomed out
     const zoomFade = () => Math.max(0.45, Math.min(1, 1 - (view.fit - 16) / 80));
     // the booth with its speakers, as a box to hit (it's made of props, which voxel picking doesn't see)
-    const deckBox = new T.Box3(new T.Vector3(43.8 + OX, 1, 24.8 + OZ), new T.Vector3(50.2 + OX, 3.1, 26.4 + OZ)), deckHit = new T.Vector3(); // speakers too
+    // (tight around the booth and each speaker: a tap on the floor behind them mustn't count, or walking away would
+    // switch the music off)
+    const box3 = (x0, y0, z0, x1, y1, z1) => new T.Box3(new T.Vector3(x0 + OX, y0, z0 + OZ), new T.Vector3(x1 + OX, y1, z1 + OZ));
+    const deckBoxes = [box3(45, 1, 25, 49, 2.35, 26), box3(44.1, 1, 25, 44.9, 2.9, 25.8), box3(49.1, 1, 25, 49.9, 2.9, 25.8)], deckHit = new T.Vector3();
     function tapDecks(cx, cy) {
       setRay(cx, cy);
-      if (!raycaster.ray.intersectBox(deckBox, deckHit)) return false;
+      if (!deckBoxes.some((b) => raycaster.ray.intersectBox(b, deckHit))) return false;
       if (snd && !snd.enabled) setSound(true);
       setDj(!dj.on);
       dj.mine = Date.now(); // our tap wins over a poll that was already on its way
