@@ -2087,6 +2087,14 @@
           leave(id) {
             return fetch(DB_URL + "/fefe40/live/" + id + ".json", { method: "DELETE", keepalive: true });
           },
+          async djGet() {
+            const r = await fetch(DB_URL + "/fefe40/dj.json", { cache: "no-store" });
+            if (!r.ok) throw new Error("dj " + r.status);
+            return r.json();
+          },
+          djSet(on) {
+            return fetch(DB_URL + "/fefe40/dj.json", { method: "PUT", body: JSON.stringify({ on: !!on, t: Date.now() }) });
+          },
           voicePut(id, clip, str) {
             return fetch(DB_URL + "/fefe40/voices/" + id + "/" + clip + ".json", { method: "PUT", body: JSON.stringify(str) });
           },
@@ -2113,6 +2121,8 @@
           async live() { return {}; },
           async beat() {},
           async leave() {},
+          async djGet() { return null; },
+          async djSet() {},
           async voicePut() { return { ok: true }; },
           async voiceGet() { throw new Error("not shared"); },
           async voiceDrop() {},
@@ -2431,6 +2441,7 @@
       if (polling || !store.shared) return;
       polling = true;
       try {
+        store.djGet().then(djFromServer).catch(() => { /* keep what we have */ });
         const data = await store.live();
         const clean = {};
         Object.keys(data).forEach((id) => {
@@ -2649,8 +2660,9 @@
     }
     soundBtn.hidden = !snd;
     soundBtn.addEventListener("click", () => setSound(!(snd && snd.enabled)));
-    // remembered "on": switch back on at the first tap anywhere
-    if (snd && lsGet("fefe40.sound") === "1") {
+    // on by default (phones only allow sound after a tap, so it starts at the first tap anywhere), unless they've
+    // turned it off with the speaker button before
+    if (snd && lsGet("fefe40.sound") !== "0") {
       const wake = () => {
         ["touchend", "click"].forEach((ev) => window.removeEventListener(ev, wake, true));
         if (!snd.enabled) setSound(true);
@@ -3153,7 +3165,20 @@
     }
     // The DJ decks on the dance floor: a tap starts the club music (our own house loop, nobody else's song) and gets
     // the dance floor dancing; another tap stops it and everyone goes back to chatting.
-    const dj = { on: false };
+    const dj = { on: false, mine: 0 };
+    // The decks are shared: whoever taps them switches the music on or off for the whole party (fefe40/dj).
+    function setDj(on) {
+      if (on === dj.on) return;
+      dj.on = on;
+      if (snd) snd.setMusic(on, DANCE_CENTER[0], DANCE_CENTER[1], true);
+      if (party) party.fx.icon(on ? "note" : "bang", 47, 3, 25.5, { size: 0.5, vy: 1 });
+    }
+    // Music left on for three hours with nobody touching the decks goes off by itself.
+    function djFromServer(d) {
+      if (Date.now() - dj.mine < 4000) return;
+      const on = !!(d && d.on === true && Number.isFinite(+d.t) && Date.now() - +d.t < 3 * 3600 * 1000);
+      setDj(on);
+    }
     // The club music carries over the dance floor, the pool and the pickleball court, fading out a few metres beyond.
     const DJ_AREA = [[43, 24, 50, 34], [51, 15, 69, 33], [46, 38, 69, 53]];
     function djArea(x, z) {
@@ -3167,10 +3192,10 @@
       setRay(cx, cy);
       if (!raycaster.ray.intersectBox(deckBox, deckHit)) return false;
       if (snd && !snd.enabled) setSound(true);
-      dj.on = !dj.on;
-      if (snd) snd.setMusic(dj.on, DANCE_CENTER[0], DANCE_CENTER[1], true);
-      if (party) party.fx.icon(dj.on ? "note" : "bang", 47, 3, 25.5, { size: 0.5, vy: 1 });
-      hint.textContent = dj.on ? "The DJ's on! Everyone on the dance floor is dancing." : "Music off. Tap the decks to start it again.";
+      setDj(!dj.on);
+      dj.mine = Date.now(); // our tap wins over a poll that was already on its way
+      Promise.resolve(store.djSet(dj.on)).catch(() => {});
+      hint.textContent = dj.on ? "The DJ's on! Everyone on the dance floor is dancing, and everyone at the party can hear it." : "Music off. Tap the decks to start it again.";
       hint.classList.remove("gone");
       clearTimeout(hintTimer);
       hintTimer = setTimeout(dismissHint, 4000);

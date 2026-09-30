@@ -31,6 +31,11 @@
             ".validate": "$clip.matches(/^[a-z][a-z0-9]{0,3}$/) && newData.isString() && newData.val().length <= 60000 && newData.val().beginsWith('V1')"
           }
         }
+      },
+      "dj": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['on', 't']) && newData.child('on').isBoolean() && newData.child('t').isNumber()"
       }
     }
   }
