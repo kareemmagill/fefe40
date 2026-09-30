@@ -3605,7 +3605,7 @@
       const roof = buildings.get("pavilion");
       const cut = Math.max(0, Math.min(1, (TV.y + TV.h / 2 - clipPlane.constant) / TV.h)); // share of the screen above the close-up slice
       tv.view = ux * vy - uy * vx > 0 && // facing us
-        Math.hypot(ux, uy) >= (tv.view ? 34 : 40) && // big enough to make out (a little slack once on, so it doesn't flicker)
+        Math.hypot(ux, uy) >= (tv.view ? 10 : 12) && // still there to see, however small (a little slack once on, so it doesn't flicker)
         mx > 0 && mx < w && my > 0 && my < h && // on screen
         !!roof && roof.fade > 0.5 && // the pavilion roof is off
         buildClock.value > karaoke.land && // the TV has landed after the build-in
@@ -4679,7 +4679,9 @@
         const r = byId[bid] ? byId[bid].rect : CUT_RECTS[bid];
         const over = tx >= r[0] && tx <= r[2] + 1 && tz >= r[1] && tz <= r[3] + 1;
         const mine = me && me.drop === 0 && me.x >= r[0] && me.x <= r[2] + 1 && me.z >= r[1] && me.z <= r[3] + 1;
-        const want = seeInside || mine || (selected && selected.b === bid) || (over && view.fit <= 30) ? 1 : 0;
+        // the pavilion stays open while the karaoke TV plays, so its video (and music) carries on when zoomed out
+        const tvOpen = bid === "pavilion" && jb.on && view.fit <= 70 && Math.hypot(tx - TV.x, tz - TV.z) < 45;
+        const want = seeInside || mine || tvOpen || (selected && selected.b === bid) || (over && view.fit <= 30) ? 1 : 0;
         if (b.fade === want) return;
         b.fade = reduceMotion ? want : b.fade + Math.sign(want - b.fade) * Math.min(Math.abs(want - b.fade), dt * 3.2);
         const f = b.fade, vis = f < 0.999;
