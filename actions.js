@@ -66,23 +66,29 @@
     flash: ["#FFFFFF", ["#..#..#.", ".#.#.#..", "..###...", "#######.", "..###...", ".#.#.#..", "#..#..#."]],
     puff: ["#E6E6E6", ["..###...", ".#####..", "#######.", "#######.", ".#####..", "..###..."]]
   };
+  const WIDE = { dnd: 2.6, censored: 2.6 }; // text signs are wider than tall
   function makeFx(T, scene, OX, OZ) {
     const texCache = {}, matCache = {};
     function iconTex(type) {
       if (texCache[type]) return texCache[type];
       const c = document.createElement("canvas");
       let tex;
-      if (type === "dnd") {
+      if (type === "dnd" || type === "censored") {
         c.width = 128;
         c.height = 48;
         const g = c.getContext("2d");
-        g.fillStyle = "#C8302C";
+        g.fillStyle = type === "dnd" ? "#C8302C" : "#111111";
         g.fillRect(0, 0, 128, 48);
         g.fillStyle = "#FFFFFF";
-        g.font = "bold 17px sans-serif";
         g.textAlign = "center";
-        g.fillText("DO NOT", 64, 21);
-        g.fillText("DISTURB", 64, 40);
+        if (type === "dnd") {
+          g.font = "bold 17px sans-serif";
+          g.fillText("DO NOT", 64, 21);
+          g.fillText("DISTURB", 64, 40);
+        } else {
+          g.font = "bold 22px sans-serif";
+          g.fillText("CENSORED", 64, 32);
+        }
         tex = new T.CanvasTexture(c);
       } else {
         const [color, rows] = ICONS[type];
@@ -135,7 +141,7 @@
         o = o || {};
         const s = new T.Sprite(spriteMat(type, o.overlay));
         const size = o.size || 0.45;
-        s.scale.set(type === "dnd" ? size * 2.6 : size, size, 1);
+        s.scale.set(WIDE[type] ? size * WIDE[type] : size, size, 1);
         add(s, x, y, z, Object.assign({ vy: 0.7, life: 1.4, max: 1.4, size }, o));
       },
       block(color, x, y, z, o) {
@@ -157,7 +163,7 @@
         if (!s) {
           s = { obj: new T.Sprite(spriteMat(type, true)), seen: 0 };
           const sz = size || 0.5;
-          s.obj.scale.set(type === "dnd" ? sz * 2.6 : sz, sz, 1);
+          s.obj.scale.set(WIDE[type] ? sz * WIDE[type] : sz, sz, 1);
           scene.add(s.obj);
           sticky.set(key, s);
         }
@@ -216,9 +222,10 @@
     { rect: [54, 6, 60, 11], beds: [[56.5, 7.6, 0.76], [57.5, 7.6, 0.76], [58.5, 7.6, 0.76]], door: [59.5, 12.9], win: [56.5, 5.0, 0, -1] }
   ];
   // showers: the stall, the shower head, and where clothes get dropped outside the glass
+  // fog: the glass walls as [centre x, centre z, size x, size z], steamed up while someone showers
   const SHOWERS = [
-    { rect: [13, 11, 14, 12], head: [13.5, 11.45], pile: [15.5, 12.3] },
-    { rect: [33, 5, 34, 6], head: [33.5, 5.45], pile: [35.5, 6.3] }
+    { rect: [13, 11, 14, 12], head: [13.5, 11.45], pile: [15.5, 12.3], fog: [[14.0, 12.99, 2.04, 0.12], [14.99, 12.0, 0.12, 2.04]] },
+    { rect: [33, 5, 34, 6], head: [33.5, 5.45], pile: [35.5, 6.3], fog: [[34.0, 6.99, 2.04, 0.12], [34.99, 6.0, 0.12, 2.04]] }
   ];
   const STOOLS = [[37.5, 29.5], [38.5, 29.5], [39.5, 29.5], [40.5, 29.5]];
   const LOUNGERS = [[53.5, 31.0], [56.5, 31.0], [59.5, 31.0]];
@@ -563,6 +570,13 @@
   function planParking(ms, env) {
     const t = env.t;
     const guys = ms.filter(male);
+    // two or more Cheeky guests (not just guys) pile into the nearest parked car; anyone else films it
+    const ck = ms.filter(cheeky);
+    const car = ck.length >= 2 && !ck.every(male) && env.nearestCar ? env.nearestCar(centre(ck)) : null;
+    if (car) {
+      env.steamy(car, ck.length);
+      return ms.map((a) => (cheeky(a) ? { act: "steamy", spot: [car.x, car.z], car } : { act: "phone", face: [car.x, car.z] }));
+    }
     if (guys.length >= 2) {
       const [cx, cz] = centre(guys);
       return ms.map((a) => {
@@ -1068,6 +1082,8 @@
     },
     sleepover(m) { const p = lie(m.asg.bed || 0.76); p.armR = [-2.5, 0, 0.4]; if (m.every(2.5)) m.fx.icon("dots", m.x, m.y + 1.4, m.z - 0.8, { size: 0.3 }); return { pose: p }; },
     // jumping on the bed together holding hands, then under a bouncing duvet with just their heads out
+    // inside the steamy car: out of sight (app.js rocks the car and fogs the windows)
+    steamy() { return { pose: base(), hide: true }; },
     scene(m) {
       const u = m.T % 22, bed = m.asg.bed || 0.76;
       if (u < 6 || u >= 20) {
@@ -1274,7 +1290,13 @@
       p.head = [-0.2, 0, Math.sin(m.T * 2) * 0.12];
       if (m.every(0.03)) m.fx.block("#9FD8FF", sh.head[0] + (Math.random() - 0.5) * 0.6, m.y + 2.4, sh.head[1] + (Math.random() - 0.5) * 0.6, { vy: -1.5, g: 9, size: 0.06, life: 0.35, max: 0.35 });
       if (m.every(0.45)) m.fx.icon("puff", m.x + (Math.random() - 0.5) * 0.9, m.y + 1.7, m.z + (Math.random() - 0.5) * 0.9, { size: 0.55, vy: 0.45, life: 2, max: 2 });
-      if (m.every(2.6)) m.fx.icon(m.asg.together ? "heart" : "note", m.x, m.y + 3.1, m.z, { size: 0.35 });
+      if (m.every(m.asg.together ? 1.2 : 0.9)) m.fx.icon(m.asg.together ? "heart" : "note", m.x + (Math.random() - 0.5) * 0.5, m.y + 3.1, m.z, { size: 0.35, vx: (Math.random() - 0.5) * 0.5 }); // singing in the shower
+      if (m.asg.i === 0) { // the glass steams up, with a heart drawn in it
+        sh.fog.forEach(([fx0, fz0, sx, sz], k) => m.fx.keepBox("fog" + sh.head[0] + k, "#EEF3F8", fx0, m.y + 1.1, fz0, sx, 2.2, sz, 0.62));
+        const [gx, gz] = sh.fog[0];
+        m.fx.keep("glassheart" + sh.head[0], "heart", gx + 0.35, m.y + 1.55, gz + 0.1, 0.45);
+        if (m.asg.together) m.fx.keep("glassheart2" + sh.head[0], "heart", gx - 0.3, m.y + 1.3, gz + 0.1, 0.3);
+      }
       if (m.asg.bare) {
         const k = m.a.key, sc = m.a.av.scale || 1, neck = 24 * (window.FefeAvatar ? FefeAvatar.P : 0.069) * sc - 0.04;
         m.fx.keepBox("steam" + k, "#F4F8FF", m.x, m.y + neck / 2, m.z, 0.95, neck, 0.95, 0.94);
@@ -1361,30 +1383,31 @@
       shoe: pick(O && (() => O.leg(1, 11, "front", 0)), "#23252B")
     };
   }
-  // Sounds: [effect, seconds between repeats, optional Swedish line said now and then]. Played through ctx.sound / ctx.say.
+  // Sounds: [effect, seconds between repeats, optional voice line key, chance of the line (default 0.25)].
+  // Played through ctx.sound / ctx.say; sound.js speaks them in Swedish (see its LINES and SPOKEN).
   const SOUNDS = {
-    disco: ["clap", 3.5], discomirror: ["clap", 3.5], robot: ["boing", 4], airguitar: ["cheer", 6], pole: ["cheer", 5],
-    leadspin: ["whoosh", 3], spin: ["whoosh", 3], slowdance: ["kiss", 6, "alskar"], line: ["clap", 2.5], wild: ["cheer", 4, "heja"],
+    disco: ["clap", 5, "dansa", 0.3], discomirror: ["clap", 5, "dansa", 0.3], robot: ["boing", 4], airguitar: ["cheer", 6], pole: ["cheer", 5],
+    leadspin: ["whoosh", 3], spin: ["whoosh", 3], slowdance: ["kiss", 6, "alskar"], line: ["clap", 5, "dansa", 0.3], wild: ["cheer", 4, "dansa", 0.5],
     clap: ["clap", 1.2], conga: ["laugh", 5, "kul"], surf: ["cheer", 3, "heja"], carry: ["cheer", 4],
     paddle: ["splash", 3], swim: ["splash", 1.6], float: ["splash", 6], bomb: ["cannonball", 4, "oj"], splash: ["splash", 0.9, "nej"], ball: ["splash", 1.6, "kul"],
-    sunbathe: ["zzz", 9], nap: ["zzz", 4], hangover: ["burp", 7], facedown: ["zzz", 4], chat: ["laugh", 7, "hej"], selfie: ["pop", 5],
-    huddle: ["laugh", 5], shove: ["bonk", 12, "nej"], pushed: ["splash", 12],
-    sip: ["clink", 5], horn: ["chug", 5, "skal"], skal: ["clink", 5, "skal"], chug: ["chug", 2.5, "skal"], helan: ["cheer", 8, "helan"],
-    cook: ["pop", 4], snack: ["pop", 5], chop: ["clack", 0.6], highfive: ["clap", 8], taste: ["pop", 3, "jattebra"], smokewave: ["laugh", 4],
-    sing: ["cheer", 7], sway: ["clap", 5], blow: ["cheer", 6, "grattis"], bdaysing: ["cheer", 5, "grattis"],
+    sunbathe: ["zzz", 9], nap: ["zzz", 4], facedown: ["zzz", 4], chat: ["laugh", 8, "chatter", 0.6], selfie: ["pop", 7, "chatter", 0.4],
+    huddle: ["laugh", 6, "chatter", 0.4], shove: ["bonk", 12, "nej"], pushed: ["splash", 12],
+    sip: ["clink", 7, "skal", 0.3], horn: ["chug", 6, "skal", 0.6], skal: ["clink", 5, "skal", 0.8], chug: ["chug", 3.5, "skal", 0.5], helan: ["cheer", 11, "helan", 1],
+    cook: ["pop", 5, "bork", 0.9], snack: ["pop", 6, "kott", 0.5], chop: ["clack", 0.6], highfive: ["clap", 8], taste: ["pop", 5, "kott", 0.6], hangover: ["burp", 7, "bork", 0.5], smokewave: ["laugh", 5],
+    sing: ["cheer", 8, "sjung", 0.6], sway: ["clap", 6, "sjung", 0.3], blow: ["cheer", 8, "grattis", 1], bdaysing: ["cheer", 12, "leva", 1],
     cue: ["clack", 4], leancue: null, cheer: ["cheer", 4, "heja"], nibble: ["pop", 4], eat: ["clink", 6], toast: ["clink", 4, "skal"],
-    raiseglass: ["clink", 4], cheersit: ["cheer", 4, "heja"], tabledance: ["cheer", 3], pong: ["pok", 3],
+    raiseglass: ["clink", 5, "skal", 0.5], cheersit: ["cheer", 4, "heja"], tabledance: ["cheer", 3], pong: ["pok", 3],
     paper: ["fart", 6], toilet: ["pee", 9], makeup: ["kiss", 7], wash: ["splash", 5], queue: ["nej", 0], gottago: ["nej", 0],
     kiss: ["kiss", 1.6, "alskar"], snus: ["sniff", 6], sleep: ["zzz", 3], jumpbed: ["boing", 0.7], pillow: ["pillow", 1], sleepover: ["giggle", 4],
-    scene: ["boing", 0.5, "oj"], tv: ["laugh", 12], gaming: ["pop", 3], movie: ["laugh", 10], fan: ["whoosh", 4], fika: ["clink", 6, "fika"], cards: ["laugh", 8],
-    serve: ["pok", 3], hoops: ["bonk", 3], rally: ["pok", 1.2], watch: ["clap", 5], swing: ["whoosh", 2.9], seesaw: ["boing", 3.2], run: ["laugh", 4],
+    scene: ["boing", 0.5, "oj"], steamy: ["boing", 0.45, "alskar"], tv: ["laugh", 12], gaming: ["pop", 3], movie: ["laugh", 10], fan: ["whoosh", 4], fika: ["clink", 7, "fika", 0.8], cards: ["laugh", 8, "chatter", 0.5],
+    serve: ["pok", 6, "heja", 0.3], hoops: ["bonk", 5, "hockey", 0.3], rally: ["pok", 6, "heja", 0.3], watch: ["clap", 6, "hockey", 0.4], swing: ["whoosh", 2.9], seesaw: ["boing", 3.2], run: ["laugh", 4],
     photo: ["pop", 4], peace: ["laugh", 8], phone: ["pop", 7], fetch: ["clink", 8], wave: ["wave", 5, "hej"], brawl: ["bonk", 0.6, "nej"],
-    smoke: ["sniff", 6], puke: ["vomit", 3.2], toiletpuke: ["vomit", 3], smell: ["sniff", 5], climb: ["whoosh", 6, "heja"],
-    pee: ["pee", 14], shower: ["shower", 3], candy: ["sparkle", 1.5, "jattebra"], idle: null
+    smoke: ["sniff", 6], puke: ["vomit", 3.2, "bork", 0.3], toiletpuke: ["vomit", 3], smell: ["sniff", 5], climb: ["", 6, "heja", 0.5],
+    pee: ["pee", 14], shower: ["shower", 4], candy: ["sparkle", 4, "godis", 1], idle: null
   };
   const SOBERING = new Set(["swim", "float", "bomb", "splash", "ball", "paddle", "shower", "rally", "serve", "hoops", "run"]);
   // acts where people are meant to be this close, so they aren't nudged apart
-  const CLOSE_ACTS = new Set(["kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
+  const CLOSE_ACTS = new Set(["steamy", "kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
   const HEAD_LOCKED = new Set(["candy", "toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
   function discoPose(T, side) {
     const p = base(), s = (Math.sin(T * 2.2 * PI) + 1) / 2;
@@ -1411,7 +1434,7 @@
     const states = new WeakMap();
     const st = (a) => { let s = states.get(a); if (!s) { s = { bar: 0, barAt: 0 }; states.set(a, s); } return s; };
     let lastDrop = null;
-    const scenes = [];
+    const scenes = [], steamies = [];
     const env = {
       t: 0,
       actors: [],
@@ -1421,6 +1444,8 @@
       get lastDrop() { return lastDrop; },
       drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 60)); }, // wears off a level a minute
       scene(room, count) { scenes.push({ room, count }); },
+      nearestCar(pt) { return ctx.nearestCar ? ctx.nearestCar(pt[0], pt[1]) : null; },
+      steamy(car, count) { if (steamies.indexOf(car) < 0) { steamies.push(car); car.steamyCount = count; } },
       atCandy(a) { return (ctx.candy || []).some(([x, z]) => Math.floor(a.x) === x && Math.floor(a.z) === z); },
       treeNear(a) {
         let best = null, bd = 1.55;
@@ -1441,8 +1466,28 @@
       if (s.act === "scene") s.shameUntil = env.t + 25;
       if (s.act === "snus") s.buzzUntil = env.t + 30;
       if (s.act === "candy") s.sugarUntil = env.t + 30;
+      if (s.act === "shower") { s.slipped = false; s.towelUntil = env.t + 28; s.slipAt = a.look && a.look.cheeky ? env.t + 6 + hashStr(a.key) * 8 : Infinity; }
       s.act = null;
       s.vx = undefined;
+    }
+    // Fresh out of the shower: a towel round the waist and one on the head. In Cheeky mode the towel drops once:
+    // it lands on the floor, a CENSORED bar pops up and they cover up with both hands.
+    function towel(a, s) {
+      const on = s.towelUntil > env.t && !a.hiddenAct && !a.inCar;
+      const slip = on && env.t > s.slipAt && env.t < s.slipAt + 3.5;
+      a.av.hold("body", on && !slip ? "towel" : null);
+      if (on && !s.on) a.av.hold("head", "turban");
+      if (!slip) return;
+      if (!s.slipped) {
+        s.slipped = true;
+        fx.block("#FFFFFF", a.x + 0.3, a.y + 0.03, a.z + 0.2, { g: 0, size: 0.7, life: 3.5, max: 3.5, flat: true });
+        fx.icon("bang", a.x, a.y + 2.9, a.z, { size: 0.5 });
+        if (ctx.say) ctx.say("oj", a.x, a.z);
+      }
+      a.av.parts.armR.rotation.set(-0.35, 0, 0.35);
+      a.av.parts.armL.rotation.set(-0.35, 0, -0.35);
+      fx.keep("censor" + a.key, "censored", a.x, a.y + 0.75, a.z, 0.38);
+      if (Math.random() < 0.05) fx.icon("blush", a.x, a.y + 2.6, a.z, { size: 0.35 });
     }
     function walkingExtras(a, s, dt) {
       const lv = env.drunk(a);
@@ -1472,7 +1517,7 @@
         a.av.rig.rotation.z = Math.sin(env.t * 3.2) * 0.06 * lv;
         if (Math.random() < dt * 0.8) {
           fx.icon("bubble", a.x, a.y + 2.5, a.z, { size: 0.25 });
-          if (ctx.sound) ctx.sound(Math.random() < 0.8 ? "hiccup" : "burp", a.x, a.z);
+          if (ctx.sound) ctx.sound(Math.random() < 0.4 ? "hiccup" : "babble", a.x, a.z); // hic, or drunken börk-börk babble
         }
       }
     }
@@ -1486,11 +1531,12 @@
         env.actors = actors;
         env.danceCount = 0;
         scenes.length = 0;
+        steamies.length = 0;
         const groups = new Map();
         actors.forEach((a) => {
           const s = st(a);
           if (a.drop > 0) {
-            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
+            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.towelUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
           } else s.dropping = false;
           s.on = false;
           if (a.drop > 0 || a.idleT < 0.35 || a.inCar) return;
@@ -1507,6 +1553,7 @@
           const s = st(a);
           if (!s.on && s.act) stop(a, s);
           if (!s.on && a.moving) walkingExtras(a, s, dt);
+          towel(a, s);
         });
         scenes.forEach(({ room, count }) => {
           const [bx, bz] = room.beds[0];
@@ -1520,6 +1567,18 @@
         });
         if (ctx.onDance) ctx.onDance(env.danceCount);
         if (ctx.onScenes) ctx.onScenes(scenes.map((sc) => BEDROOMS.indexOf(sc.room)));
+        steamies.forEach((car) => { // hearts out of the roof, clothes out of the windows, the odd honk
+          const n = car.steamyCount || 2;
+          if (Math.random() < dt * (2 + n)) fx.icon("heart", car.x + (Math.random() - 0.5), car.y + 2.3, car.z + (Math.random() - 0.5) * 2, { vy: 1.2, life: 1.6, max: 1.6, size: 0.4 });
+          if (Math.random() < dt * 0.5 * n) {
+            const side = Math.random() < 0.5 ? -1 : 1, cs = Math.cos(car.h), sn = Math.sin(car.h);
+            const wx = car.x + side * cs * 0.9, wz = car.z - side * sn * 0.9;
+            fx.arc(["#FEFE40", "#006AA7", "#FF6FB5", "#FFFFFF", "#23252B", "#E23D3D"][Math.floor(Math.random() * 6)], [wx, car.y + 1.5, wz], [wx + side * cs * 2.5 + (Math.random() - 0.5) * 2, car.y + 0.05, wz - side * sn * 2.5 + (Math.random() - 0.5) * 2], 0.8, 1.3, 0.28);
+          }
+          if (Math.random() < dt * 0.12) { fx.icon("bang", car.x, car.y + 2.6, car.z, { size: 0.4 }); if (ctx.sound) ctx.sound("horn", car.x, car.z); }
+          if (Math.random() < dt * 0.25 && ctx.sound) ctx.sound("giggle", car.x, car.z);
+        });
+        if (ctx.onSteamy) ctx.onSteamy(steamies);
         fx.update(dt);
       }
     };
@@ -1582,13 +1641,12 @@
       };
       const out = (ACTS[asg.act] || ACTS.idle)(m) || {};
       const snd = SOUNDS[asg.act];
-      if (snd && env.t >= s.sndAt) {
-        if (snd[1] > 0) {
-          s.sndAt = env.t + snd[1] * (0.8 + Math.random() * 0.4);
-          if (ctx.sound) ctx.sound(snd[0], m.x, m.z);
-        } else s.sndAt = Infinity;
-        if (snd[2] && ctx.say && Math.random() < (snd[1] > 0 ? 0.25 : 1)) ctx.say(snd[2], m.x, m.z);
-        if (!(snd[1] > 0) && ctx.say) ctx.say(snd[0], m.x, m.z);
+      if (snd && env.t >= s.sndAt) { // either the act's line or its sound, never both at once
+        const repeat = snd[1] > 0;
+        s.sndAt = repeat ? env.t + snd[1] * (0.8 + Math.random() * 0.4) : Infinity;
+        if (snd[2] && ctx.say && Math.random() < (repeat ? (snd[3] !== undefined ? snd[3] : 0.25) : 1)) ctx.say(snd[2], m.x, m.z);
+        else if (!repeat && ctx.say) ctx.say(snd[0], m.x, m.z);
+        else if (snd[0] && ctx.sound) ctx.sound(snd[0], m.x, m.z);
       }
       a.av.hold("R", out.R || null);
       a.av.hold("L", out.L || null);

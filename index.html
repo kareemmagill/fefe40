@@ -146,6 +146,26 @@ body {
   pointer-events: none;
 }
 .dock > * { pointer-events: auto; }
+/* ABBA jukebox: bottom left, above the place buttons */
+.jukebox {
+  position: absolute;
+  z-index: 3;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: 124px;
+  width: 212px;
+  padding: 6px;
+  border: 3px solid var(--blue-edge);
+  border-radius: 12px;
+  background: var(--blue-deep);
+  box-shadow: 0 4px 0 var(--blue-edge);
+}
+.jukebox[hidden] { display: none; }
+.jb-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.jb-title { flex: 1; color: var(--yellow); font: 700 0.875rem/1.1 var(--font-pixel); }
+.jb-btn { border: 0; border-radius: 6px; padding: 4px 8px; background: var(--white); color: var(--blue-deep); font: 700 0.75rem var(--font-body); cursor: pointer; }
+.jb-player { width: 200px; height: 200px; overflow: hidden; border-radius: 6px; background: #000; }
+.jb-player iframe { display: block; width: 200px; height: 200px; border: 0; }
+body.driving .jukebox { bottom: 96px; }
 /* driving: wheel on the left, pedals on the right, the rest of the dock steps aside */
 .drive {
   position: absolute;
@@ -297,6 +317,38 @@ body.driving .dock { display: none; }
   opacity: 0.8;
   pointer-events: none;
 }
+/* head scan: a dot for each angle round the face guide, lit once that angle is captured, and a big arrow */
+.scan-ring { position: absolute; inset: 0; pointer-events: none; }
+.scan-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 3px solid var(--yellow);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  transition: background 0.2s, transform 0.2s;
+}
+.scan-dot[data-at="front"] { left: 50%; top: 7%; }
+.scan-dot[data-at="right"] { left: 86%; top: 47%; }
+.scan-dot[data-at="left"] { left: 14%; top: 47%; }
+.scan-dot[data-at="down"] { left: 50%; top: 88%; }
+.scan-dot.now { transform: scale(1.35); }
+.scan-dot.done { background: var(--yellow); }
+.scan-arrow {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  transform: translate(-50%, -50%);
+  color: var(--yellow);
+  font: 700 4.5rem/1 var(--font-body);
+  text-shadow: 0 3px 0 var(--blue-edge), 0 0 18px rgba(0, 0, 0, 0.6);
+}
+.frame.flash::after { content: ""; position: absolute; inset: 0; background: #fff; animation: flash 0.35s ease-out forwards; }
+@keyframes flash { from { opacity: 0.85; } to { opacity: 0; } }
+.scan-thumbs { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.scan-thumbs figure { margin: 0; display: grid; gap: 3px; justify-items: center; font-size: 0.75rem; color: var(--sky-bottom); }
+.scan-thumbs canvas { width: 56px; height: 56px; border: 2px solid var(--blue-edge); border-radius: 8px; image-rendering: pixelated; }
 .scan-msg {
   position: absolute;
   left: 8px;
@@ -513,7 +565,18 @@ body.driving .dock { display: none; }
     <p class="hint" id="hint">Drag to explore · Pinch to zoom · Tap a place</p>
     <button type="button" class="enter" id="enter" hidden>Enter the party</button>
     <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
+    <button type="button" class="enter alt jb-play" id="jb-play" hidden>&#9654; Play ABBA</button>
     <nav class="chips" id="chips" aria-label="Places"></nav>
+  </div>
+
+  <!-- ABBA jukebox: ABBA's official YouTube videos, shown (as YouTube requires) while they play near the dance floor or karaoke -->
+  <div class="jukebox" id="jukebox" hidden>
+    <div class="jb-head">
+      <span class="jb-title">ABBA at the party</span>
+      <button type="button" class="jb-btn" id="jb-next" aria-label="Next song">Next</button>
+      <button type="button" class="jb-btn" id="jb-close" aria-label="Stop the music">&#10005;</button>
+    </div>
+    <div class="jb-player"><div id="jb-player"></div></div>
   </div>
 
   <div class="drive" id="drive" hidden>
@@ -532,15 +595,21 @@ body.driving .dock { display: none; }
     <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="join-title">
       <div id="step-photo">
         <p class="eyebrow">Step 1 of 2 · Photo and name</p>
-        <h2 class="sheet-title" id="join-title">Snap your party face</h2>
-        <p class="sheet-sub">Look straight at the camera. Your photo stays on your phone; only a 32 × 32 pixel face goes online.</p>
+        <h2 class="sheet-title" id="join-title">Scan your party head</h2>
+        <p class="sheet-sub">A quick head scan: look straight, turn right, turn left, then tip your head down, so your block head gets your face, ears and hair. The photos stay on your phone; only small pixel versions go online.</p>
         <div class="frame">
           <video id="cam" playsinline muted autoplay></video>
           <canvas id="shot" width="480" height="480" hidden></canvas>
           <p class="frame-msg" id="cam-msg" hidden></p>
           <p class="scan-msg" id="scan-msg" aria-live="assertive" hidden></p>
           <div class="frame-guide" id="guide" aria-hidden="true"></div>
+          <div class="scan-ring" id="scan-ring" aria-hidden="true" hidden>
+            <span class="scan-dot" data-at="front"></span><span class="scan-dot" data-at="right"></span>
+            <span class="scan-dot" data-at="left"></span><span class="scan-dot" data-at="down"></span>
+            <span class="scan-arrow" id="scan-arrow"></span>
+          </div>
         </div>
+        <div class="scan-thumbs" id="scan-thumbs" hidden></div>
         <div class="row">
           <button type="button" class="btn primary" id="snap" disabled>Scan my head</button>
           <button type="button" class="btn" id="retake" hidden>Retake</button>

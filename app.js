@@ -301,6 +301,14 @@
       box(x + 0.3, 1.6, z + 5.88, 0.3, 0.2, 0.05, C.bulb, glow);
       box(x + 1.4, 1.6, z + 5.88, 0.3, 0.2, 0.05, C.bulb, glow);
     }
+    // a rubber duck keeping watch in the corner of a shower
+    function rubberDuck(x, y, z) {
+      box(x, y, z, 0.24, 0.14, 0.3, "#FFD21A", { j: false });
+      box(x + 0.04, y + 0.12, z, 0.16, 0.14, 0.14, "#FFD21A", { j: false });
+      box(x + 0.09, y + 0.15, z - 0.06, 0.06, 0.04, 0.07, "#FF8A1F", { j: false });
+      box(x + 0.05, y + 0.2, z + 0.01, 0.03, 0.03, 0.03, "#23252B", { j: false });
+      box(x + 0.16, y + 0.2, z + 0.01, 0.03, 0.03, 0.03, "#23252B", { j: false });
+    }
     function lounger(x, z, cushion) {
       box(x + 0.1, 1, z + 0.05, 0.8, 0.3, 1.9, C.white);
       box(x + 0.15, 1.3, z + 0.6, 0.7, 0.1, 1.3, cushion);
@@ -463,6 +471,7 @@
       box(13, fy, 12.95, 2, 2.2, 0.08, C.clearGlass, { kind: "clear", j: false });
       box(14.95, fy, 11, 0.08, 2.2, 2, C.clearGlass, { kind: "clear", j: false });
       box(13.3, fy + 2.1, 11.2, 0.35, 0.1, 0.35, C.metal);
+      rubberDuck(13.15, fy, 12.55);
       box(18.9, fy + 1.2, 11.3, 0.08, 0.9, 1.2, C.yellow);
 
       // lanai
@@ -507,6 +516,7 @@
       box(33, fy, 6.95, 2, 2.2, 0.08, C.clearGlass, { kind: "clear", j: false });
       box(34.95, fy, 5, 0.08, 2.2, 2, C.clearGlass, { kind: "clear", j: false });
       box(33.3, fy + 2.1, 5.2, 0.35, 0.1, 0.35, C.metal);
+      rubberDuck(33.15, fy, 6.55);
       toilet(36, 5, fy, "N");
       box(33.1, fy, 10.2, 0.7, 0.9, 2, C.woodLight);
       box(33.2, fy + 0.9, 10.6, 0.5, 0.12, 1.2, C.white);
@@ -805,7 +815,7 @@
     // lamps
     [[6, 24], [14, 24], [29, 40], [32, 46], [29, 52], [51, 35], [69, 35]].forEach(([x, z]) => lamp(x, z));
 
-    // ---------- Garden: palms, shade trees, flowering trees, bushes, grass tufts, flowers ----------
+    // ---------- Garden: palms, shade trees, flowering trees, bushes and grass tufts ----------
     const OCC = [[2, 2, 21, 21], [24, 2, 45, 20], [2, 21, 51, 24], [18, 23, 51, 38], [50, 3, 70, 35], [45, 37, 70, 54], [34, 39, 45, 51], [0, 39, 18, 56], [17, 54, 36, 59], [28, 36, 33, 56], [21, 37, 30, 41]];
     function rectDist(x, z, r) {
       const dx = Math.max(r[0] - x, 0, x - r[2]);
@@ -911,11 +921,6 @@
     // grass tufts poking up out of the lawn
     for (let u = 2 * X0 + 2; u <= 2 * X1 - 1; u++) for (let w = 2 * Z0 + 2; w <= 2 * Z1 - 1; w++) {
       if ((metaV(u, 1, w) & 128) && !metaV(u, 2, w) && hash(u * 13, w * 17) < 0.025) setV(u, 2, w, pick(C.tuft), soft);
-    }
-    for (let i = 0; i < 360; i++) {
-      const x = -3 + ((rnd() * 78) | 0), z = -3 + ((rnd() * 62) | 0);
-      if (!isGrass(x, z) || !isEmpty(x, 1, z)) continue;
-      box(x + 0.2 + rnd() * 0.5, 1, z + 0.2 + rnd() * 0.5, 0.2, 0.3, 0.2, pick(C.bloom), { j: false });
     }
 
     // ---------- places ----------
@@ -1438,6 +1443,7 @@
     function selectZone(id) {
       const z = byId[id];
       if (!z) return;
+      zoneSound(id);
       // on tall screens the place buttons cover the bottom edge, so aim a little past the place
       const shift = canvas.clientHeight > canvas.clientWidth ? z.fit * 0.12 : 0;
       goal.target.set(z.at[0] + OX + Math.sin(goal.az) * shift, 1, z.at[2] + OZ + Math.cos(goal.az) * shift);
@@ -2108,6 +2114,7 @@
         face: myLook.face ? toB64(myLook.face) : "",
         faceL: myLook.faceL ? toB64(myLook.faceL) : "",
         faceR: myLook.faceR ? toB64(myLook.faceR) : "",
+        faceT: myLook.faceT ? toB64(myLook.faceT) : "",
         cheeky: myLook.cheeky ? 1 : 0,
         h: FefeAvatar.bodyShape(myLook).h,
         wt: FefeAvatar.bodyShape(myLook).wt,
@@ -2138,7 +2145,7 @@
           return px;
         } catch (e) { return null; }
       };
-      const face = photo(r.face), faceL = photo(r.faceL), faceR = photo(r.faceR);
+      const face = photo(r.face), faceL = photo(r.faceL), faceR = photo(r.faceR), faceT = photo(r.faceT);
       const parse = (track) => {
         const nodes = [];
         if (typeof track !== "string" || track.length > 30000) return nodes;
@@ -2152,11 +2159,11 @@
       };
       const nodes = parse(r.track), nodesN = parse(r.trackN);
       const name = String(r.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest";
-      const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, faceL, faceR, cheeky: r.cheeky === 1 };
+      const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, faceL, faceR, faceT, cheeky: r.cheeky === 1 };
       const sh = FefeAvatar.bodyShape({ body: look.body, h: +r.h || 0, wt: +r.wt || 0 }); // clamps to sensible sizes
       look.h = sh.h;
       look.wt = sh.wt;
-      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : ""].join("|") };
+      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -2376,7 +2383,7 @@
       [[24, 40, "Astrid"], [25, 39, "Linnea"], [26, 40, "Saga"], [52, 44, "Oskar"], [62, 44, "Gustav"], [52, 47, "Axel"], [62, 47, "Lukas"], [55, 51, "Freja", "Maja"],
         [6, 12, "Tilda"], [7, 12, "Ebba"], [7, 17, "Björn"], [8, 17, "Erik"], [22, 34, "Viktor"], [23, 34, "Elsa", "Alva"], [70, 30, "Hugo"], [38, 30, "Nils"], [39, 30, "Anton", "Wilma"]],
       [[13, 12, "Saga"], [14, 11, "Erik"], [7, 8, "Maja"], [9, 9, "Lukas"], [27, 45, "Björn"], [1, 28, "Linnea"], [64, 29, "Freja"], [67, 29, "Oskar"],
-        [38, 30, "Viktor"], [39, 30, "Hugo"], [27, 33, "Gustav"], [31, 33, "Axel"], [55, 9, "Astrid"], [57, 9, "Nils"], [45, 28, "Tilda"], [46, 29, "Ebba"],
+        [38, 30, "Viktor"], [39, 30, "Hugo"], [27, 33, "Gustav"], [31, 33, "Axel"], [6, 46, "Astrid"], [7, 46, "Nils"], [45, 28, "Tilda"], [46, 29, "Ebba"],
         [47, 30, "Wilma"], [48, 31, "Anton"], [37, 33, "Alva"], [60, 20, "Elsa"]]
     ];
     const NIGHT_ROUNDS = [
@@ -2490,7 +2497,9 @@
           onDance(n) { danceCrowd = n; },
           sound: sfx,
           say(key, x, z) { if (snd && snd.enabled) snd.say(key, x, z); },
-          onScenes(rooms) { loveRooms = rooms; }
+          onScenes(rooms) { loveRooms = rooms; },
+          nearestCar: nearestParkedCar,
+          onSteamy(cars) { steamyCars = cars.slice(); }
         })
       : null;
     const actorList = [];
@@ -2501,7 +2510,7 @@
       : new T.MeshLambertMaterial({ color: c, transparent: kind === "clear", opacity: kind === "clear" ? 0.5 : 1 }));
     const carBox = new T.BoxGeometry(1, 1, 1);
     carList = CAR_SPECS.map((sp) => {
-      const g = new T.Group(), top = [];
+      const g = new T.Group(), top = [], glass = [];
       sp.parts.forEach(([x, y, z, w, h, d, color, kind]) => {
         const m = new T.Mesh(carBox, carMat(color, kind));
         m.scale.set(w, h, d);
@@ -2509,11 +2518,24 @@
         m.castShadow = kind === "solid";
         g.add(m);
         if (y >= 0.95) top.push(m); // cabin glass and roof: hidden while someone drives, so it's a convertible
+        if (kind === "clear") glass.push(m);
       });
       g.visible = false;
       scene.add(g);
-      return { g, top, x: sp.x, z: sp.z, h: 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
+      return { g, top, glass, x: sp.x, z: sp.z, h: 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
     });
+    // steamy car: fogged windows and a rocking body while Cheeky guests are inside (see actions.js)
+    const fogGlass = new T.MeshLambertMaterial({ color: 0xf2f5f8, transparent: true, opacity: 0.92 });
+    let steamyCars = [];
+    function nearestParkedCar(x, z) {
+      let best = null, bd = 7;
+      carList.forEach((c) => {
+        if (c === drive.car || c.drop > 0 || !c.g.visible || Math.abs(c.speed) > 0.2) return;
+        const d = Math.hypot(c.x - x, c.z - z);
+        if (d < bd) { bd = d; best = c; }
+      });
+      return best;
+    }
     function showCars() { carList.forEach((c) => { c.g.visible = true; c.drop = 10 + Math.random() * 3; }); }
     const drive = { car: null, gas: 0, steer: 0, keys: {}, shake: 0 };
     let pendingCar = null;
@@ -2583,7 +2605,7 @@
           else if (drive.gas < 0) acc = c.speed > 0.2 ? -16 : -5;
         }
         c.speed += acc * dt;
-        if (driving && acc > 0 && t > (c.revAt || 0)) { c.revAt = t + 0.55; sfx("engine", c.x, c.z, { pitch: 0.8 + Math.abs(c.speed) / 10 }); }
+        if (driving && acc > 0 && t > (c.revAt || 0)) { c.revAt = t + 5; sfx("engine", c.x, c.z, { pitch: 0.8 + Math.abs(c.speed) / 10 }); }
         if (driving && drive.steer && Math.abs(c.speed) > 6 && t > (c.skidAt || 0)) { c.skidAt = t + 0.7; sfx("skid", c.x, c.z); }
         const friction = driving && drive.gas ? 0.5 : 4;
         c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), friction * dt);
@@ -2601,8 +2623,15 @@
         const gy = carGround(c.x, c.z);
         if (gy !== null) c.y += (gy - c.y) * Math.min(1, dt * 10);
         const bump = driving && Math.abs(c.speed) > 1 ? Math.sin(t * 23) * 0.015 : 0;
-        c.g.position.set(c.x + OX, c.y + c.drop + bump, c.z + OZ);
-        c.g.rotation.set(-c.speed * 0.004 * (acc ? Math.sign(acc) : 0), c.h, (c.dmg % 2 ? 1 : -1) * c.dmg * 0.012);
+        const steamy = !driving && steamyCars.indexOf(c) >= 0, n = steamy ? c.steamyCount || 2 : 0;
+        const rock = steamy ? Math.abs(Math.sin(t * (8 + n))) * 0.07 : 0;
+        c.g.position.set(c.x + OX, c.y + c.drop + bump + rock, c.z + OZ);
+        c.g.rotation.set(-c.speed * 0.004 * (acc ? Math.sign(acc) : 0) + (steamy ? Math.sin(t * (8 + n)) * 0.035 : 0), c.h,
+          (c.dmg % 2 ? 1 : -1) * c.dmg * 0.012 + (steamy ? Math.sin(t * (5.5 + n)) * 0.05 : 0));
+        if (steamy !== !!c.fogged) { // steam the windows up, or clear them again
+          c.fogged = steamy;
+          c.glass.forEach((m) => { m.material = steamy ? fogGlass : carMat(C.glassCar, "clear"); });
+        }
         if (c.dmg >= 3 && party && t > c.smokeAt) { // a bashed-up car smokes from the bonnet
           c.smokeAt = t + (c.dmg >= 6 ? 0.15 : 0.4);
           party.fx.icon("puff", c.x + Math.sin(c.h) * (c.l / 2 - 0.5), c.y + 1.3, c.z + Math.cos(c.h) * (c.l / 2 - 0.5), { size: 0.5, vy: 0.9, life: 1.6, max: 1.6 });
@@ -2690,6 +2719,107 @@
       return true;
     }
     window.addEventListener("keyup", (e) => driveKeys(e, false));
+
+    // ---------- the sound of a place: tapping a place (joined or not) plays what it sounds like ----------
+    // Dance floor and karaoke start ABBA; everywhere else a line or two in Swedish. The first tap switches sound on,
+    // unless the speaker button was used to turn it off.
+    const ZONE_SOUNDS = {
+      pool: ["plask", "jaa"], dance: ["dansa"], kitchen: ["bork", "kott"], bedroom: ["oj", "puss"], bathroom: ["prutt", "plopp"],
+      bar: ["helan", "skal"], pavilion: ["skal", "grattis"], lounge: ["sjung"], court: ["heja", "hockey"], mainVilla: ["hej", "chatter"],
+      lanaiVilla: ["fika", "chatter"], poolVilla: ["plask", "hej"], playground: ["lek", "haha"], restroom: ["prutt", "aah"],
+      parking: ["tut", "brum"], gate: ["valkommen", "grattis"]
+    };
+    let zoneLineTimer = 0;
+    function zoneSound(id) {
+      if (!snd) return;
+      if (!snd.enabled && lsGet("fefe40.sound") !== "0") setSound(true);
+      if (id === "dance" || id === "lounge") startJukebox();
+      if (!snd.enabled) return;
+      const keys = ZONE_SOUNDS[id] || [], cx = view.target.x - OX, cz = view.target.z - OZ;
+      clearTimeout(zoneLineTimer);
+      if (keys[0]) snd.say(keys[0], cx, cz);
+      if (keys[1]) zoneLineTimer = setTimeout(() => { if (snd.enabled) snd.say(keys[1], view.target.x - OX, view.target.z - OZ); }, 2500);
+    }
+
+    // ---------- ABBA jukebox ----------
+    // ABBA's own official videos, embedded from YouTube (nothing loads from YouTube until someone taps Play ABBA).
+    // Near the dance floor or the karaoke lounge it plays, louder the closer you are, and it pauses when you walk off.
+    // YouTube requires the player to be visible while it plays, so it sits in a small panel. iPhones ignore volume
+    // changes from web pages, so there it just plays near the music and pauses away from it.
+    const ABBA_VIDEOS = ["xFrGuyw1V8s", "unfzfe8f9NI", "XEjLoHdbVeE", "Sj_9CiNkkn4"]; // Dancing Queen, Mamma Mia, Gimme! Gimme! Gimme!, Waterloo
+    // after dark the dance floor turns club: Swedish House Mafia's official videos
+    const SHM_VIDEOS = ["1y6smkh6c-0", "BXpdmKELE1k", "PkQ5rEJaTmk", "u9n7Cw-4_HQ"]; // Don't You Worry Child, Save the World, One (Your Name), Moth to a Flame
+    const jbList = () => (night ? SHM_VIDEOS : ABBA_VIDEOS);
+    const jbTitle = document.querySelector("#jukebox .jb-title");
+    const MUSIC_SPOTS = [[47, 30], [38.5, 33.5]];
+    const jbEl = document.getElementById("jukebox"), jbPlayBtn = document.getElementById("jb-play");
+    const jb = { player: null, ready: false, on: false, near: false, playing: false, next: 0, loading: false };
+    function musicDistance() {
+      const px = me ? me.x : view.target.x - OX, pz = me ? me.z : view.target.z - OZ;
+      return Math.min(...MUSIC_SPOTS.map(([x, z]) => Math.hypot(px - x, pz - z)));
+    }
+    function loadYouTube(then) {
+      if (window.YT && window.YT.Player) { then(); return; }
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { if (prev) prev(); then(); };
+      if (jb.loading) return;
+      jb.loading = true;
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    }
+    function startJukebox() {
+      jb.on = true;
+      jb.night = night;
+      jbTitle.textContent = night ? "Swedish House Mafia" : "ABBA at the party";
+      jbEl.hidden = false;
+      jbPlayBtn.hidden = true;
+      if (jb.player) { if (jb.ready) jb.player.playVideo(); return; }
+      loadYouTube(() => {
+        if (jb.player) return;
+        jb.player = new YT.Player("jb-player", {
+          width: 200,
+          height: 200,
+          videoId: jbList()[0],
+          host: "https://www.youtube-nocookie.com",
+          playerVars: { playlist: jbList().join(","), loop: 1, playsinline: 1, rel: 0, modestbranding: 1 },
+          events: {
+            onReady: () => { jb.ready = true; if (jb.on && jb.near) jb.player.playVideo(); },
+            onStateChange: (e) => { jb.playing = e.data === 1; },
+            onError: () => { if (jb.ready) jb.player.nextVideo(); } // a video that won't play here: skip it
+          }
+        });
+      });
+    }
+    function stopJukebox() {
+      jb.on = false;
+      if (jb.ready) jb.player.pauseVideo();
+      jbEl.hidden = true;
+    }
+    jbPlayBtn.addEventListener("click", startJukebox);
+    document.getElementById("jb-close").addEventListener("click", stopJukebox);
+    document.getElementById("jb-next").addEventListener("click", () => { if (jb.ready) jb.player.nextVideo(); });
+    function updateJukebox(t) {
+      if (t < jb.next) return;
+      jb.next = t + 0.25;
+      const d = musicDistance(), near = d < (jb.near ? 26 : 16) && view.fit < 60;
+      jb.near = near;
+      jbPlayBtn.hidden = jb.on || !near || !joinEl.hidden;
+      jbPlayBtn.textContent = night ? "\u25B6 Swedish House Mafia" : "\u25B6 Play ABBA";
+      if (!jb.on) return;
+      if (jb.ready && jb.night !== night) { // day and night have their own music
+        jb.night = night;
+        jbTitle.textContent = night ? "Swedish House Mafia" : "ABBA at the party";
+        jb.player.loadPlaylist(jbList(), 0);
+        jb.player.setLoop(true);
+      }
+      jbEl.hidden = !near;
+      if (!jb.ready) return;
+      if (near) {
+        jb.player.setVolume(Math.round(100 * Math.max(0.15, Math.min(1, 1 - (d - 7) / 19))));
+        if (!jb.playing && jb.player.getPlayerState() !== 3) jb.player.playVideo();
+      } else if (jb.playing) jb.player.pauseVideo();
+    }
 
     // ---------- karaoke screen: an ABBA night (song titles only, no lyrics) ----------
     const ABBA = ["Dancing Queen", "Mamma Mia", "Waterloo", "Gimme! Gimme! Gimme!", "Take a Chance on Me", "Super Trouper", "Voulez-Vous", "Fernando", "Money, Money, Money", "Chiquitita"];
@@ -3007,32 +3137,65 @@
     }
     const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     let scanning = false;
+    const scanRing = $("scan-ring"), scanArrow = $("scan-arrow"), scanThumbs = $("scan-thumbs"), frameEl = video.parentElement;
+    const SCAN = [
+      ["front", "Look straight at the camera", "\u25CE"],
+      ["right", "Turn your head to the right", "\u2192"],
+      ["left", "Now slowly to the left", "\u2190"],
+      ["down", "Tip your head down", "\u2193"]
+    ];
+    function showThumbs(frames) {
+      scanThumbs.textContent = "";
+      ["Front", "Right", "Left", "Top"].forEach((label, i) => {
+        const f = document.createElement("figure"), c = document.createElement("canvas"), cap = document.createElement("figcaption");
+        c.width = c.height = 56;
+        c.getContext("2d").drawImage(frames[i], 90, 60, 300, 300, 0, 0, 56, 56);
+        cap.textContent = label;
+        f.append(c, cap);
+        scanThumbs.appendChild(f);
+      });
+      scanThumbs.hidden = false;
+    }
     async function scanHead() {
       if (!video.videoWidth || scanning) return;
       scanning = true;
       snapBtn.disabled = true;
+      scanThumbs.hidden = true;
+      scanRing.hidden = false;
+      const dots = [...scanRing.querySelectorAll(".scan-dot")];
+      dots.forEach((d) => d.classList.remove("done", "now"));
       const frames = [];
-      for (const text of ["Look straight at the camera", "Turn your head to the right \u2192", "Now slowly to the left \u2190"]) {
+      for (const [at, text, arrow] of SCAN) {
+        const dot = dots.find((d) => d.dataset.at === at);
+        dot.classList.add("now");
+        scanArrow.textContent = arrow;
         for (let n = 3; n >= 1; n--) {
-          if (joinEl.hidden || !stream) { scanMsg.hidden = true; scanning = false; return; }
+          if (joinEl.hidden || !stream) { scanMsg.hidden = true; scanRing.hidden = true; scanning = false; return; }
           scanMsg.textContent = text + "   " + n;
           scanMsg.hidden = false;
-          await pause(frames.length ? 550 : 650);
+          await pause(frames.length ? 520 : 650);
         }
         frames.push(grabFrame());
+        dot.classList.remove("now");
+        dot.classList.add("done");
+        frameEl.classList.remove("flash");
+        void frameEl.offsetWidth; // restart the flash animation
+        frameEl.classList.add("flash");
       }
       scanMsg.hidden = true;
+      scanRing.hidden = true;
       scanning = false;
-      sides = [frames[1], frames[2]];
+      sides = [frames[1], frames[2], frames[3]];
       setPhoto(frames[0], frames[0].width, frames[0].height, false);
+      showThumbs(frames);
     }
     snapBtn.addEventListener("click", scanHead);
-    retakeBtn.addEventListener("click", () => { photo = null; sides = null; startCamera(); });
+    retakeBtn.addEventListener("click", () => { photo = null; sides = null; scanThumbs.hidden = true; startCamera(); });
     fileIn.addEventListener("change", () => {
       const f = fileIn.files && fileIn.files[0];
       if (!f) return;
       const img = new Image();
-      img.onload = () => { sides = null; setPhoto(img, img.naturalWidth, img.naturalHeight, false); URL.revokeObjectURL(img.src); };
+      img.onload = () => { sides = null; scanThumbs.hidden = true; setPhoto(img, img.naturalWidth, img.naturalHeight, false); URL.revokeObjectURL(img.src); };
       img.onerror = () => noCamera("That photo couldn't be opened. Try another one.");
       img.src = URL.createObjectURL(f);
       fileIn.value = "";
@@ -3102,6 +3265,8 @@
         const nudge = (dir) => Math.max(0, Math.min(W - size, cx - size / 2 + dir * size * 0.12));
         out.faceL = pixels(sides[0], nudge(-1), cy - size / 2, true);
         out.faceR = pixels(sides[1], nudge(1), cy - size / 2, true);
+        // head tipped down: the crown sits about where the forehead was, back of the head at the top of the picture
+        if (sides[2]) out.faceT = pixels(sides[2], cx - size / 2, Math.max(0, cy - size / 2 - size * 0.28), true);
       }
       const avg = (x0, y0, x1, y1) => {
         const s = [0, 0, 0];
@@ -3124,7 +3289,7 @@
       showStep("wait");
       const res = await analyse(photo);
       if (joinEl.hidden) return;
-      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, faceL: res.faceL || null, faceR: res.faceR || null, cheeky: lsGet("fefe40.cheeky") === "1" };
+      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, faceL: res.faceL || null, faceR: res.faceR || null, faceT: res.faceT || null, cheeky: lsGet("fefe40.cheeky") === "1" };
       // height and weight come back from last time, otherwise they follow the body until moved
       sizeSet = !!lsGet("fefe40.h");
       draft.h = +lsGet("fefe40.h") || FefeAvatar.HEIGHT[draft.body];
@@ -3359,7 +3524,8 @@
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
       trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
       speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
-      cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car]),
+      cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car, !!c.fogged, +c.g.rotation.z.toFixed(3), +c.g.position.y.toFixed(3)]),
+      holds: () => actorList.map((a) => [a.name, a.av.holding(), !!a.hiddenAct]),
       goCar: (i) => goToCar(carList[i]),
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
@@ -3425,6 +3591,7 @@
       updateCutaway(dt);
       updateNightLights(dt, now / 1000);
       updateKaraoke(now / 1000);
+      updateJukebox(now / 1000);
       if (snd && snd.enabled) {
         snd.setListener(view.target.x - OX, view.target.z - OZ, view.fit);
         snd.setMusicLevel(Math.min(1, danceCrowd / 6));

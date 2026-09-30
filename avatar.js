@@ -318,6 +318,9 @@
     phone: (add) => { add(-0.8, -13.6, 1.6, 1.6, 2.8, 0.4, "#23252B"); add(-0.6, -13.4, 2.05, 1.2, 2.4, 0.1, "#7FD8FF", true); },
     plate: (add) => { add(-2.5, -10.6, -0.5, 5, 0.4, 5, "#F7F7F4"); add(-1.2, -10.2, 0.7, 2.4, 0.9, 2.4, "#F2A33A"); },
     snus: (add) => { add(-1.1, -11.4, 0.9, 2.2, 0.9, 2.2, "#1F3C88"); add(-1.2, -10.6, 0.8, 2.4, 0.3, 2.4, "#E8E8E8"); },
+    // after the shower: a towel round the waist (on the torso) and one wrapped round the head
+    towel: (add) => { add(-4.7, -3.6, -2.7, 9.4, 6, 5.4, "#FFFFFF"); add(-4.8, -1.8, -2.8, 9.6, 0.8, 5.6, "#2F6FD1"); add(-4.8, 0.2, -2.8, 9.6, 0.5, 5.6, "#FEFE40"); },
+    turban: (add) => { add(-4.5, 6.2, -4.5, 9, 3.2, 9, "#FFFFFF"); add(-1.6, 9.3, -1.6, 3.2, 1.6, 3.2, "#F4F4F4"); },
     pouch: (add) => { add(-0.6, -11.3, 0.4, 1.2, 0.4, 1.8, "#F4F4F0"); },
     cig: (add) => { add(-0.2, -10.6, 2, 0.4, 0.4, 3, "#FFFFFF"); add(-0.25, -10.65, 5, 0.5, 0.5, 0.5, "#FF5A36", true); },
     pillow: (add) => { add(-3, -16, 0, 6, 4, 3, "#FFFFFF"); },
@@ -405,8 +408,8 @@
       px(1, 4, WHITE); px(2, 4, "#3A2A20"); px(5, 4, "#3A2A20"); px(6, 4, WHITE);
       px(3, 6, "#9E4A3A"); px(4, 6, "#9E4A3A");
     }
-    // the sides of the head from the head scan (ears and hair), when there is one
-    [[look.faceL, "left"], [look.faceR, "right"]].forEach(([data, side]) => {
+    // the sides and top of the head from the head scan (ears and hair), when there is one
+    [[look.faceL, "left"], [look.faceR, "right"], [look.faceT, "top"]].forEach(([data, side]) => {
       const m = data ? Math.round(Math.sqrt(data.length / 3)) : 0;
       if (m < 8 || m * m * 3 !== data.length) return;
       const [sx, sy] = faceRects(0, 0, 8, 8, 8)[side];
@@ -547,7 +550,7 @@
         m.position.set((x + w / 2) * P, (y + h / 2) * P, (z + d / 2) * P);
         group.add(m);
       }, look);
-      (slot === "head" ? head : slot === "R" ? armR : armL).add(group);
+      (slot === "head" ? head : slot === "R" ? armR : slot === "body" ? torso : armL).add(group);
       held[slot] = { kind, group, own };
     }
     // Sharpie moustache drawn straight onto the face pixels (a drunk-nap prank), and back off again.
@@ -578,6 +581,7 @@
       height: (32 + 8 * (HEAD - 1)) * P * shape.s,
       scale: shape.s,
       hold,
+      holding: () => Object.fromEntries(Object.entries(held).map(([k, v]) => [k, v.kind])),
       moustache,
       // phase advances with distance walked; moving blends between walking and standing
       setPose(phase, moving) {
@@ -596,7 +600,7 @@
         armR.position.y = armL.position.y = 22 * P + bob;
       },
       dispose() {
-        ["R", "L", "head"].forEach((s) => hold(s, null));
+        ["R", "L", "head", "body"].forEach((s) => hold(s, null));
         owned.forEach((o) => o.dispose());
       }
     };

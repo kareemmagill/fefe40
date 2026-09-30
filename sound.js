@@ -5,11 +5,39 @@
   const AC = window.AudioContext || window.webkitAudioContext;
   const SS = window.speechSynthesis && window.SpeechSynthesisUtterance ? window.speechSynthesis : null;
   const FLOOR_X = 47, FLOOR_Z = 30; // dance floor centre, world metres
-  const MAX_VOICES = 24, PER_NAME = 8, SAY_GAP = 2500, MASTER = 0.8;
+  const MAX_VOICES = 24, PER_NAME = 8, SAY_GAP = 2200, MASTER = 0.8;
   const DAY_BPM = 112, NIGHT_BPM = 124;
+  // Voice lines, said in the phone's Swedish voice ("en:" lines in an English one). Each key picks one of its lines.
+  // Helan går and Ja, må han leva are traditional songs, free to use.
   const LINES = {
-    skal: "Skål!", grattis: "Grattis Filip!", helan: "Helan går!", hej: "Hej hej!", oj: "Oj oj oj!", tack: "Tack!",
-    heja: "Heja!", fika: "Fika!", jattebra: "Jättebra!", nej: "Nej nej nej!", kul: "Vad kul!", alskar: "Jag älskar dig!"
+    skal: ["Skål!", "Skål på er!", "Skåål!"],
+    grattis: ["Grattis Filip!", "Grattis på födelsedagen, Filip!", "Hurra för Filip!"],
+    helan: ["Helan går! Sjung hopp faderallan lallan lej!", "Helan går! Sjung hopp faderallan lej! Och den som inte helan tar, han heller inte halvan får!"],
+    leva: ["Ja, må han leva! Ja, må han leva! Ja, må han leva uti hundrade år!", "Hurra! Hurra! Hurra! Hurraaa!"],
+    hej: ["Hej hej!", "Hallå!", "Tjena!"], oj: ["Oj oj oj!", "Oj!", "Hoppsan!"], tack: ["Tack!"],
+    heja: ["Heja!", "Heja heja!", "Heja Sverige!"], jaa: ["Jaaa!", "Wohoo!", "Jaaaa!"],
+    fika: ["Fika!", "Nu blir det fika!", "Kanelbulle!"], jattebra: ["Jättebra!", "Mums!"], nej: ["Nej nej nej!", "Men nej!"],
+    kul: ["Vad kul!", "Så kul!"], alskar: ["Jag älskar dig!", "Puss puss!"], puss: ["Puss!", "Puss puss!", "Mwah!"],
+    godis: ["Vill du ha godis?", "Godis!", "Mer godis!", "en:Want some candy?", "en:Candy!"],
+    haha: ["Ha ha ha ha!", "Haha!"], hihi: ["Hi hi hi!", "Hihi!"],
+    hick: ["Hick!", "Hick! Hick!"], rap: ["Rapp!", "Buuurp!"], blah: ["Bläää!", "Bleeeh!"], prutt: ["Prutt!", "Oj, förlåt!"],
+    plopp: ["Plopp!", "Ahhh!"], aah: ["Aaaah!", "Skönt!"], plask: ["Plask!", "Hoppa i!", "Kallt!"],
+    snus: ["Snus!", "En prilla!"], tut: ["Tut tut!", "Tuuut!"], brum: ["Brum brum!", "Vroom!"], krasch: ["Krasch!", "Aj aj aj!", "Hoppsan!"],
+    aj: ["Aj!", "Aj aj!"], dansa: ["Nu dansar vi!", "Nu kör vi!", "Dansa!"], sjung: ["La la la laaa!", "Tralalala!"],
+    hockey: ["Heja Tre Kronor!", "Hockey!"], kott: ["Köttbullar!", "Vem vill ha köttbullar?", "Chokladbollar!"],
+    // Swedish-Chef-style gibberish (original lines in that spirit): the cook in the kitchen and anyone drunk
+    bork: ["Börk börk börk!", "Hurdi gurdi, flurdi smörgås!", "Bjork a bjork a bjork!", "Hurdi gurdi durdi, bla bla bla!", "Smörgåsbörk! Hurdi flurdi!",
+      "Bla bla bla bla, börk!", "Hurdi durdi köttbullar, börk börk!", "Fläsk i flurdi, börk!"],
+    valkommen: ["Välkommen till festen!", "Välkommen till Filips fest!"], lek: ["Wohoo!", "Vi leker!"],
+    // random party chatter
+    chatter: ["Börk börk börk!", "Ska vi åka skidor?", "en:Let's go skiing!", "Heja Tre Kronor!", "Köttbullar!", "Vill du ha godis?", "Fika!", "Skål!", "Grattis Filip!", "Vad kul!", "Chokladbollar!"]
+  };
+  // what each game sound becomes: a voice line key (sounds with no entry stay quiet)
+  const SPOKEN = {
+    laugh: "haha", giggle: "hihi", cheer: "jaa", clap: "heja", hiccup: "hick", burp: "bork", babble: "bork", vomit: "blah", fart: "prutt",
+    plop: "plopp", pee: "aah", flush: "plopp", splash: "plask", cannonball: "plask", kiss: "puss", sniff: "snus", chug: "skal",
+    clink: "skal", horn: "tut", engine: "brum", crash: "krasch", bonk: "aj", wave: "hej", sparkle: "godis", shower: "sjung",
+    boing: "oj", pillow: "hihi"
   };
   const rand = Math.random;
   const noop = () => {};
@@ -44,7 +72,7 @@
     let musicOn = false, step = 0, nextT = 0, lastMix = -1, hadRun = false, lastRetry = 0, listening = false;
     let voices = [];
     const recent = {};
-    let lastSay = -1e9, svVoice = null, voicesSeen = 0, queued = 0, speechUnlocked = false;
+    let lastSay = -1e9, svVoice = null, enVoice = null, voicesSeen = 0, queued = 0, speechUnlocked = false;
 
     // ---------- building blocks ----------
     const hz = (f) => clamp(f * pm, 10, nyq);
@@ -523,6 +551,7 @@
         const vs = SS.getVoices() || [];
         voicesSeen = vs.length;
         svVoice = vs.find((v) => /^sv[-_]SE/i.test(v.lang)) || vs.find((v) => /^sv/i.test(v.lang)) || null;
+        enVoice = vs.find((v) => /^en[-_](US|GB)/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
       } catch (e) { svVoice = null; }
     }
 
@@ -534,11 +563,7 @@
       master.gain.cancelScheduledValues(t);
       master.gain.setValueAtTime(master.gain.value, t);
       master.gain.setTargetAtTime(MASTER, t, 0.05);
-      if (!musicOn) {
-        musicOn = true;
-        nextT = t + 0.1;
-        step -= step & 15; // restart the current bar
-      }
+      // (the synthesised disco loop is retired: the ABBA jukebox at the dance floor plays the music now)
       eng.enabled = true;
       if (!listening && !offline) {
         listening = true;
@@ -582,7 +607,11 @@
       levelTarget = clamp(+v || 0, 0, 1);
     }
 
+    // Effects are spoken: the synthesised versions didn't sound good enough, so each maps to a voice line (see SPOKEN).
     function play(name, x, z, o) {
+      if (Object.prototype.hasOwnProperty.call(SPOKEN, name)) say(SPOKEN[name], x, z);
+    }
+    function playSynth(name, x, z, o) {
       if (!eng.enabled || !ctx || !Object.prototype.hasOwnProperty.call(FX, name)) return;
       if (!running()) return;
       const g = place(x, z) * (o && o.vol != null ? clamp(+o.vol || 0, 0, 1) : 1);
@@ -614,8 +643,10 @@
       if (g < 0.05) return;
       lastSay = ms;
       if (!svVoice) pickVoice();
-      const u = new SpeechSynthesisUtterance(LINES[key]);
-      if (svVoice) { u.voice = svVoice; u.lang = svVoice.lang; } else if (!voicesSeen) u.lang = "sv-SE";
+      const pickLine = LINES[key][Math.floor(rand() * LINES[key].length)], en = pickLine.indexOf("en:") === 0;
+      const u = new SpeechSynthesisUtterance(en ? pickLine.slice(3) : pickLine);
+      if (en) { if (enVoice) { u.voice = enVoice; u.lang = enVoice.lang; } else u.lang = "en-US"; }
+      else if (svVoice) { u.voice = svVoice; u.lang = svVoice.lang; } else if (!voicesSeen) u.lang = "sv-SE";
       u.volume = clamp(0.2 + 0.8 * g, 0, 1);
       u.rate = 1 + rand() * 0.15;
       u.pitch = 0.7 + rand() * 0.8;
