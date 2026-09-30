@@ -1598,7 +1598,7 @@
     // ---------- party: avatars, walking and recorded tracks ----------
     // Guests are shared through a Firebase Realtime Database over its REST API: no keys, only the database URL,
     // with rules that let anyone read and each guest write their own record. While DB_URL is empty the party runs solo.
-    const DB_URL = "";
+    const DB_URL = "https://fefe40-a3dae-default-rtdb.asia-southeast1.firebasedatabase.app";
     const FACEAPI = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15";
     const ID_RE = /^[a-z0-9]{6,24}$/;
     const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };

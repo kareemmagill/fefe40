@@ -30,7 +30,8 @@ The photo never leaves the phone: only the name, the 32 × 32 face, the outfit, 
 ## Sharing guests between phones
 
 Guests are shared through a Firebase Realtime Database using its REST API, so only the database URL is needed (no keys). Records live under `fefe40/guests`, their version stamps under `fefe40/index`, and live positions under `fefe40/live`.
-Paste the rules from `database.rules.json` into the database's **Rules** tab, then set `DB_URL` near the top of the party section in `app.js`.
+The party's database is `https://fefe40-a3dae-default-rtdb.asia-southeast1.firebasedatabase.app` (Singapore), set as `DB_URL` near the top of the party section in `app.js`. Its rules must match `database.rules.json`: paste that file into the database's **Rules** tab and publish whenever it changes.
+Everyone who joined is listed under `fefe40/guests` in the Firebase console's **Data** tab.
 While `DB_URL` is empty the party runs solo: everything works, but each phone only sees its own avatar.
 
 Room layout is approximate, built from the venue's public listing and photos.
