@@ -1768,6 +1768,7 @@
         skin: myLook.skin,
         hair: myLook.hair,
         face: myLook.face ? toB64(myLook.face) : "",
+        cheeky: myLook.cheeky ? 1 : 0,
         track: rec ? rec.nodes.map((n) => n.join(",")).join(";") : "",
         at: Date.now()
       };
@@ -1801,7 +1802,7 @@
         });
       }
       const name = String(r.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest";
-      const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face };
+      const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, cheeky: r.cheeky === 1 };
       return { name, look, nodes, key: [name, look.body, look.outfit, look.skin, look.hair, typeof r.face === "string" ? r.face : ""].join("|") };
     }
     const ghosts = new Map();
@@ -2173,7 +2174,7 @@
       showStep("wait");
       const res = await analyse(photo);
       if (joinEl.hidden) return;
-      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face };
+      draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, cheeky: lsGet("fefe40.cheeky") === "1" };
       guessNote.textContent = res.body ? "Guessed from your photo. Tap to change." : photo ? "We couldn't spot a face, so pick one." : "Pick one.";
       setDressMode("join");
       showStep("dress");
@@ -2217,12 +2218,19 @@
       if (wardrobeBtn.hidden === show) wardrobeBtn.hidden = !show;
     }
     wardrobeBtn.addEventListener("click", openWardrobe);
+    // Cheeky mode is opt-in per guest: only avatars whose owner switched it on join the adults-only gags.
+    const cheekyIn = $("cheeky");
+    cheekyIn.addEventListener("change", () => {
+      if (draft) draft.cheeky = cheekyIn.checked;
+      lsSet("fefe40.cheeky", cheekyIn.checked ? "1" : "0");
+    });
 
     function refreshDress() {
       bodyM.setAttribute("aria-pressed", String(draft.body === "m"));
       bodyF.setAttribute("aria-pressed", String(draft.body === "f"));
       outfitName.textContent = FefeAvatar.OUTFITS[draft.outfit].name;
       outfitCount.textContent = draft.outfit + 1 + " / " + FefeAvatar.OUTFITS.length;
+      cheekyIn.checked = !!draft.cheeky;
       rebuildPreview();
     }
     bodyM.addEventListener("click", () => { draft.body = "m"; refreshDress(); });

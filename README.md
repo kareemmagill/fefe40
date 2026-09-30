@@ -12,7 +12,7 @@ Live at **https://kareemmagill.github.io/fefe40/**, on phones and computers.
 4. In any bedroom, a **Change outfit** button opens the wardrobe.
 5. The guest list (top left) shows everyone who has joined. Guests online right now are marked **Live** and move in real time; everyone else loops the walk they recorded. Entering again from the same phone starts that guest's recording over.
 
-It's an 18+ party: the join screen says so, and the adults-only gags apply to everyone.
+It's an 18+ party. The outfit screen has a **Cheeky mode (18+)** switch, off by default: only guests who turn it on join the adults-only gags.
 The photo never leaves the phone: only the name, the 32 × 32 face, the outfit, the walk and (while online) the current position are shared.
 
 ## Files

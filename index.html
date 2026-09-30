@@ -209,7 +209,10 @@ body {
 }
 .enter.alt { background: var(--white); font-size: 1.125rem; min-height: 48px; animation: none; }
 .eyebrow { margin: 0 0 4px; color: var(--sky-bottom); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-.adult-note { margin: 12px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--blue-deep); font-size: 0.8125rem; line-height: 1.4; }
+.check { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 12px; border: 2px solid var(--blue-edge); border-radius: 8px; background: var(--blue-deep); cursor: pointer; }
+.check input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; accent-color: var(--yellow); }
+.check span { display: grid; gap: 2px; font-size: 0.9375rem; }
+.check small { color: var(--sky-bottom); font-size: 0.8125rem; line-height: 1.35; }
 .enter:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--blue-edge); animation: none; }
 .enter:focus-visible { outline: 3px solid var(--white); outline-offset: 3px; }
 @keyframes nudge { 50% { transform: translateY(-3px); } }
@@ -467,7 +470,6 @@ body {
         </div>
         <label class="field" for="guest-name">Your name</label>
         <input class="input" id="guest-name" type="text" maxlength="20" autocomplete="given-name" enterkeyhint="done" placeholder="e.g. Filip">
-        <p class="adult-note">18+ party: avatars get cheeky here (kissing, bedroom antics, drunk moments), and yours joins in.</p>
         <p class="sheet-note" id="solo-note" hidden>Guest sharing isn't switched on yet, so for now you'll see only your own avatar.</p>
         <div class="row end">
           <button type="button" class="btn ghost" id="join-cancel">Cancel</button>
@@ -499,6 +501,10 @@ body {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="m9 4 8 8-8 8"/></svg>
           </button>
         </div>
+        <label class="check" for="cheeky">
+          <input type="checkbox" id="cheeky">
+          <span><strong>Cheeky mode (18+)</strong><small>Your avatar joins the adults-only gags: kissing, bedroom antics, drunk moments. Leave it off to keep yours clean.</small></span>
+        </label>
         <div class="row end">
           <button type="button" class="btn ghost" id="back">Back</button>
           <button type="button" class="btn primary" id="drop">OK, drop me in</button>
