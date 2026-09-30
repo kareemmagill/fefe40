@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "fefe40": {
+      "index": {
+        ".read": true,
+        "$id": {
+          ".write": true,
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.isNumber()"
+        }
+      },
+      "guests": {
+        "$id": {
+          ".read": true,
+          ".write": true,
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['name', 'track', 'at']) && newData.child('name').isString() && newData.child('name').val().length <= 20 && newData.child('track').isString() && newData.child('track').val().length <= 30000 && (!newData.child('face').exists() || (newData.child('face').isString() && newData.child('face').val().length <= 1100))"
+        }
+      }
+    }
+  }
+}
