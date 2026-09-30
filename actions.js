@@ -1473,21 +1473,28 @@
     // Fresh out of the shower: a towel round the waist and one on the head. In Cheeky mode the towel drops once:
     // it lands on the floor, a CENSORED bar pops up and they cover up with both hands.
     function towel(a, s) {
-      const on = s.towelUntil > env.t && !a.hiddenAct && !a.inCar;
+      const on = s.towelUntil > env.t && s.act !== "shower" && !a.hiddenAct && !a.inCar;
       const slip = on && env.t > s.slipAt && env.t < s.slipAt + 3.5;
       a.av.hold("body", on && !slip ? "towel" : null);
-      if (on && !s.on) a.av.hold("head", "turban");
+      if (on && !s.on && a.av.holding().head !== "turban") a.av.hold("head", "turban");
+      if (on) s.turban = true;
+      else if (s.turban) { // towel time's over (or they're driving, or out of sight): the turban comes off too
+        s.turban = false;
+        if (a.av.holding().head === "turban") a.av.hold("head", null);
+      }
       if (!slip) return;
+      // effects go where the body is drawn, which during an act can be a step away from the guest's cell
+      const r = a.av.root.position, bx = r.x - OX, by = r.y, bz = r.z - OZ;
       if (!s.slipped) {
         s.slipped = true;
-        fx.block("#FFFFFF", a.x + 0.3, a.y + 0.03, a.z + 0.2, { g: 0, size: 0.7, life: 3.5, max: 3.5, flat: true });
-        fx.icon("bang", a.x, a.y + 2.9, a.z, { size: 0.5 });
-        if (ctx.say) ctx.say("oj", a.x, a.z);
+        fx.block("#FFFFFF", bx + 0.3, by + 0.03, bz + 0.2, { g: 0, size: 0.7, life: 3.5, max: 3.5, flat: true });
+        fx.icon("bang", bx, by + 2.9, bz, { size: 0.5 });
+        if (ctx.say) ctx.say("oj", bx, bz);
       }
       a.av.parts.armR.rotation.set(-0.35, 0, 0.35);
       a.av.parts.armL.rotation.set(-0.35, 0, -0.35);
-      fx.keep("censor" + a.key, "censored", a.x, a.y + 0.75, a.z, 0.38);
-      if (Math.random() < 0.05) fx.icon("blush", a.x, a.y + 2.6, a.z, { size: 0.35 });
+      fx.keep("censor" + a.key, "censored", bx, by + 0.75, bz, 0.38);
+      if (Math.random() < 0.05) fx.icon("blush", bx, by + 2.6, bz, { size: 0.35 });
     }
     function walkingExtras(a, s, dt) {
       const lv = env.drunk(a);
@@ -1512,7 +1519,7 @@
         if (Math.random() < dt * 1.5) fx.icon(Math.random() < 0.5 ? "star" : "bang", a.x, a.y + 2.8, a.z, { size: 0.3 });
       }
       a.av.hold("L", shame ? "shoes" : null);
-      a.av.hold("head", shame ? "messy" : null);
+      a.av.hold("head", shame ? "messy" : s.towelUntil > env.t && s.turban ? "turban" : null);
       if (lv >= 2 && a.look && a.look.cheeky) {
         a.av.rig.rotation.z = Math.sin(env.t * 3.2) * 0.06 * lv;
         if (Math.random() < dt * 0.8) {
@@ -1536,7 +1543,7 @@
         actors.forEach((a) => {
           const s = st(a);
           if (a.drop > 0) {
-            if (!s.dropping) { s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.towelUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
+            if (!s.dropping) { if (s.act) stop(a, s); s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.towelUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
           } else s.dropping = false;
           s.on = false;
           if (a.drop > 0 || a.idleT < 0.35 || a.inCar) return;
@@ -1650,7 +1657,7 @@
       }
       a.av.hold("R", out.R || null);
       a.av.hold("L", out.L || null);
-      a.av.hold("head", out.head || out.headL || null);
+      a.av.hold("head", out.head || out.headL || (!out.hide && s.towelUntil > env.t && asg.act !== "shower" ? "turban" : null));
       if (out.skinny && Math.random() < dt * 0.6) fx.icon("blush", m.x, a.y + 2.6, m.z, { size: 0.35 });
       const off = m.offset || [0, 0, 0];
       a.av.root.position.set(s.vx + off[0] + OX, a.y + off[2], s.vz + off[1] + OZ);

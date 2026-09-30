@@ -306,8 +306,8 @@
       box(x, y, z, 0.24, 0.14, 0.3, "#FFD21A", { j: false });
       box(x + 0.04, y + 0.12, z, 0.16, 0.14, 0.14, "#FFD21A", { j: false });
       box(x + 0.09, y + 0.15, z - 0.06, 0.06, 0.04, 0.07, "#FF8A1F", { j: false });
-      box(x + 0.05, y + 0.2, z + 0.01, 0.03, 0.03, 0.03, "#23252B", { j: false });
-      box(x + 0.16, y + 0.2, z + 0.01, 0.03, 0.03, 0.03, "#23252B", { j: false });
+      box(x + 0.05, y + 0.2, z - 0.01, 0.03, 0.03, 0.03, "#23252B", { j: false });
+      box(x + 0.16, y + 0.2, z - 0.01, 0.03, 0.03, 0.03, "#23252B", { j: false });
     }
     function lounger(x, z, cushion) {
       box(x + 0.1, 1, z + 0.05, 0.8, 0.3, 1.9, C.white);
@@ -2176,7 +2176,7 @@
       const sh = FefeAvatar.bodyShape({ body: look.body, h: +r.h || 0, wt: +r.wt || 0 }); // clamps to sensible sizes
       look.h = sh.h;
       look.wt = sh.wt;
-      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
+      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -3460,6 +3460,7 @@
     }
     function wearDraft() {
       myLook = Object.assign({}, draft);
+      me.look = myLook; // the acts read Cheeky from here
       scene.remove(me.av.root);
       me.av.dispose();
       me.av = FefeAvatar.build(T, myLook);
