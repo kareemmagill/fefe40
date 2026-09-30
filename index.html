@@ -512,7 +512,7 @@ body.driving .dock { display: none; }
     <p class="logo">FiFi4000</p>
     <div class="brand-row">
       <button type="button" class="meta guests-btn" id="guests" aria-expanded="false" aria-controls="guest-list" hidden></button>
-      <button type="button" class="meta exit-btn invite-btn" id="invite">Invite</button>
+      <button type="button" class="meta exit-btn invite-btn" id="invite" hidden>Invite</button>
       <label class="meta exit-btn" id="test-faces" for="test-face-files" hidden>Test faces</label>
       <input type="file" id="test-face-files" accept="image/*" multiple hidden>
       <button type="button" class="meta exit-btn" id="exit" hidden>Exit</button>
@@ -548,7 +548,7 @@ body.driving .dock { display: none; }
   </div>
 
   <div class="dock">
-    <p class="hint" id="hint">Drag to explore · Pinch to zoom · Tap a place</p>
+    <p class="hint" id="hint" hidden></p>
     <button type="button" class="enter" id="enter" hidden>Enter the party</button>
     <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
     <nav class="chips" id="chips" aria-label="Places" hidden></nav>

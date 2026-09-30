@@ -711,9 +711,7 @@
       box(46.95, 5.3, 29.95, 0.05, 1.7, 0.05, C.metal);
       box(45, 1, 25, 4, 1.1, 0.9, C.black);
       box(45.05, 1.3, 25.9, 3.9, 0.12, 0.02, C.blue, glow);
-      box(45.4, 2.1, 25.15, 1, 0.1, 0.6, C.metal);
-      box(47.6, 2.1, 25.15, 1, 0.1, 0.6, C.metal);
-      box(46.6, 2.1, 25.2, 0.8, 0.35, 0.05, C.screen, glow);
+      // (the turntables and mixer on top are built with the DJ code: they move)
       box(44.1, 1, 25, 0.8, 1.9, 0.8, C.black);
       box(49.1, 1, 25, 0.8, 1.9, 0.8, C.black);
       box(44.3, 1.4, 25.8, 0.4, 0.4, 0.02, C.metal);
@@ -3451,9 +3449,89 @@
     function setDj(on) {
       if (on === dj.on) return;
       dj.on = on;
+      if (!on) paintDance(0, true);
       if (snd) snd.setMusic(on, DANCE_CENTER[0], DANCE_CENTER[1], true);
       if (party) party.fx.icon(on ? "note" : "bang", 47, 3, 25.5, { size: 0.5, vy: 1 });
     }
+    // The decks themselves: two turntables with records that spin while the DJ plays, a mixer with faders and knobs,
+    // and a front panel with the party's name and an equaliser that jumps to the beat.
+    const decks = (() => {
+      const g = new T.Group(), mats = [];
+      const mat = (o) => { const m = new T.MeshLambertMaterial(o); m.clippingPlanes = [clipPlane]; mats.push(m); return m; };
+      const glowMat = (o) => { const m = new T.MeshBasicMaterial(o); m.clippingPlanes = [clipPlane]; return m; };
+      const canvasTex = (w, h, draw) => {
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        draw(c.getContext("2d"), w, h);
+        const t = new T.CanvasTexture(c);
+        t.magFilter = T.NearestFilter;
+        return { c, t, g: c.getContext("2d") };
+      };
+      const boxAt = (x, y, z, w, h, d, m) => { const b = new T.Mesh(carBox, m); b.scale.set(w, h, d); b.position.set(x + w / 2 + OX, y + h / 2, z + d / 2 + OZ); b.castShadow = true; g.add(b); return b; };
+      // brushed-metal top plate for the whole booth
+      const brushed = canvasTex(64, 32, (c, w, h) => {
+        for (let y = 0; y < h; y++) { const v = 58 + ((y * 37) % 11); c.fillStyle = "rgb(" + v + "," + v + "," + (v + 6) + ")"; c.fillRect(0, y, w, 1); }
+      });
+      boxAt(45, 2.1, 25.05, 4, 0.06, 0.8, mat({ map: brushed.t }));
+      // the records: grooved black vinyl with a yellow FIFI label
+      const vinyl = canvasTex(64, 64, (c, w) => {
+        c.fillStyle = "#101014"; c.beginPath(); c.arc(32, 32, 32, 0, Math.PI * 2); c.fill();
+        for (let r = 12; r < 31; r += 2) { c.strokeStyle = r % 4 ? "#24242c" : "#1a1a20"; c.beginPath(); c.arc(32, 32, r, 0, Math.PI * 2); c.stroke(); }
+        c.fillStyle = "#FEFE40"; c.beginPath(); c.arc(32, 32, 10, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "#006AA7"; c.font = "bold 7px sans-serif"; c.textAlign = "center"; c.fillText("FIFI", 32, 30); c.fillText("4000", 32, 38);
+        c.fillStyle = "#000"; c.fillRect(31, 31, 2, 2);
+      });
+      const platterGeo = new T.CylinderGeometry(0.36, 0.36, 0.04, 28);
+      const records = [];
+      [[45.9, 25.45], [48.1, 25.45]].forEach(([x, z]) => {
+        const base = new T.Mesh(new T.CylinderGeometry(0.4, 0.4, 0.05, 28), mat({ color: 0xb8bcc4 }));
+        base.position.set(x + OX, 2.19, z + OZ);
+        g.add(base);
+        const rec = new T.Mesh(platterGeo, [mat({ color: 0x101014 }), mat({ map: vinyl.t }), mat({ color: 0x101014 })]);
+        rec.position.set(x + OX, 2.235, z + OZ);
+        g.add(rec);
+        records.push(rec);
+        boxAt(x + 0.28, 2.24, z - 0.3, 0.04, 0.05, 0.42, mat({ color: 0xd8dce4 })); // tone arm
+        boxAt(x + 0.24, 2.23, z - 0.34, 0.1, 0.08, 0.1, mat({ color: 0x2a2a30 }));
+        boxAt(x - 0.34, 2.16, z + 0.28, 0.1, 0.02, 0.08, glowMat({ color: 0x3be36b })); // start button
+      });
+      // the mixer: faders and coloured knobs
+      boxAt(46.62, 2.16, 25.12, 0.76, 0.06, 0.66, mat({ color: 0x1e1f24 }));
+      [0.72, 0.96].forEach((dx) => { boxAt(46.62 + dx - 0.6, 2.22, 25.46, 0.05, 0.04, 0.26, mat({ color: 0x55585f })); });
+      const faders = [0.72, 0.96].map((dx) => boxAt(46.62 + dx - 0.63, 2.24, 25.55, 0.1, 0.05, 0.07, mat({ color: 0xf4f4f0 })));
+      [[0x2e9bff, 0.14], [0xffd21f, 0.34], [0xff4fb0, 0.54]].forEach(([c, dz]) => [0.2, 0.46].forEach((dx) => boxAt(46.62 + dx, 2.22, 25.12 + dz * 0.6, 0.08, 0.05, 0.08, glowMat({ color: c }))));
+      // the front panel: the name in lights and an equaliser
+      const front = canvasTex(128, 32, () => {});
+      const panel = new T.Mesh(new T.PlaneGeometry(3.9, 0.95), (() => { const m = new T.MeshBasicMaterial({ map: front.t }); m.clippingPlanes = [clipPlane]; return m; })());
+      panel.position.set(47 + OX, 1.55, 25.915 + OZ);
+      g.add(panel);
+      function paintFront(t, on) {
+        const c = front.g;
+        c.fillStyle = "#0d0e12"; c.fillRect(0, 0, 128, 32);
+        for (let x = 2; x < 128; x += 4) for (let y = 2; y < 32; y += 4) { c.fillStyle = "#1b1d24"; c.fillRect(x, y, 2, 2); } // grille
+        c.font = "bold 11px 'Pixelify Sans', monospace"; c.textAlign = "center";
+        c.fillStyle = on ? "#FEFE40" : "#6b6b2a"; c.fillText("FiFi4000", 64, 13);
+        for (let i = 0; i < 24; i++) {
+          const h = on ? 2 + Math.floor(Math.abs(Math.sin(t * (3 + (i % 5)) + i * 1.7)) * 12) : 1;
+          for (let y = 0; y < h; y += 2) { c.fillStyle = y > 9 ? "#FF2E2E" : y > 5 ? "#FFD21F" : "#3BD16F"; c.fillRect(4 + i * 5, 30 - y, 4, 1); }
+        }
+        front.t.needsUpdate = true;
+      }
+      paintFront(0, false);
+      g.visible = false;
+      scene.add(g);
+      let next = 0;
+      return {
+        update(dt, t) {
+          g.visible = !building;
+          if (!g.visible) return;
+          if (dj.on) records.forEach((r) => { r.rotation.y -= dt * 3.5; });
+          if (dj.on) faders.forEach((f, i) => { f.position.z = 25.585 + OZ + Math.sin(t * (1.3 + i)) * 0.08; });
+          if (t > next) { next = t + (dj.on ? 0.1 : 1); paintFront(t, dj.on); }
+        }
+      };
+    })();
     // Music left on for three hours with nobody touching the decks goes off by itself.
     function djFromServer(d) {
       if (Date.now() - dj.mine < 4000) return;
@@ -3751,6 +3829,7 @@
       ghosts.forEach((g, id) => updateGhost(g, id, dt));
       updatePuffs(dt);
       updateClothes(dt);
+      decks.update(dt, performance.now() / 1000);
       if (!party) return;
       actorList.length = 0;
       if (me) actorList.push(me);
@@ -4614,19 +4693,22 @@
       });
     }
 
-    const DANCE_COLORS = [C.blue, C.fefe, "#FFFFFF", "#2E9BFF"].map((c) => new T.Color(c));
-    function paintDance(s) {
+    // Saturday Night Fever: every glass square has its own warm colour, lit from below. With the DJ on they flash in
+    // turns (sparkles, a chase across the floor, a checkerboard); with it off they sit there softly glowing.
+    const FEVER = ["#FF2E2E", "#FF8A1F", "#FFD21F", "#FF4FB0", "#3BD16F", "#2E9BFF", "#F4F4F4"].map((c) => new T.Color(c));
+    const tileHash = (x, z, s) => { const h = Math.sin(x * 12.9898 + z * 78.233 + s * 37.719) * 43758.5453; return h - Math.floor(h); };
+    const dimCol = new T.Color();
+    function paintDance(s, off) {
       if (!danceMesh) return;
-      const rings = ((s / 16) | 0) % 2 === 1;
+      const mode = ((s / 24) | 0) % 3;
       danceCells.forEach(([x, z], i) => {
-        const k = rings
-          ? Math.max(Math.abs(x + 0.5 - DANCE_CENTER[0] * 2), Math.abs(z + 0.5 - DANCE_CENTER[1] * 2)) + s
-          : x + z + s;
-        danceMesh.setColorAt(i, DANCE_COLORS[((Math.floor(k) % 4) + 4) % 4]);
+        const base = FEVER[Math.floor(tileHash(x, z, 0) * FEVER.length)];
+        const lit = off ? false : mode === 0 ? tileHash(x, z, s) > 0.55 : mode === 1 ? ((x + z + s) % 6 + 6) % 6 < 2 : (x + z + s) % 2 === 0;
+        danceMesh.setColorAt(i, lit ? base : dimCol.copy(base).multiplyScalar(off ? 0.4 : 0.22));
       });
       danceMesh.instanceColor.needsUpdate = true;
     }
-    paintDance(0);
+    paintDance(0, true);
 
     let last = performance.now();
     let danceClock = 0;
