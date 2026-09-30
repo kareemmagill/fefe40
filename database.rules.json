@@ -12,7 +12,14 @@
         "$id": {
           ".read": true,
           ".write": true,
-          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['name', 'track', 'at']) && newData.child('name').isString() && newData.child('name').val().length <= 20 && newData.child('track').isString() && newData.child('track').val().length <= 30000 && (!newData.child('face').exists() || (newData.child('face').isString() && newData.child('face').val().length <= 1100))"
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['name', 'track', 'at']) && newData.child('name').isString() && newData.child('name').val().length <= 20 && newData.child('track').isString() && newData.child('track').val().length <= 30000 && (!newData.child('face').exists() || (newData.child('face').isString() && newData.child('face').val().length <= 4200))"
+        }
+      },
+      "live": {
+        ".read": true,
+        "$id": {
+          ".write": true,
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['t', 'x', 'z']) && newData.child('t').isNumber() && newData.child('x').isNumber() && newData.child('z').isNumber()"
         }
       }
     }

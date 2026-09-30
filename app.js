@@ -1169,10 +1169,6 @@
     let selected = null;
     let seeInside = false;
     let night = false;
-    const card = document.getElementById("card");
-    const cardTitle = document.getElementById("card-title");
-    const cardTime = document.getElementById("card-time");
-    const cardText = document.getElementById("card-text");
     const hint = document.getElementById("hint");
     const insideBtn = document.getElementById("inside");
     const nightBtn = document.getElementById("night");
@@ -1198,52 +1194,28 @@
       chipsEl.appendChild(b);
       z.chip = b;
     });
-    ZONES.forEach((z) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "pin" + (z.level === 2 ? " room" : "");
-      b.textContent = z.name;
-      b.hidden = true;
-      b.addEventListener("click", () => selectZone(z.id));
-      labelsEl.appendChild(b);
-      z.pin = b;
-      z.world = new T.Vector3(z.at[0] + OX, z.at[1], z.at[2] + OZ);
-    });
 
     function selectZone(id) {
       const z = byId[id];
       if (!z) return;
-      // On tall screens the card covers the lower third, so aim a little past the place to lift it up the screen.
-      const shift = canvas.clientHeight > canvas.clientWidth ? z.fit * 0.45 : z.fit * 0.08;
+      // on tall screens the place buttons cover the bottom edge, so aim a little past the place
+      const shift = canvas.clientHeight > canvas.clientWidth ? z.fit * 0.12 : 0;
       goal.target.set(z.at[0] + OX + Math.sin(goal.az) * shift, 1, z.at[2] + OZ + Math.cos(goal.az) * shift);
       clampTarget(goal.target);
       goal.fit = z.fit;
       if (me && z.spot) { walkTo(z.spot[0], z.spot[1]); follow = false; }
-      showCard(z);
+      markSelected(z);
     }
-    function showCard(z) {
+    function markSelected(z) {
       selected = z;
-      cardTitle.textContent = z.name;
-      cardTime.hidden = !z.time;
-      cardTime.textContent = z.time || "";
-      cardText.textContent = z.text;
-      card.hidden = false;
-      ZONES.forEach((o) => {
-        o.chip.setAttribute("aria-pressed", String(o === z));
-        o.pin.classList.toggle("active", o === z);
-      });
+      ZONES.forEach((o) => o.chip.setAttribute("aria-pressed", String(o === z)));
       z.chip.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", inline: "center", block: "nearest" });
       dismissHint();
     }
     function clearSelection() {
       selected = null;
-      card.hidden = true;
-      ZONES.forEach((o) => {
-        o.chip.setAttribute("aria-pressed", "false");
-        o.pin.classList.remove("active");
-      });
+      ZONES.forEach((o) => o.chip.setAttribute("aria-pressed", "false"));
     }
-    document.getElementById("card-close").addEventListener("click", clearSelection);
 
     function setInside(on) {
       seeInside = on;
@@ -1353,7 +1325,7 @@
         const zone = roof ? byId[bid] : zoneAtCell(x, z);
         const dest = roof && zone.spot ? zone.spot : [x, z];
         if (walkTo(dest[0], dest[1])) follow = true;
-        if (zone) showCard(zone);
+        if (zone) markSelected(zone);
         else clearSelection();
         return;
       }
@@ -1681,41 +1653,44 @@
       myPath = path;
       return true;
     }
+    // Walk an actor along a path of cells at walking speed; onNode fires as each cell centre is reached.
+    function stepAlong(a, path, dt, onNode) {
+      let budget = SPEED * dt, moving = false, heading;
+      while (budget > 1e-6 && path.length) {
+        const [cx, cz] = path[0];
+        const dx = cx + 0.5 - a.x, dz = cz + 0.5 - a.z, dist = Math.hypot(dx, dz);
+        if (dist > 1e-4) heading = Math.atan2(dx, dz);
+        moving = true;
+        if (dist <= budget) {
+          a.x = cx + 0.5;
+          a.z = cz + 0.5;
+          budget -= dist;
+          path.shift();
+          if (onNode) onNode(cx, cz, path.length === 0);
+        } else {
+          a.x += (dx / dist) * budget;
+          a.z += (dz / dist) * budget;
+          budget = 0;
+        }
+      }
+      return { moving, heading };
+    }
     function updateMe(dt) {
       if (!me) return;
-      let moving = false, heading;
       if (me.drop === 0 && pendingWalk) {
         const [px, pz] = pendingWalk;
         pendingWalk = null;
         walkTo(px, pz);
       }
-      if (me.drop === 0) {
-        let budget = SPEED * dt;
-        while (budget > 1e-6 && myPath.length) {
-          const [cx, cz] = myPath[0];
-          const dx = cx + 0.5 - me.x, dz = cz + 0.5 - me.z, dist = Math.hypot(dx, dz);
-          if (dist > 1e-4) heading = Math.atan2(dx, dz);
-          moving = true;
-          if (dist <= budget) {
-            me.x = cx + 0.5;
-            me.z = cz + 0.5;
-            budget -= dist;
-            myPath.shift();
-            recNode(cx, cz);
-            if (!myPath.length) scheduleSave(1200);
-          } else {
-            me.x += (dx / dist) * budget;
-            me.z += (dz / dist) * budget;
-            budget = 0;
-          }
-        }
-      }
-      tickRecording(dt, moving);
-      poseActor(me, dt, moving, heading);
-      if (follow && (moving || me.drop > 0)) {
+      const step = me.drop === 0 ? stepAlong(me, myPath, dt, (cx, cz, last) => { recNode(cx, cz); if (last) scheduleSave(1200); }) : { moving: false };
+      tickRecording(dt, step.moving);
+      poseActor(me, dt, step.moving, step.heading);
+      if (follow && (step.moving || me.drop > 0)) {
         goal.target.set(me.x + OX, 1, me.z + OZ);
         clampTarget(goal.target);
       }
+      heartbeat(performance.now());
+      updateWardrobe();
     }
     // The recording clock runs while walking and for at most 6 s of each standstill, so replayed loops stay lively.
     function startRecording(x, z) { rec = { clock: 0, idle: 0, nodes: [[0, x, z]] }; }
@@ -1746,6 +1721,17 @@
             if (!r.ok) throw new Error("guest " + r.status);
             return r.json();
           },
+          async live() {
+            const r = await fetch(DB_URL + "/fefe40/live.json", { cache: "no-store" });
+            if (!r.ok) throw new Error("live " + r.status);
+            return (await r.json()) || {};
+          },
+          beat(id, data) {
+            return fetch(DB_URL + "/fefe40/live/" + id + ".json", { method: "PUT", body: JSON.stringify(data) });
+          },
+          leave(id) {
+            return fetch(DB_URL + "/fefe40/live/" + id + ".json", { method: "DELETE", keepalive: true });
+          },
           put(id, record, keepalive) {
             const req = (body) => ({ method: "PUT", body: JSON.stringify(body), keepalive: !!keepalive });
             return Promise.all([
@@ -1758,6 +1744,9 @@
           shared: false,
           async index() { return {}; },
           async get() { return null; },
+          async live() { return {}; },
+          async beat() {},
+          async leave() {},
           async put(id, record) { lsSet("fefe40.mine", JSON.stringify(record)); }
         };
     let saveTimer = 0;
@@ -1784,17 +1773,22 @@
       };
       Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
     }
-    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveMe(true); });
+    function leaving() {
+      saveMe(true);
+      if (me) { store.leave(myId).catch(() => {}); lastBeat = 0; lastBeatCell = ""; }
+    }
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") leaving(); });
+    window.addEventListener("pagehide", leaving);
 
     // Other guests' records are untrusted input: clean every field before use.
     function sanitize(r) {
       if (!r || typeof r !== "object") return null;
       const hex = (c, d) => (typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : d);
       let face = null;
-      if (typeof r.face === "string" && r.face.length <= 1100) {
+      if (typeof r.face === "string" && r.face.length <= 4200) {
         try {
           const b = atob(r.face);
-          if (b.length === 768) { face = new Uint8Array(768); for (let i = 0; i < 768; i++) face[i] = b.charCodeAt(i); }
+          if (b.length === 768 || b.length === 3072) { face = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) face[i] = b.charCodeAt(i); }
         } catch (e) { face = null; }
       }
       const nodes = [];
@@ -1831,9 +1825,43 @@
       g.i = 0;
       if (g.t > dur) g.t = 0;
     }
-    // Other guests loop their recorded walk, dropping back in at their start each time round.
-    function updateGhost(g, dt) {
-      const a = g.actor, n = g.nodes;
+    // Guests who are online right now walk live to where they really are; everyone else loops their recorded walk,
+    // dropping back in at their start each time round.
+    function updateGhost(g, id, dt) {
+      const a = g.actor, now = liveMap[id];
+      if (isLive(id)) {
+        const cell = now.x + "," + now.z;
+        if (!g.live) {
+          g.live = true;
+          a.tag.classList.add("live");
+          a.x = now.x + 0.5;
+          a.z = now.z + 0.5;
+          a.y = worldY(now.x, now.z);
+          a.drop = 12;
+          a.dropV = 0;
+          g.path = [];
+          g.cell = cell;
+        } else if (g.cell !== cell) {
+          g.cell = cell;
+          let sx = Math.floor(a.x), sz = Math.floor(a.z);
+          if (!inMap(sx, sz) || !reach[cellIdx(sx, sz)]) [sx, sz] = nearestReachable(sx, sz) || [now.x, now.z];
+          const path = reach[cellIdx(now.x, now.z)] ? findPath(sx, sz, now.x, now.z) : null;
+          if (path) g.path = path;
+          else { g.path = []; a.x = now.x + 0.5; a.z = now.z + 0.5; }
+        }
+        const step = a.drop === 0 ? stepAlong(a, g.path, dt) : { moving: false };
+        poseActor(a, dt, step.moving, step.heading);
+        return;
+      }
+      if (g.live) {
+        g.live = false;
+        a.tag.classList.remove("live");
+        g.t = 0;
+        g.i = 0;
+        a.drop = 12;
+        a.dropV = 0;
+      }
+      const n = g.nodes;
       g.t += dt;
       if (g.t >= g.dur) { g.t = 0; g.i = 0; a.drop = 12; a.dropV = 0; }
       const t10 = g.t * 10;
@@ -1853,12 +1881,78 @@
       }
       poseActor(a, dt, moving, heading);
     }
-    const guestsEl = document.getElementById("guests");
-    function updateGuestCount() {
-      const n = ghosts.size + (me ? 1 : 0);
-      guestsEl.hidden = n === 0;
-      guestsEl.textContent = n === 1 ? "1 guest at the party" : n + " guests at the party";
+    // Live guests send a heartbeat with their current cell: every couple of seconds while moving, every 8 s when still.
+    const LIVE_MS = 20000;
+    let liveMap = {}, lastBeat = 0, lastBeatCell = "";
+    const isLive = (id) => !!(liveMap[id] && Date.now() - liveMap[id].t < LIVE_MS);
+    function heartbeat(now) {
+      if (!me || !store.shared || me.drop > 0 || document.visibilityState === "hidden") return;
+      const x = Math.floor(me.x), z = Math.floor(me.z), cell = x + "," + z;
+      if (now - lastBeat < 1500 || (cell === lastBeatCell && now - lastBeat < 8000)) return;
+      lastBeat = now;
+      lastBeatCell = cell;
+      Promise.resolve(store.beat(myId, { t: Date.now(), x, z })).catch(() => {});
     }
+    let polling = false;
+    async function pollLive() {
+      if (polling || !store.shared) return;
+      polling = true;
+      try {
+        const data = await store.live();
+        const clean = {};
+        Object.keys(data).forEach((id) => {
+          const l = data[id];
+          if (!ID_RE.test(id) || !l || typeof l !== "object") return;
+          const t = +l.t, x = Math.floor(+l.x), z = Math.floor(+l.z);
+          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z };
+        });
+        liveMap = clean;
+        if (Object.keys(clean).some((id) => id !== myId && isLive(id) && !ghosts.has(id))) syncGuests();
+      } catch (e) { /* keep the last known positions */ }
+      polling = false;
+      updateGuestCount();
+    }
+    const guestsBtn = document.getElementById("guests"), guestList = document.getElementById("guest-list");
+    function guestRows() {
+      const rows = [];
+      if (me) rows.push({ name: myName, live: true, actor: me, me: true });
+      ghosts.forEach((g, id) => rows.push({ name: g.actor.name, live: isLive(id), actor: g.actor }));
+      return rows.sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0) || (b.live ? 1 : 0) - (a.live ? 1 : 0) || a.name.localeCompare(b.name));
+    }
+    function updateGuestCount() {
+      const rows = guestRows(), live = rows.filter((r) => r.live).length;
+      guestsBtn.hidden = rows.length === 0;
+      guestsBtn.textContent = (rows.length === 1 ? "1 guest" : rows.length + " guests") + (store.shared && live ? " · " + live + " live" : "");
+      if (!guestList.hidden) renderGuestList(rows);
+    }
+    function renderGuestList(rows) {
+      guestList.textContent = "";
+      rows.forEach((r) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "guest";
+        const name = document.createElement("span");
+        name.textContent = r.me ? r.name + " (you)" : r.name;
+        const badge = document.createElement("span");
+        badge.className = r.live ? "badge live" : "badge";
+        badge.textContent = r.live ? "Live" : "Replay";
+        b.append(name, badge);
+        b.addEventListener("click", () => {
+          follow = !!r.me;
+          goal.fit = Math.min(goal.fit, 20);
+          goal.target.set(r.actor.x + OX, 1, r.actor.z + OZ);
+          clampTarget(goal.target);
+          guestList.hidden = true;
+          guestsBtn.setAttribute("aria-expanded", "false");
+        });
+        guestList.appendChild(b);
+      });
+    }
+    guestsBtn.addEventListener("click", () => {
+      guestList.hidden = !guestList.hidden;
+      guestsBtn.setAttribute("aria-expanded", String(!guestList.hidden));
+      if (!guestList.hidden) renderGuestList(guestRows());
+    });
     let syncing = false;
     async function syncGuests() {
       if (syncing || !store.shared) return;
@@ -1893,7 +1987,7 @@
     }
     function updateParty(dt) {
       updateMe(dt);
-      ghosts.forEach((g) => updateGhost(g, dt));
+      ghosts.forEach((g, id) => updateGhost(g, id, dt));
       updatePuffs(dt);
     }
     function updateTags() {
@@ -1909,7 +2003,7 @@
     const video = $("cam"), shot = $("shot"), camMsg = $("cam-msg"), guide = $("guide");
     const snapBtn = $("snap"), retakeBtn = $("retake"), fileIn = $("file"), nameIn = $("guest-name"), makeBtn = $("make");
     const previewCanvas = $("preview"), bodyM = $("body-m"), bodyF = $("body-f"), guessNote = $("guess-note");
-    const outfitName = $("outfit-name"), outfitCount = $("outfit-count");
+    const outfitName = $("outfit-name"), outfitCount = $("outfit-count"), waitMsg = $("wait-msg");
     let stream = null, photo = null, draft = null;
     nameIn.value = lsGet("fefe40.name") || "";
     $("solo-note").hidden = store.shared;
@@ -1922,6 +2016,7 @@
     function updateMake() { makeBtn.disabled = !nameIn.value.trim(); }
     function openJoin() {
       joinEl.hidden = false;
+      setDressMode("join");
       showStep("photo");
       updateMake();
       if (!photo) startCamera();
@@ -2022,14 +2117,17 @@
       return faceApi;
     }
     const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
-    // Photo → 16×16 pixel face, skin and hair colours, and a male/female guess for the starting look.
+    // Photo → 32×32 pixel face, skin and hair colours, and a male/female guess for the starting look.
+    const FACE = 32;
     async function analyse(src) {
       const out = { face: null, skin: "#D9A57E", hair: "#4A3020", body: null };
       if (!src) return out;
       let box = null;
       try {
-        const api = await withTimeout(loadFaceApi(), 20000);
-        const det = await withTimeout(api.detectSingleFace(src, new api.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 })).withAgeAndGender(), 10000);
+        waitMsg.textContent = "Loading the face finder…";
+        const api = await withTimeout(loadFaceApi(), 12000);
+        waitMsg.textContent = "Finding your face…";
+        const det = await withTimeout(api.detectSingleFace(src, new api.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 })).withAgeAndGender(), 6000);
         if (det) { box = det.detection.box; out.body = det.gender === "female" ? "f" : "m"; }
       } catch (e) { /* no model or no face found: use the middle of the photo */ }
       const W = src.width, H = src.height;
@@ -2039,30 +2137,30 @@
       cx = Math.max(size / 2, Math.min(W - size / 2, cx));
       cy = Math.max(size / 2, Math.min(H - size / 2, cy));
       const c = document.createElement("canvas");
-      c.width = c.height = 16;
+      c.width = c.height = FACE;
       const g = c.getContext("2d");
       g.imageSmoothingEnabled = true;
       g.imageSmoothingQuality = "high";
-      g.drawImage(src, cx - size / 2, cy - size / 2, size, size, 0, 0, 16, 16);
-      const d = g.getImageData(0, 0, 16, 16).data;
-      const face = new Uint8Array(768);
-      for (let i = 0; i < 256; i++) {
+      g.drawImage(src, cx - size / 2, cy - size / 2, size, size, 0, 0, FACE, FACE);
+      const d = g.getImageData(0, 0, FACE, FACE).data;
+      const face = new Uint8Array(FACE * FACE * 3);
+      for (let i = 0; i < FACE * FACE; i++) {
         const r = d[i * 4], gr = d[i * 4 + 1], b = d[i * 4 + 2];
         const L = 0.3 * r + 0.59 * gr + 0.11 * b;
         [r, gr, b].forEach((v, k) => {
           const c2 = (L + (v - L) * 1.25 - 128) * 1.12 + 128; // a little more colour and contrast
-          face[i * 3 + k] = Math.max(0, Math.min(255, Math.round(c2 / 12) * 12)); // posterised for the blocky look
+          face[i * 3 + k] = Math.max(0, Math.min(255, Math.round(c2 / 10) * 10)); // lightly posterised for the blocky look
         });
       }
       const avg = (x0, y0, x1, y1) => {
         const s = [0, 0, 0];
         let n = 0;
-        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { for (let k = 0; k < 3; k++) s[k] += face[(y * 16 + x) * 3 + k]; n++; }
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { for (let k = 0; k < 3; k++) s[k] += face[(y * FACE + x) * 3 + k]; n++; }
         return "#" + s.map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("");
       };
       out.face = face;
-      out.skin = avg(5, 9, 10, 11);
-      out.hair = avg(2, 0, 13, 1);
+      out.skin = avg(10, 18, 21, 23);
+      out.hair = avg(4, 0, 27, 3);
       return out;
     }
 
@@ -2071,15 +2169,55 @@
       if (!myName) return;
       lsSet("fefe40.name", myName);
       stopCamera();
+      waitMsg.textContent = "Finding your face and picking your pixels.";
       showStep("wait");
       const res = await analyse(photo);
       if (joinEl.hidden) return;
       draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face };
       guessNote.textContent = res.body ? "Guessed from your photo. Tap to change." : photo ? "We couldn't spot a face, so pick one." : "Pick one.";
+      setDressMode("join");
       showStep("dress");
       startPreview();
       refreshDress();
     });
+    // The outfit screen doubles as the bedroom wardrobe once you're at the party.
+    let dressMode = "join";
+    function setDressMode(mode) {
+      dressMode = mode;
+      $("dress-step").hidden = mode !== "join";
+      $("dress-title").textContent = mode === "join" ? "Pick your outfit" : "Change your outfit";
+      $("back").textContent = mode === "join" ? "Back" : "Cancel";
+      $("drop").textContent = mode === "join" ? "OK, drop me in" : "Wear it";
+      guessNote.hidden = mode !== "join";
+    }
+    function openWardrobe() {
+      if (!me) return;
+      draft = Object.assign({}, myLook);
+      joinEl.hidden = false;
+      setDressMode("change");
+      showStep("dress");
+      startPreview();
+      refreshDress();
+    }
+    function wearDraft() {
+      myLook = Object.assign({}, draft);
+      scene.remove(me.av.root);
+      me.av.dispose();
+      me.av = FefeAvatar.build(T, myLook);
+      me.av.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      scene.add(me.av.root);
+      poof(me.x, me.y, me.z);
+      saveMe(false);
+    }
+    const BEDROOMS = [[13, 5, 18, 9], [27, 5, 31, 12], [38, 5, 42, 12], [54, 6, 60, 11]];
+    const wardrobeBtn = $("wardrobe");
+    function updateWardrobe() {
+      const show = !!me && me.drop === 0 && !myPath.length && joinEl.hidden &&
+        BEDROOMS.some((r) => me.x >= r[0] && me.x < r[2] + 1 && me.z >= r[1] && me.z < r[3] + 1);
+      if (wardrobeBtn.hidden === show) wardrobeBtn.hidden = !show;
+    }
+    wardrobeBtn.addEventListener("click", openWardrobe);
+
     function refreshDress() {
       bodyM.setAttribute("aria-pressed", String(draft.body === "m"));
       bodyF.setAttribute("aria-pressed", String(draft.body === "f"));
@@ -2092,8 +2230,17 @@
     const cycle = (n) => { const len = FefeAvatar.OUTFITS.length; draft.outfit = (draft.outfit + n + len) % len; refreshDress(); };
     $("prev").addEventListener("click", () => cycle(-1));
     $("next").addEventListener("click", () => cycle(1));
-    $("back").addEventListener("click", () => { stopPreview(); showStep("photo"); if (!photo) startCamera(); });
-    $("drop").addEventListener("click", () => { closeJoin(); enterParty(); });
+    $("back").addEventListener("click", () => {
+      if (dressMode === "change") { closeJoin(); return; }
+      stopPreview();
+      showStep("photo");
+      if (!photo) startCamera();
+    });
+    $("drop").addEventListener("click", () => {
+      closeJoin();
+      if (dressMode === "change") wearDraft();
+      else enterParty();
+    });
 
     let pv = null;
     function startPreview() {
@@ -2167,7 +2314,7 @@
       clampTarget(goal.target);
     }
     findBtn.addEventListener("click", findMe);
-    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0 }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)] };
+    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)] };
 
     // ---------- per-frame updates ----------
     function updateCutaway(dt) {
@@ -2189,29 +2336,6 @@
           m.castShadow = vis && f < 0.5 && (kind === "solid" || kind === "glass");
         });
         b.roof.forEach((m) => { m.position.y = f * 5; });
-      });
-    }
-
-    const v3 = new T.Vector3();
-    function updateLabels() {
-      const w = canvas.clientWidth, h = canvas.clientHeight;
-      ZONES.forEach((z) => {
-        const b = z.b ? buildings.get(z.b) : null;
-        const open = b && b.fade > 0.6;
-        const show = z.level === 2 ? open : !(z.b && open);
-        let x = 0, y = 0, onScreen = false;
-        if (show) {
-          v3.copy(z.world).project(cam);
-          x = ((v3.x + 1) / 2) * w;
-          y = ((1 - v3.y) / 2) * h;
-          onScreen = x > -80 && x < w + 80 && y > -30 && y < h + 40;
-        }
-        if (!show || !onScreen) {
-          if (!z.pin.hidden) z.pin.hidden = true;
-          return;
-        }
-        if (z.pin.hidden) z.pin.hidden = false;
-        z.pin.style.transform = "translate(" + x.toFixed(1) + "px," + y.toFixed(1) + "px) translate(-50%, calc(-100% - 8px))";
       });
     }
 
@@ -2255,7 +2379,6 @@
         danceClock = 0;
         paintDance(++danceStep);
       }
-      updateLabels();
       updateTags();
       renderer.render(scene, cam);
       requestAnimationFrame(frame);
@@ -2283,6 +2406,8 @@
     if (store.shared) {
       syncGuests();
       setInterval(syncGuests, 15000);
+      pollLive();
+      setInterval(pollLive, 2000);
     }
     const hot = window.claude && window.claude.hot;
     if (hot && typeof hot.snapshot === "function") {

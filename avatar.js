@@ -1,9 +1,9 @@
 /* FEFE40 avatars: Minecraft-style blocky people with a pixel face from the guest's photo and 20 Swedish-themed outfits.
    Exposes window.FefeAvatar = { OUTFITS, build(THREE, look), P }.
-   look = { body: "m" | "f", outfit: 0..19, skin: "#rrggbb", hair: "#rrggbb", face: Uint8Array(16*16*3) | null } */
+   look = { body: "m" | "f", outfit: 0..19, skin: "#rrggbb", hair: "#rrggbb", face: Uint8Array(n*n*3) | null } (n = 32, or 16 for early guests) */
 (function () {
   const P = 2.2 / 32; // metres per skin pixel: avatars stand 2.2 m tall
-  const S = 2; // atlas texels per skin pixel, so the head front holds a 16×16 photo face
+  const S = 4; // atlas texels per skin pixel, so the head front holds a 32×32 photo face
   const ATLAS = 64 * S;
 
   const SB = "#006AA7", SY = "#FECC02", FE = "#FEFE40", WHITE = "#F4F4F0", BLACK = "#1E1F24", NAVY = "#17325E";
@@ -354,17 +354,23 @@
       if (side === "left" || side === "right") return y < (long ? 8 : 2) || (!long && y < 5 && ((side === "right" && x === 0) || (side === "left" && x === 7))) ? look.hair : look.skin;
       return look.skin;
     });
-    // photo face on the head front (16×16 texels), or a simple drawn face when there is no photo
+    // photo face on the head front (32×32 texels), or a simple drawn face when there is no photo
     const [fx, fy] = faceRects(0, 0, 8, 8, 8).front;
-    if (look.face && look.face.length === 768) {
-      const img = g.createImageData(16, 16);
-      for (let i = 0; i < 256; i++) {
+    const n = look.face ? Math.round(Math.sqrt(look.face.length / 3)) : 0;
+    if (n >= 8 && n * n * 3 === look.face.length) {
+      const tmp = document.createElement("canvas");
+      tmp.width = tmp.height = n;
+      const tg = tmp.getContext("2d");
+      const img = tg.createImageData(n, n);
+      for (let i = 0; i < n * n; i++) {
         img.data[i * 4] = look.face[i * 3];
         img.data[i * 4 + 1] = look.face[i * 3 + 1];
         img.data[i * 4 + 2] = look.face[i * 3 + 2];
         img.data[i * 4 + 3] = 255;
       }
-      g.putImageData(img, fx * S, fy * S);
+      tg.putImageData(img, 0, 0);
+      g.imageSmoothingEnabled = false;
+      g.drawImage(tmp, fx * S, fy * S, 8 * S, 8 * S);
     } else {
       const px = (x, y, col) => { g.fillStyle = col; g.fillRect((fx + x) * S, (fy + y) * S, S, S); };
       for (let x = 0; x < 8; x++) { px(x, 0, look.hair); px(x, 1, look.hair); }

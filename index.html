@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Figtree:wght@400;600;700&display=swap">
 <style>
-/* Layout: full-screen block map of Casa Anahao. HUD floats on top: name tag top-left, tool buttons top-right, place chips and the info card along the bottom. One deliberate game look: Swedish blue panels with FEFE40 yellow. */
+/* Layout: full-screen block map of Casa Anahao. HUD floats on top: name tag top-left, guest list under it, tool buttons top-right, place buttons along the bottom. One deliberate game look: Swedish blue panels with FEFE40 yellow. */
 :root {
   color-scheme: light;
   --blue: #0B5FA5;
@@ -23,6 +23,7 @@
   --white: #FFFFFF;
   --scrim: rgba(5, 40, 72, 0.74);
   --veil: rgba(5, 40, 72, 0.5);
+  --live: #3BE36B;
   --sky-top: #74CCFA;
   --sky-bottom: #D6F2FF;
   --night-top: #0D1838;
@@ -68,42 +69,6 @@ body {
   pointer-events: none;
   z-index: 1;
 }
-.pin {
-  position: absolute;
-  left: 0;
-  top: 0;
-  pointer-events: auto;
-  touch-action: manipulation;
-  padding: 5px 8px 4px;
-  border: 2px solid var(--blue-edge);
-  border-radius: 6px;
-  background: var(--blue);
-  color: var(--yellow);
-  font-family: var(--font-pixel);
-  font-weight: 500;
-  font-size: 0.8125rem;
-  line-height: 1;
-  white-space: nowrap;
-  box-shadow: 0 2px 0 var(--blue-edge);
-  cursor: pointer;
-  will-change: transform;
-}
-.pin::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -6px;
-  width: 7px;
-  height: 7px;
-  background: inherit;
-  border-right: 2px solid var(--blue-edge);
-  border-bottom: 2px solid var(--blue-edge);
-  transform: translateX(-50%) rotate(45deg);
-}
-.pin.room { background: var(--white); color: var(--blue-deep); }
-.pin.active { background: var(--yellow); color: var(--blue-deep); }
-.pin:focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
-
 .brand {
   position: absolute;
   z-index: 2;
@@ -166,7 +131,7 @@ body {
 .tool svg { width: 22px; height: 22px; }
 .tool[aria-pressed="true"] { background: var(--yellow); color: var(--blue-deep); }
 .tool:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--blue-edge); }
-.tool:focus-visible, .chip:focus-visible, .close:focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
+.tool:focus-visible, .chip:focus-visible, .guests-btn:focus-visible, .guest:focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
 
 .dock {
   position: absolute;
@@ -190,54 +155,6 @@ body {
   transition: opacity 0.5s ease;
 }
 .hint.gone { opacity: 0; pointer-events: none; }
-.card {
-  width: min(430px, 100%);
-  box-sizing: border-box;
-  padding: 14px 16px 12px;
-  border: 2px solid var(--blue-edge);
-  border-radius: 10px;
-  background: var(--blue);
-  box-shadow: 0 4px 0 var(--blue-edge);
-}
-.card-head { display: flex; align-items: center; gap: 10px; }
-.card h2 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  color: var(--yellow);
-  font-family: var(--font-pixel);
-  font-weight: 700;
-  font-size: 1.375rem;
-  line-height: 1.1;
-  text-wrap: balance;
-}
-.pill {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--yellow);
-  color: var(--blue-deep);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.close {
-  width: 32px;
-  height: 32px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 2px solid var(--blue-edge);
-  border-radius: 6px;
-  background: var(--blue-deep);
-  color: var(--white);
-  cursor: pointer;
-}
-.close svg { width: 14px; height: 14px; }
-.card p { margin: 8px 0 0; font-size: 0.9375rem; line-height: 1.45; max-width: 60ch; }
-.card .foot { font-size: 0.75rem; color: var(--sky-bottom); }
 .chips {
   width: 100%;
   display: flex;
@@ -290,6 +207,9 @@ body {
   touch-action: manipulation;
   animation: nudge 1.8s ease-in-out infinite;
 }
+.enter.alt { background: var(--white); font-size: 1.125rem; min-height: 48px; animation: none; }
+.eyebrow { margin: 0 0 4px; color: var(--sky-bottom); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.adult-note { margin: 12px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--blue-deep); font-size: 0.8125rem; line-height: 1.4; }
 .enter:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--blue-edge); animation: none; }
 .enter:focus-visible { outline: 3px solid var(--white); outline-offset: 3px; }
 @keyframes nudge { 50% { transform: translateY(-3px); } }
@@ -427,6 +347,55 @@ body {
   will-change: transform;
 }
 .tag.me { background: var(--yellow); color: var(--blue-deep); }
+.tag.live::before, .badge.live::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--live);
+  vertical-align: 1px;
+}
+.guests-btn {
+  border: 0;
+  color: var(--white);
+  font-family: var(--font-body);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.guests-btn::after { content: " ▾"; }
+.guest-list {
+  display: grid;
+  width: min(260px, calc(100vw - 120px));
+  max-height: 45vh;
+  overflow-y: auto;
+  border: 2px solid var(--blue-edge);
+  border-radius: 8px;
+  background: var(--blue);
+  box-shadow: 0 3px 0 var(--blue-edge);
+  pointer-events: auto;
+}
+.guest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--blue-edge);
+  background: transparent;
+  color: var(--white);
+  font: 600 0.9375rem var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.guest span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { flex: none; color: var(--sky-bottom); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.badge.live { color: var(--white); }
 
 @media (min-width: 720px) {
   .logo { font-size: 2.125rem; }
@@ -446,7 +415,8 @@ body {
   <div class="brand">
     <p class="logo">FEFE40</p>
     <p class="meta">Filip's 40th · Casa Anahao, Tanauan · 10 Oct, 13:00</p>
-    <p class="meta" id="guests" hidden></p>
+    <button type="button" class="meta guests-btn" id="guests" aria-expanded="false" aria-controls="guest-list" hidden></button>
+    <div class="guest-list" id="guest-list" hidden></div>
   </div>
 
   <div class="tools">
@@ -472,26 +442,17 @@ body {
 
   <div class="dock">
     <p class="hint" id="hint">Drag to explore · Pinch to zoom · Tap a place</p>
-    <section class="card" id="card" hidden aria-live="polite">
-      <div class="card-head">
-        <h2 id="card-title">Pool</h2>
-        <span class="pill" id="card-time" hidden></span>
-        <button type="button" class="close" id="card-close" aria-label="Close">
-          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><path d="M2 2l10 10M12 2 2 12"/></svg>
-        </button>
-      </div>
-      <p id="card-text"></p>
-      <p class="foot">Rooms and party setup are placed from the venue's public listing, so positions are approximate.</p>
-    </section>
     <button type="button" class="enter" id="enter" hidden>Enter the party</button>
+    <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
     <nav class="chips" id="chips" aria-label="Places"></nav>
   </div>
 
   <div class="join" id="join" hidden>
     <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="join-title">
       <div id="step-photo">
+        <p class="eyebrow">Step 1 of 2 · Photo and name</p>
         <h2 class="sheet-title" id="join-title">Snap your party face</h2>
-        <p class="sheet-sub">Look straight at the camera. Your photo stays on your phone; only a 16 × 16 pixel face goes online.</p>
+        <p class="sheet-sub">Look straight at the camera. Your photo stays on your phone; only a 32 × 32 pixel face goes online.</p>
         <div class="frame">
           <video id="cam" playsinline muted autoplay></video>
           <canvas id="shot" width="480" height="480" hidden></canvas>
@@ -506,18 +467,20 @@ body {
         </div>
         <label class="field" for="guest-name">Your name</label>
         <input class="input" id="guest-name" type="text" maxlength="20" autocomplete="given-name" enterkeyhint="done" placeholder="e.g. Filip">
+        <p class="adult-note">18+ party: avatars get cheeky here (kissing, bedroom antics, drunk moments), and yours joins in.</p>
         <p class="sheet-note" id="solo-note" hidden>Guest sharing isn't switched on yet, so for now you'll see only your own avatar.</p>
         <div class="row end">
           <button type="button" class="btn ghost" id="join-cancel">Cancel</button>
-          <button type="button" class="btn primary" id="make" disabled>Make my avatar</button>
+          <button type="button" class="btn primary" id="make" disabled>Next: pick your outfit</button>
         </div>
       </div>
       <div id="step-wait" hidden>
         <h2 class="sheet-title">Making your blocky self…</h2>
-        <p class="sheet-sub">Finding your face and picking your pixels.</p>
+        <p class="sheet-sub" id="wait-msg">Finding your face and picking your pixels.</p>
       </div>
       <div id="step-dress" hidden>
-        <h2 class="sheet-title">Pick your outfit</h2>
+        <p class="eyebrow" id="dress-step">Step 2 of 2 · Outfit</p>
+        <h2 class="sheet-title" id="dress-title">Pick your outfit</h2>
         <div class="preview"><canvas id="preview"></canvas></div>
         <div class="seg" role="group" aria-label="Body">
           <button type="button" class="seg-btn" id="body-m" aria-pressed="true">Male</button>
