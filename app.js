@@ -3196,7 +3196,7 @@
       const roof = buildings.get("pavilion");
       const cut = Math.max(0, Math.min(1, (TV.y + TV.h / 2 - clipPlane.constant) / TV.h)); // share of the screen above the close-up slice
       tv.view = ux * vy - uy * vx > 0 && // facing us
-        Math.hypot(ux, uy) >= (tv.view ? 34 : 40) && // big enough to watch (a little slack once on, so it doesn't flicker)
+        Math.hypot(ux, uy) >= (tv.view ? 110 : 120) && // big enough to watch properly (a little slack once on, so it doesn't flicker)
         mx > 0 && mx < w && my > 0 && my < h && // on screen
         !!roof && roof.fade > 0.5 && // the pavilion roof is off
         buildClock.value > karaoke.land && // the TV has landed after the build-in
