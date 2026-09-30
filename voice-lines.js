@@ -44,6 +44,8 @@ window.FefeVoiceLines = {
     { id: "b20", cat: "birthday", text: "Welcome to the forties, FiFi!", kind: "say", dur: 1.9 },
     { id: "b21", cat: "birthday", text: "Happy birthday to you!", kind: "sing", dur: 2.2, note: "sing it!" },
     { id: "b22", cat: "birthday", text: "Make a wish, FiFi!", kind: "say", dur: 1.2 },
+    { id: "b23", cat: "birthday", text: "We love FiFi!", kind: "say", dur: 1.1 },
+    { id: "b24", cat: "birthday", text: "Vi älskar FiFi!", en: "We love FiFi!", hint: "vee ELL-skar FEE-fee", kind: "say", dur: 1.2 },
 
     // ---- cheers: the bar, toasts, the snaps song ----
     { id: "c1", cat: "cheers", text: "Skål!", en: "Cheers!", hint: "skohl", kind: "say", dur: 0.8, note: "raise your glass!" },
@@ -234,6 +236,7 @@ window.FefeVoiceLines = {
     { id: "x4", cat: "cheeky", text: "Ooh, sexy!", kind: "say", dur: 1.0, cheeky: true, note: "sultry voice" },
     { id: "x5", cat: "cheeky", text: "Stör ej!", en: "Do not disturb!", hint: "stur ay", kind: "say", dur: 0.8, cheeky: true },
     { id: "x6", cat: "cheeky", text: "Hallå där, snygging!", en: "Hello there, gorgeous!", hint: "hah-LOH dair, SNEWG-ing", kind: "say", dur: 1.3, cheeky: true, note: "smooth voice" },
-    { id: "x7", cat: "cheeky", text: "Ska vi mysa?", en: "Shall we cuddle up?", hint: "skah vee MEW-sah", kind: "say", dur: 1.0, cheeky: true }
+    { id: "x7", cat: "cheeky", text: "Ska vi mysa?", en: "Shall we cuddle up?", hint: "skah vee MEW-sah", kind: "say", dur: 1.0, cheeky: true },
+    { id: "x8", cat: "cheeky", text: "We love pussy!", note: "FiFi's other meaning", kind: "say", dur: 1.1, cheeky: true }
   ]
 };
