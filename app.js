@@ -3260,6 +3260,7 @@
       snapBtn.hidden = true;
     }
     async function startCamera() {
+      endFraming();
       camMsg.hidden = true;
       shot.hidden = true;
       retakeBtn.hidden = true;
@@ -3285,22 +3286,170 @@
       if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
       video.srcObject = null;
     }
+    // The photo can be moved and zoomed under the oval before it's used. The whole photo is kept (at most 1600 px a
+    // side) and the frame shows a square of it: zoom 1 fits its short side, and (cx, cy) is the photo point at the
+    // frame's centre. It starts framed on the face the face finder spots; after that the guest's framing wins.
+    const zoomRow = $("zoom-row"), zoomIn = $("zoom"), frameTip = $("frame-tip"), frameEl = shot.parentElement;
+    const ZMIN = 0.6, ZMAX = 5, SHOT = 480;
+    // the face box the oval stands for, in frame pixels: the same crop the face finder's box gives (see analyse)
+    const OVAL_BOX = { x: 126.1, y: 129.7, width: 227.8, height: 227.8 };
+    let framing = null;
     function setPhoto(src, sw, sh, mirror) {
-      const s = Math.min(sw, sh), g = shot.getContext("2d");
-      g.save();
-      if (mirror) { g.translate(shot.width, 0); g.scale(-1, 1); }
-      g.drawImage(src, (sw - s) / 2, (sh - s) / 2, s, s, 0, 0, shot.width, shot.height);
-      g.restore();
+      const k = Math.min(1, 1600 / Math.max(sw, sh)), c = document.createElement("canvas");
+      c.width = Math.round(sw * k);
+      c.height = Math.round(sh * k);
+      const g = c.getContext("2d");
+      if (mirror) { g.translate(c.width, 0); g.scale(-1, 1); }
+      g.drawImage(src, 0, 0, c.width, c.height);
+      framing = { img: c, w: c.width, h: c.height, zoom: 1, cx: c.width / 2, cy: c.height / 2, touched: false, body: null };
       photo = shot;
+      drawShot();
       shot.hidden = false;
       video.hidden = true;
-      guide.hidden = true;
+      guide.hidden = false;
       camMsg.hidden = true;
       snapBtn.hidden = true;
       retakeBtn.hidden = false;
+      zoomRow.hidden = false;
+      frameTip.hidden = false;
+      frameTip.textContent = "Finding your face…";
+      frameEl.classList.add("framing");
+      syncZoom();
       stopCamera();
       updateMake();
+      autoFrame(framing);
     }
+    function endFraming() {
+      framing = null;
+      zoomRow.hidden = true;
+      frameTip.hidden = true;
+      frameEl.classList.remove("framing", "grabbing");
+    }
+    const frameScale = (fr) => SHOT / (Math.min(fr.w, fr.h) / fr.zoom); // frame pixels per photo pixel
+    function drawShot() {
+      const fr = framing;
+      if (!fr) return;
+      const g = shot.getContext("2d"), k = frameScale(fr);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.fillStyle = "#0B2A4A";
+      g.fillRect(0, 0, SHOT, SHOT);
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = "high";
+      g.setTransform(k, 0, 0, k, SHOT / 2 - fr.cx * k, SHOT / 2 - fr.cy * k);
+      g.drawImage(fr.img, 0, 0);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    // keep the photo under the middle of the frame
+    function clampFraming(fr) {
+      fr.zoom = Math.max(ZMIN, Math.min(ZMAX, fr.zoom));
+      fr.cx = Math.max(0, Math.min(fr.w, fr.cx));
+      fr.cy = Math.max(0, Math.min(fr.h, fr.cy));
+    }
+    // zoom by a factor, keeping the photo point under frame pixel (fx, fy) where it is
+    function zoomAt(fx, fy, factor) {
+      const fr = framing, k0 = frameScale(fr);
+      const px = fr.cx + (fx - SHOT / 2) / k0, py = fr.cy + (fy - SHOT / 2) / k0;
+      fr.zoom = Math.max(ZMIN, Math.min(ZMAX, fr.zoom * factor));
+      const k1 = frameScale(fr);
+      fr.cx = px - (fx - SHOT / 2) / k1;
+      fr.cy = py - (fy - SHOT / 2) / k1;
+      clampFraming(fr);
+    }
+    function framePan(dx, dy) { // in frame pixels
+      const fr = framing, k = frameScale(fr);
+      fr.cx -= dx / k;
+      fr.cy -= dy / k;
+      clampFraming(fr);
+    }
+    const zoomToSlider = (z) => Math.log(z / ZMIN) / Math.log(ZMAX / ZMIN);
+    function syncZoom() { if (framing) zoomIn.value = String(zoomToSlider(framing.zoom)); }
+    function touchFraming() {
+      if (!framing) return;
+      framing.touched = true;
+      frameTip.textContent = "Drag to move and pinch to zoom: fit your face in the oval.";
+      drawShot();
+      syncZoom();
+    }
+    // Put the face the face finder spots where the oval is, the same size as the oval's face box.
+    async function autoFrame(fr) {
+      try {
+        const api = await withTimeout(loadFaceApi(), 12000);
+        if (framing !== fr || fr.touched) return;
+        const det = await withTimeout(api.detectSingleFace(fr.img, new api.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 })).withAgeAndGender(), 8000);
+        if (framing !== fr) return;
+        if (det) {
+          fr.body = det.gender === "female" ? "f" : "m";
+          if (!fr.touched) {
+            const b = det.detection.box;
+            fr.zoom = Math.max(ZMIN, Math.min(ZMAX, ((OVAL_BOX.width / Math.max(b.width, b.height)) * Math.min(fr.w, fr.h)) / SHOT));
+            // the face's reference point (centre across, 40% down its box) goes to the oval box's
+            const k = frameScale(fr);
+            fr.cx = b.x + b.width / 2 - (OVAL_BOX.x + OVAL_BOX.width / 2 - SHOT / 2) / k;
+            fr.cy = b.y + b.height * 0.4 - (OVAL_BOX.y + OVAL_BOX.height * 0.4 - SHOT / 2) / k;
+            clampFraming(fr);
+            drawShot();
+            syncZoom();
+          }
+        }
+      } catch (e) { /* no face finder: the guest frames it by hand */ }
+      if (framing === fr && !fr.touched) frameTip.textContent = "Drag to move and pinch to zoom: fit your face in the oval.";
+    }
+    // the oval's face box, in the kept photo's pixels
+    function framedBox(fr) {
+      const k = frameScale(fr);
+      return { x: fr.cx + (OVAL_BOX.x - SHOT / 2) / k, y: fr.cy + (OVAL_BOX.y - SHOT / 2) / k, width: OVAL_BOX.width / k, height: OVAL_BOX.height / k };
+    }
+    // one finger drags, two pinch (and drag), a mouse wheel zooms
+    const grips = new Map();
+    let framePinch = null;
+    const toFrame = (e) => { const r = shot.getBoundingClientRect(); return [((e.clientX - r.left) / r.width) * SHOT, ((e.clientY - r.top) / r.height) * SHOT]; };
+    frameEl.addEventListener("pointerdown", (e) => {
+      if (!framing) return;
+      e.preventDefault();
+      frameEl.setPointerCapture(e.pointerId);
+      grips.set(e.pointerId, toFrame(e));
+      frameEl.classList.add("grabbing");
+      framePinch = null;
+    });
+    frameEl.addEventListener("pointermove", (e) => {
+      if (!framing || !grips.has(e.pointerId)) return;
+      const prev = grips.get(e.pointerId), now = toFrame(e);
+      if (grips.size === 1) framePan(now[0] - prev[0], now[1] - prev[1]);
+      grips.set(e.pointerId, now);
+      if (grips.size >= 2) {
+        const [a, b] = [...grips.values()], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        if (framePinch && framePinch.d > 10) {
+          framePan(mid[0] - framePinch.mid[0], mid[1] - framePinch.mid[1]);
+          zoomAt(mid[0], mid[1], d / framePinch.d);
+        }
+        framePinch = { mid, d };
+      }
+      touchFraming();
+    });
+    const letGo = (e) => {
+      grips.delete(e.pointerId);
+      framePinch = null;
+      if (!grips.size) frameEl.classList.remove("grabbing");
+    };
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach((ev) => frameEl.addEventListener(ev, letGo));
+    frameEl.addEventListener("wheel", (e) => {
+      if (!framing) return;
+      e.preventDefault();
+      const [fx, fy] = toFrame(e);
+      zoomAt(fx, fy, Math.exp(-e.deltaY * 0.0015));
+      touchFraming();
+    }, { passive: false });
+    zoomIn.addEventListener("input", () => {
+      if (!framing) return;
+      const want = ZMIN * Math.pow(ZMAX / ZMIN, +zoomIn.value);
+      zoomAt(OVAL_BOX.x + OVAL_BOX.width / 2, OVAL_BOX.y + OVAL_BOX.height * 0.4, want / framing.zoom);
+      touchFraming();
+    });
+    [["zoom-in", 1.2], ["zoom-out", 1 / 1.2]].forEach(([id, f]) => $(id).addEventListener("click", () => {
+      if (!framing) return;
+      zoomAt(OVAL_BOX.x + OVAL_BOX.width / 2, OVAL_BOX.y + OVAL_BOX.height * 0.4, f);
+      touchFraming();
+    }));
     snapBtn.addEventListener("click", () => { if (video.videoWidth) setPhoto(video, video.videoWidth, video.videoHeight, true); });
     retakeBtn.addEventListener("click", () => { photo = null; startCamera(); });
     fileIn.addEventListener("change", () => {
@@ -3336,17 +3485,22 @@
     const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
     // Photo → 32×32 pixel face, skin and hair colours, and a male/female guess for the starting look.
     const FACE = 32;
-    async function analyse(src) {
+    // framed: the guest's framing of a photo (see setPhoto), whose oval says where the face is
+    async function analyse(src, framed) {
       const out = { face: null, skin: "#D9A57E", hair: "#4A3020", body: null };
+      if (framed) { out.body = framed.body; src = framed.img; }
       if (!src) return out;
-      let box = null;
-      try {
-        waitMsg.textContent = "Loading the face finder…";
-        const api = await withTimeout(loadFaceApi(), 12000);
-        waitMsg.textContent = "Finding your face…";
-        const det = await withTimeout(api.detectSingleFace(src, new api.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 })).withAgeAndGender(), 6000);
-        if (det) { box = det.detection.box; out.body = det.gender === "female" ? "f" : "m"; }
-      } catch (e) { /* no model or no face found: use the middle of the photo */ }
+      let box = framed ? framedBox(framed) : null;
+      if (!out.body) {
+        try {
+          waitMsg.textContent = "Loading the face finder…";
+          const api = await withTimeout(loadFaceApi(), 12000);
+          waitMsg.textContent = "Finding your face…";
+          // for a framed photo, look at just what's in the frame: that's the face they picked
+          const det = await withTimeout(api.detectSingleFace(framed ? shot : src, new api.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 })).withAgeAndGender(), 6000);
+          if (det) { if (!box) box = det.detection.box; out.body = det.gender === "female" ? "f" : "m"; }
+        } catch (e) { /* no model or no face found: use the middle of the photo */ }
+      }
       const W = src.width, H = src.height;
       // the head's front is the face from just above the brows to the chin, so the face fills it
       let size = Math.min(W, H) * 0.56, cx = W / 2, cy = H * 0.46;
@@ -3425,7 +3579,7 @@
       stopCamera();
       waitMsg.textContent = "Finding your face and picking your pixels.";
       showStep("wait");
-      const res = await analyse(photo);
+      const res = await analyse(photo, framing);
       if (joinEl.hidden) return;
       draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, cheeky: lsGet("fefe40.cheeky") === "1" };
       // height and weight come back from last time, otherwise they follow the body until moved
