@@ -146,26 +146,14 @@ body {
   pointer-events: none;
 }
 .dock > * { pointer-events: auto; }
-/* ABBA jukebox: bottom left, above the place buttons */
-.jukebox {
-  position: absolute;
-  z-index: 3;
-  left: max(12px, env(safe-area-inset-left));
-  bottom: 124px;
-  width: 212px;
-  padding: 6px;
-  border: 3px solid var(--blue-edge);
-  border-radius: 12px;
-  background: var(--blue-deep);
-  box-shadow: 0 4px 0 var(--blue-edge);
-}
-.jukebox[hidden] { display: none; }
-.jb-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-.jb-title { flex: 1; color: var(--yellow); font: 700 0.875rem/1.1 var(--font-pixel); }
-.jb-btn { border: 0; border-radius: 6px; padding: 4px 8px; background: var(--white); color: var(--blue-deep); font: 700 0.75rem var(--font-body); cursor: pointer; }
-.jb-player { width: 200px; height: 200px; overflow: hidden; border-radius: 6px; background: #000; }
-.jb-player iframe { display: block; width: 200px; height: 200px; border: 0; }
-body.driving .jukebox { bottom: 96px; }
+/* karaoke TV: the YouTube player sits under the canvas, which is see-through at the TV screen while it plays, and app.js
+   moves it onto the screen every frame. 406 x 200 keeps the screen's shape and YouTube's 200 px minimum. */
+.tv-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.tv-video { position: absolute; left: 0; top: 0; width: 406px; height: 200px; background: #000; transform-origin: 0 0; visibility: hidden; will-change: transform; }
+.tv-video iframe { display: block; width: 100%; height: 100%; border: 0; }
+/* a phone that only starts YouTube from a tap on the video itself: lift it over the canvas until it plays */
+.tv-layer.tap { z-index: 1; }
+.tv-layer.tap .tv-video { pointer-events: auto; }
 /* driving: wheel on the left, pedals on the right, the rest of the dock steps aside */
 .drive {
   position: absolute;
@@ -479,6 +467,7 @@ body.driving .dock { display: none; }
 </head>
 <body>
 <div id="app">
+  <div class="tv-layer" id="tv-layer"><div class="tv-video" id="tv-video"><div id="jb-player"></div></div></div>
   <canvas id="scene" tabindex="0" aria-label="Block map of Casa Anahao. Drag to move, pinch or scroll to zoom, tap a place for details."></canvas>
   <div id="labels"></div>
 
@@ -524,16 +513,6 @@ body.driving .dock { display: none; }
     <button type="button" class="enter alt" id="wardrobe" hidden>Change outfit</button>
     <button type="button" class="enter alt jb-play" id="jb-play" hidden>&#9654; Play ABBA</button>
     <nav class="chips" id="chips" aria-label="Places"></nav>
-  </div>
-
-  <!-- ABBA jukebox: ABBA's official YouTube videos, shown (as YouTube requires) while they play near the dance floor or karaoke -->
-  <div class="jukebox" id="jukebox" hidden>
-    <div class="jb-head">
-      <span class="jb-title">ABBA at the party</span>
-      <button type="button" class="jb-btn" id="jb-next" aria-label="Next song">Next</button>
-      <button type="button" class="jb-btn" id="jb-close" aria-label="Stop the music">&#10005;</button>
-    </div>
-    <div class="jb-player"><div id="jb-player"></div></div>
   </div>
 
   <div class="drive" id="drive" hidden>
