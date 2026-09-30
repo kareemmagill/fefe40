@@ -1407,6 +1407,7 @@
       disco.material.emissive.set(on ? 0x39414f : 0x000000);
       nightLights.forEach((l) => { l.intensity = on ? l.userData.power : 0; });
       discoFx.visible = on;
+      nightChanged();
       meshes.forEach((m) => {
         if (m.userData.kind === "glass") m.material.emissive.set(on ? 0x7a5520 : 0x000000);
       });
@@ -1809,7 +1810,8 @@
     }
 
     // ---------- me: walking and recording ----------
-    let me = null, myPath = [], follow = false, rec = null, myName = "", myLook = null, pendingWalk = null;
+    // rec is the walk being recorded now: recs.day while it's daytime, recs.night once the night switch is on.
+    let me = null, myPath = [], follow = false, rec = null, recs = null, myName = "", myLook = null, pendingWalk = null;
     const SPEED = 3.4;
     function walkTo(tx, tz) {
       if (!me) return false;
@@ -1870,7 +1872,25 @@
     // The recording clock runs while walking and for at most 20 s of each standstill: long enough for the replayed
     // loop to show what they got up to there, short enough to keep it lively.
     const IDLE_MAX = 20;
-    function startRecording(x, z) { rec = { clock: 0, idle: 0, nodes: [[0, x, z]] }; }
+    const newRec = (x, z) => ({ clock: 0, idle: 0, nodes: [[0, x, z]] });
+    function startRecording(x, z) {
+      recs = { day: null, night: null };
+      recs[night ? "night" : "day"] = rec = newRec(x, z);
+    }
+    // Day and night are separate loops: flipping the switch closes one track where you stand and carries on
+    // in the other (starting it if new), and everyone else's replays swap to that time of day.
+    function nightChanged() {
+      if (me && recs) {
+        const x = Math.floor(me.x), z = Math.floor(me.z), mode = night ? "night" : "day";
+        recNode(x, z);
+        if (!recs[mode]) recs[mode] = newRec(x, z);
+        rec = recs[mode];
+        rec.idle = 0;
+        recNode(x, z);
+        scheduleSave(800);
+      }
+      ghosts.forEach((g) => setGhostTrack(g, true));
+    }
     function tickRecording(dt, moving) {
       if (!rec) return;
       if (moving) { rec.idle = 0; rec.clock += dt; }
@@ -1957,7 +1977,8 @@
         hair: myLook.hair,
         face: myLook.face ? toB64(myLook.face) : "",
         cheeky: myLook.cheeky ? 1 : 0,
-        track: rec ? trackOf(rec) : "",
+        track: recs && recs.day ? trackOf(recs.day) : "",
+        trackN: recs && recs.night ? trackOf(recs.night) : "",
         at: Date.now()
       };
       Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
@@ -1980,39 +2001,57 @@
           if (b.length === 768 || b.length === 3072) { face = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) face[i] = b.charCodeAt(i); }
         } catch (e) { face = null; }
       }
-      const nodes = [];
-      if (typeof r.track === "string") {
-        r.track.split(";").slice(0, 1500).forEach((part) => {
+      const parse = (track) => {
+        const nodes = [];
+        if (typeof track !== "string" || track.length > 30000) return nodes;
+        track.split(";").slice(0, 1500).forEach((part) => {
           const [t, x, z] = part.split(",").map(Number);
           if (![t, x, z].every(Number.isFinite) || !inMap(x, z) || heightAt(x, z) === NONE) return;
           if (nodes.length && t < nodes[nodes.length - 1][0]) return;
           nodes.push([t, x | 0, z | 0]);
         });
-      }
+        return nodes;
+      };
+      const nodes = parse(r.track), nodesN = parse(r.trackN);
       const name = String(r.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest";
       const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, cheeky: r.cheeky === 1 };
-      return { name, look, nodes, key: [name, look.body, look.outfit, look.skin, look.hair, typeof r.face === "string" ? r.face : ""].join("|") };
+      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, typeof r.face === "string" ? r.face : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
     function upsertGhost(id, clean, at) {
       let g = ghosts.get(id);
       if (g && g.key !== clean.key) { removeActor(g.actor); ghosts.delete(id); g = null; }
-      const nodes = clean.nodes.length ? clean.nodes : [[0, SPAWN[0][0], SPAWN[0][1]]];
-      const dur = nodes[nodes.length - 1][0] / 10 + 4;
+      const day = clean.nodes.length ? clean.nodes : clean.nodesN.length ? clean.nodesN : [[0, SPAWN[0][0], SPAWN[0][1]]];
       if (!g) {
         const actor = makeActor(clean.name, clean.look, false, id);
-        actor.x = nodes[0][1] + 0.5;
-        actor.z = nodes[0][2] + 0.5;
-        actor.y = worldY(nodes[0][1], nodes[0][2]);
-        g = { actor, key: clean.key, t: Math.random() * dur, i: 0 };
+        g = { actor, key: clean.key, t: -1, i: 0 };
         ghosts.set(id, g);
       }
       g.at = at;
+      g.day = day;
+      g.night = clean.nodesN.length ? clean.nodesN : null;
+      setGhostTrack(g, false);
+    }
+    // At night a guest replays their night walk if they made one, otherwise their day walk.
+    function setGhostTrack(g, swapped) {
+      const nodes = night && g.night ? g.night : g.day;
+      const changed = g.nodes !== nodes;
       g.nodes = nodes;
-      g.dur = dur;
+      g.dur = nodes[nodes.length - 1][0] / 10 + 4;
       g.i = 0;
-      if (g.t > dur) g.t = 0;
+      const a = g.actor;
+      if (g.t < 0) { // new guest: join somewhere along their loop
+        g.t = Math.random() * g.dur;
+        a.x = nodes[0][1] + 0.5;
+        a.z = nodes[0][2] + 0.5;
+        a.y = worldY(nodes[0][1], nodes[0][2]);
+      } else if (swapped && changed && !g.live) { // other time of day: start their other loop with a fresh drop-in
+        g.t = 0;
+        a.drop = 12;
+        a.dropV = 0;
+      }
+      if (g.t > g.dur) g.t = 0;
     }
     // Guests who are online right now walk live to where they really are; everyone else loops their recorded walk,
     // dropping back in at their start each time round.
@@ -2055,7 +2094,12 @@
       if (g.t >= g.dur) { g.t = 0; g.i = 0; a.drop = 12; a.dropV = 0; }
       const t10 = g.t * 10;
       if (g.i >= n.length || n[g.i][0] > t10) g.i = 0;
-      while (g.i < n.length - 1 && n[g.i + 1][0] <= t10) g.i++;
+      while (g.i < n.length - 1 && n[g.i + 1][0] <= t10) {
+        g.i++;
+        // a jump in the track (they flipped day and night somewhere else) replays as a fresh drop-in
+        const p0 = n[g.i - 1], p1 = n[g.i];
+        if (Math.abs(p1[1] - p0[1]) > 1 || Math.abs(p1[2] - p0[2]) > 1) { a.drop = 12; a.dropV = 0; }
+      }
       const p = n[g.i], q = n[Math.min(g.i + 1, n.length - 1)];
       let moving = false, heading;
       if (q !== p && (q[1] !== p[1] || q[2] !== p[2])) {
@@ -2540,7 +2584,7 @@
       clampTarget(goal.target);
     }
     findBtn.addEventListener("click", findMe);
-    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
+    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, dayNodes: recs && recs.day ? recs.day.nodes.length : 0, nightNodes: recs && recs.night ? recs.night.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
       look(x, z, fit) { follow = false; goal.target.set(x + OX, 1, z + OZ); goal.fit = fit || 14; } };
 
