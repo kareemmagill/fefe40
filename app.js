@@ -2010,6 +2010,7 @@
       }
       heartbeat(performance.now());
       updateWardrobe();
+      voiceClock(dt);
     }
     // The recording clock runs while walking and for at most 20 s of each standstill: long enough for the replayed
     // loop to show what they got up to there, short enough to keep it lively.
@@ -4039,14 +4040,16 @@
     function askVoice(mode) {
       return new Promise((resolve) => {
         const have = new Set(Object.keys(myVoice)), cheeky = lsGet("fefe40.cheeky") === "1" || !!(myLook && myLook.cheeky);
-        const lines = VOICE.pickSet(myId + ":" + (lsGet("fefe40.voiceRound") || "0"), have, cheeky, 20);
+        // ten at a time: a set of twenty thinned to its warm-up, every other line of the middle and the birthday finale
+        const full = VOICE.pickSet(myId + ":" + (lsGet("fefe40.voiceRound") || "0"), have, cheeky, 20);
+        const lines = full.length > 10 ? [full[0]].concat(full.slice(1, -1).filter((l, i) => i % 2 === 0).slice(0, 8), full[full.length - 1]) : full;
         if (!lines.length) { resolve(); return; } // they've recorded every line there is
         voiceDone = () => { voiceDone = null; resolve(); };
         voiceUI.open({ lines });
         $("voice-step").hidden = mode !== "join";
-        $("voice-title").textContent = have.size ? "Record " + lines.length + " more lines?" : "Now lend us your voice!";
+        $("voice-title").textContent = mode === "again" ? "Time for " + lines.length + " more lines!" : have.size ? "Record " + lines.length + " more lines?" : "Now lend us your voice!";
         $("voice-forget").hidden = !have.size;
-        $("voice-skip").textContent = mode === "join" ? (have.size ? "Keep my voice" : "Skip") : "Close";
+        $("voice-skip").textContent = mode === "join" ? (have.size ? "Keep my voice" : "Skip") : mode === "again" ? "Not now" : "Close";
         $("voice-done").textContent = mode === "join" ? "Save and pick my outfit" : "Save my voice";
         showStep("voice");
       });
@@ -4062,6 +4065,21 @@
       $("voice-title").textContent = "Now lend us your voice!";
       if ($("voice-skip").textContent === "Keep my voice") $("voice-skip").textContent = "Skip";
     });
+    // Every 4 minutes at the party it stops for ten more lines; after the first 4 minutes (the day loop) it's night.
+    let voicePlay = 0, voiceAsks = 0;
+    function voiceClock(dt) {
+      if (!me || !voiceUI || !joinEl.hidden || document.visibilityState === "hidden") return;
+      voicePlay += dt;
+      if (voicePlay < (voiceAsks + 1) * LOOP_S || me.inCar || me.drop > 0) return;
+      voiceAsks++;
+      const first = voiceAsks === 1;
+      joinEl.hidden = false;
+      askVoice("again").then(() => {
+        if (voiceUI) voiceUI.close();
+        joinEl.hidden = true;
+        if (first && !night) setNight(true);
+      });
+    }
     voiceBtn.addEventListener("click", async () => {
       if (!me || !voiceUI || !joinEl.hidden) return;
       joinEl.hidden = false;
