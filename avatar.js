@@ -1124,7 +1124,7 @@
     const skin = avg(region(0.2, 0.36, 0.56, 0.7).concat(region(0.64, 0.8, 0.56, 0.7)));
     const dist = (a, b) => Math.abs(((a >> 16) & 255) - ((b >> 16) & 255)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
     const top = region(0.12, 0.88, 0, 0.1), notSkin = top.filter((c) => dist(c, skin) > 90);
-    const hair = avg(notSkin.length > top.length * 0.25 ? notSkin : top);
+    const hair = typeof opts.hair === "number" ? opts.hair : avg(notSkin.length > top.length * 0.25 ? notSkin : top); // app.js may know better
     // 4. soften the corners into hair (above the eyes) and skin (below), so no background shows round the face
     if (opts.blend !== false) {
       for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {

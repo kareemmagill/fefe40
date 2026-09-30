@@ -12,7 +12,7 @@
         "$id": {
           ".read": true,
           ".write": true,
-          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['name', 'at']) && newData.child('name').isString() && newData.child('name').val().length <= 20 && (!newData.child('track').exists() || (newData.child('track').isString() && newData.child('track').val().length <= 30000)) && (!newData.child('trackN').exists() || (newData.child('trackN').isString() && newData.child('trackN').val().length <= 30000)) && (!newData.child('face').exists() || (newData.child('face').isString() && newData.child('face').val().length <= 4200))"
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['name', 'at']) && newData.child('name').isString() && newData.child('name').val().length <= 20 && (!newData.child('track').exists() || (newData.child('track').isString() && newData.child('track').val().length <= 30000)) && (!newData.child('trackN').exists() || (newData.child('trackN').isString() && newData.child('trackN').val().length <= 30000)) && (!newData.child('face').exists() || (newData.child('face').isString() && newData.child('face').val().length <= 4200)) && (!newData.child('voice').exists() || (newData.child('voice').isString() && newData.child('voice').val().length <= 1200))"
         }
       },
       "live": {
@@ -20,6 +20,16 @@
         "$id": {
           ".write": true,
           ".validate": "$id.matches(/^[a-z0-9]{6,24}$/) && newData.hasChildren(['t', 'x', 'z']) && newData.child('t').isNumber() && newData.child('x').isNumber() && newData.child('z').isNumber() && (!newData.child('n').exists() || newData.child('n').isNumber())"
+        }
+      },
+      "voices": {
+        "$id": {
+          ".read": true,
+          ".write": true,
+          ".validate": "$id.matches(/^[a-z0-9]{6,24}$/)",
+          "$clip": {
+            ".validate": "$clip.matches(/^[a-z][a-z0-9]{0,3}$/) && newData.isString() && newData.val().length <= 60000 && newData.val().beginsWith('V1')"
+          }
         }
       }
     }

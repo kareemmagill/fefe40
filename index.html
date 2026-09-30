@@ -317,6 +317,30 @@ body.driving .dock { display: none; }
   opacity: 0.8;
   pointer-events: none;
 }
+/* the voice step: a prompter card, a level meter, then the clips to play back */
+.voice-peek { margin: 0 0 10px; padding: 10px 14px; border-radius: 10px; background: rgba(0, 0, 0, 0.18); list-style: none; font-weight: 700; line-height: 1.5; }
+.voice-peek span { color: var(--sky-bottom); font-weight: 400; font-size: 0.85em; }
+.voice-peek .more { color: var(--sky-bottom); font-weight: 400; }
+.voice-error { margin: 8px 0 0; color: #FFB4B4; font-weight: 600; text-align: center; }
+.voice-stage { display: grid; place-items: center; min-height: 200px; padding: 12px; border: 3px solid var(--blue-edge); border-radius: 12px; background: var(--blue-deep); text-align: center; }
+.voice-countdown { margin: 0; color: var(--yellow); font: 700 4rem/1 var(--font-pixel); }
+.voice-countdown[hidden], .voice-card[hidden] { display: none; }
+.voice-card { width: 100%; }
+.voice-line { margin: 0; color: var(--white); font: 700 1.6rem/1.2 var(--font-pixel); }
+.voice-card.sing .voice-line { color: var(--yellow); }
+.voice-card.sing .voice-line::before, .voice-card.sing .voice-line::after { content: " \266A "; }
+.voice-en { margin: 8px 0 0; color: var(--sky-bottom); font-size: 0.95rem; }
+.voice-hint { margin: 4px 0 0; color: var(--yellow); font-size: 0.85rem; opacity: 0.85; }
+.voice-en[hidden], .voice-hint[hidden] { display: none; }
+.voice-bar { height: 5px; margin: 14px auto 0; width: 80%; border-radius: 3px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+.voice-bar i { display: block; height: 100%; width: 0; background: var(--yellow); }
+.voice-meter { height: 8px; margin: 10px 0 0; border-radius: 4px; background: rgba(0, 0, 0, 0.25); overflow: hidden; }
+.voice-meter i { display: block; height: 100%; width: 0; background: #6CC24A; transition: width 60ms linear; }
+.voice-progress { margin-right: auto; align-self: center; color: var(--sky-bottom); font-weight: 700; }
+.voice-list { max-height: 38vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.voice-list li { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-weight: 600; }
+.voice-list button { flex: none; width: 34px; height: 34px; border: 2px solid var(--blue-edge); border-radius: 50%; background: var(--yellow); color: var(--blue-deep); font-size: 0.9rem; cursor: pointer; }
+.voice-list button[disabled] { background: transparent; color: #FFB4B4; cursor: default; }
 /* after the photo: drag it about and zoom so the face sits in the oval */
 .frame.framing { touch-action: none; cursor: grab; }
 .frame.framing.grabbing { cursor: grabbing; }
@@ -517,6 +541,9 @@ body.driving .dock { display: none; }
     <button type="button" class="tool" id="sound" aria-pressed="false" aria-label="Sound and music" title="Sound (M)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="waves" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/></svg>
     </button>
+    <button type="button" class="tool" id="voice-btn" aria-label="Record your voice" title="Your voice" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8"/></svg>
+    </button>
     <button type="button" class="tool" id="find-me" aria-label="Find my avatar" title="Find me (F)" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><rect x="8" y="2" width="8" height="8"/><path d="M6 22v-8h12v8"/></svg>
     </button>
@@ -558,7 +585,7 @@ body.driving .dock { display: none; }
   <div class="join" id="join" hidden>
     <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="join-title">
       <div id="step-photo">
-        <p class="eyebrow">Step 1 of 2 · Photo and name</p>
+        <p class="eyebrow">Step 1 of 3 · Photo and name</p>
         <h2 class="sheet-title" id="join-title">Snap your party face</h2>
         <p class="sheet-sub">Look straight at the camera with your face in the oval. Your photo stays on your phone; only a small version of your face goes online.</p>
         <div class="frame">
@@ -576,7 +603,7 @@ body.driving .dock { display: none; }
         <div class="row">
           <button type="button" class="btn primary" id="snap" disabled>Take photo</button>
           <button type="button" class="btn" id="retake" hidden>Retake</button>
-          <label class="btn" for="file">Use a photo</label>
+          <label class="btn" for="file" id="file-btn">Use a photo</label>
           <input type="file" id="file" accept="image/*" capture="user" hidden>
         </div>
         <label class="field" for="guest-name">Your name</label>
@@ -587,19 +614,56 @@ body.driving .dock { display: none; }
           <button type="button" class="btn primary" id="make" disabled>Next: pick your outfit</button>
         </div>
       </div>
+      <!-- your voice: a set of party lines read in one go, cut up into clips your avatar says at the party (voice.js) -->
+      <div id="step-voice" hidden>
+        <p class="eyebrow" id="voice-step">Step 2 of 3 · Your voice</p>
+        <h2 class="sheet-title" id="voice-title">Now lend us your voice!</h2>
+        <div id="voice-intro">
+          <p class="sheet-sub" id="voice-about">Read <b><span class="voice-count-n">20</span> short party lines</b> out loud, in your finest Swedish accent. They pop up one at a time: just keep reading. Your avatar then says them at the party: skål at the bar, singing at the karaoke, grattis to Fefe, the odd burp&hellip;</p>
+          <ul class="voice-peek" id="voice-peek"></ul>
+          <p class="sheet-note">Your clips are shared with the other guests at the party.</p>
+          <p class="voice-error" id="voice-error" hidden></p>
+          <div class="row end">
+            <button type="button" class="btn ghost" id="voice-forget" hidden>Delete my voice</button>
+            <button type="button" class="btn ghost" id="voice-skip">Skip</button>
+            <button type="button" class="btn primary" id="voice-go">&#127908; Start</button>
+          </div>
+        </div>
+        <div id="voice-live" hidden>
+          <div class="voice-stage">
+            <p class="voice-countdown" id="voice-countdown">3</p>
+            <div class="voice-card" id="voice-card" hidden>
+              <p class="voice-line" id="voice-line"></p>
+              <p class="voice-en" id="voice-en"></p>
+              <p class="voice-hint" id="voice-hint"></p>
+              <div class="voice-bar"><i id="voice-fill"></i></div>
+            </div>
+          </div>
+          <div class="voice-meter" aria-hidden="true"><i id="voice-level"></i></div>
+          <div class="row end">
+            <span class="voice-progress" id="voice-progress"></span>
+            <button type="button" class="btn ghost" id="voice-stop">Stop</button>
+          </div>
+        </div>
+        <div id="voice-review" hidden>
+          <p class="sheet-sub" id="voice-summary"></p>
+          <ul class="voice-list" id="voice-list"></ul>
+          <div class="row">
+            <button type="button" class="btn" id="voice-redo">Redo the missed ones</button>
+            <button type="button" class="btn" id="voice-again">Start over</button>
+          </div>
+          <div class="row end">
+            <button type="button" class="btn primary" id="voice-done">Save my voice</button>
+          </div>
+        </div>
+      </div>
       <div id="step-wait" hidden>
         <h2 class="sheet-title">Making your blocky self…</h2>
         <p class="sheet-sub" id="wait-msg">Finding your face and picking your pixels.</p>
       </div>
       <div id="step-dress" hidden>
-        <p class="eyebrow" id="dress-step">Step 2 of 2 · Outfit</p>
-        <h2 class="sheet-title" id="dress-title">Pick your outfit</h2>
+        <p class="eyebrow" id="dress-step">Step 3 of 3 · Outfit</p>
         <div class="preview"><canvas id="preview"></canvas></div>
-        <div class="seg" role="group" aria-label="Body">
-          <button type="button" class="seg-btn" id="body-m" aria-pressed="true">Male</button>
-          <button type="button" class="seg-btn" id="body-f" aria-pressed="false">Female</button>
-        </div>
-        <p class="sheet-note" id="guess-note">Guessed from your photo. Tap to change.</p>
         <div class="carousel">
           <button type="button" class="arrow" id="prev" aria-label="Previous outfit">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M15 4 7 12l8 8"/></svg>
@@ -637,6 +701,8 @@ body.driving .dock { display: none; }
 <script src="avatar.js"></script>
 <script src="outfits-hd.js"></script>
 <script src="sound.js"></script>
+<script src="voice-lines.js"></script>
+<script src="voice.js"></script>
 <script src="actions.js"></script>
 <script src="app.js"></script>
 </body>

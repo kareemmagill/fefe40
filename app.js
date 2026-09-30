@@ -1904,7 +1904,7 @@
       if (a.drop > 0) {
         a.dropV += 30 * dt;
         a.drop -= a.dropV * dt;
-        if (a.drop <= 0) { a.drop = 0; a.dropV = 0; poof(a.x, a.y, a.z); if (typeof sfx === "function") sfx("pop", a.x, a.z); }
+        if (a.drop <= 0) { a.drop = 0; a.dropV = 0; poof(a.x, a.y, a.z); if (typeof sfx === "function") sfx("pop", a.x, a.z); voiceSay(a, ["birthday", "greet"], a.x, a.z, 0.45); }
       }
       if (moving) a.phase += dt * 10;
       a.moving = !!moving && a.drop === 0;
@@ -2083,6 +2083,17 @@
           leave(id) {
             return fetch(DB_URL + "/fefe40/live/" + id + ".json", { method: "DELETE", keepalive: true });
           },
+          voicePut(id, clip, str) {
+            return fetch(DB_URL + "/fefe40/voices/" + id + "/" + clip + ".json", { method: "PUT", body: JSON.stringify(str) });
+          },
+          async voiceGet(id, clip) {
+            const r = await fetch(DB_URL + "/fefe40/voices/" + id + "/" + clip + ".json");
+            if (!r.ok) throw new Error("voice " + r.status);
+            return r.json();
+          },
+          voiceDrop(id) {
+            return fetch(DB_URL + "/fefe40/voices/" + id + ".json", { method: "DELETE" });
+          },
           put(id, record, keepalive) {
             const req = (body) => ({ method: "PUT", body: JSON.stringify(body), keepalive: !!keepalive });
             return Promise.all([
@@ -2098,6 +2109,9 @@
           async live() { return {}; },
           async beat() {},
           async leave() {},
+          async voicePut() { return { ok: true }; },
+          async voiceGet() { throw new Error("not shared"); },
+          async voiceDrop() {},
           async put(id, record) { lsSet("fefe40.mine", JSON.stringify(record)); }
         };
     let saveTimer = 0;
@@ -2130,6 +2144,7 @@
         wt: FefeAvatar.bodyShape(myLook).wt,
         track: recs && recs.day ? trackOf(recs.day) : "",
         trackN: recs && recs.night ? trackOf(recs.night) : "",
+        voice: [...myVoiceUp].join(","),
         at: Date.now()
       };
       Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
@@ -2171,12 +2186,13 @@
         return nodes;
       };
       const nodes = parse(r.track), nodesN = parse(r.trackN);
+      const voice = typeof r.voice === "string" && VOICE ? r.voice.slice(0, 1200).split(",").filter((id) => CLIP_ID.test(id) && VOICE.byId.has(id)).slice(0, 240) : [];
       const name = String(r.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest";
       const look = { body: r.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, r.outfit | 0)), skin: hex(r.skin, "#D9A57E"), hair: hex(r.hair, "#4A3020"), face, faceL, faceR, faceT, cheeky: r.cheeky === 1 };
       const sh = FefeAvatar.bodyShape({ body: look.body, h: +r.h || 0, wt: +r.wt || 0 }); // clamps to sensible sizes
       look.h = sh.h;
       look.wt = sh.wt;
-      return { name, look, nodes, nodesN, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
+      return { name, look, nodes, nodesN, voice, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -2195,6 +2211,7 @@
         ghosts.set(id, g);
       }
       g.at = at;
+      g.voice = clean.voice;
       g.day = day;
       g.night = clean.nodesN.length ? clean.nodesN : null;
       setGhostTrack(g, false);
@@ -2662,14 +2679,163 @@
             return best;
           },
           onDance(n) { danceCrowd = n; },
-          sound: sfx,
-          say(key, x, z) { if (snd && snd.enabled) snd.say(key, x, z); },
+          sound(name, x, z, a) { if (!(a && voiceSay(a, EFFECT_VOICE[name], x, z, 0.5))) sfx(name, x, z); },
+          say(key, x, z, a) { if (!(a && voiceSay(a, LINE_VOICE[key], x, z, 0.6)) && snd && snd.enabled) snd.say(key, x, z); },
+          voice(a, act, x, z) { return voiceAct(a, act, x, z); },
           onScenes(rooms) { loveRooms = rooms; },
           nearestCar: nearestParkedCar,
           onSteamy(cars) { steamyCars = cars.slice(); }
         })
       : null;
     const actorList = [];
+
+    // ---------- voices: guests' own recorded lines (voice.js) ----------
+    // My clips live on this phone and go up to the shared database one by one; other guests' clips are fetched the
+    // first time their avatar wants to say one. The made-up test crowd borrows my clips, pitched up or down.
+    const VOICE = window.FefeVoice && window.FefeVoice.lines.length ? window.FefeVoice : null;
+    const CLIP_ID = /^[a-z][a-z0-9]{0,3}$/;
+    let myVoice = {}, myVoiceUp = new Set();
+    try {
+      const saved = JSON.parse(lsGet("fefe40.voice") || "{}") || {};
+      Object.keys(saved).forEach((id) => { if (VOICE && VOICE.byId.has(id) && typeof saved[id] === "string" && saved[id].length < 60000) myVoice[id] = saved[id]; });
+      (lsGet("fefe40.voiceUp") || "").split(",").forEach((id) => { if (myVoice[id]) myVoiceUp.add(id); });
+    } catch (e) { myVoice = {}; }
+    function keepMyVoice() {
+      lsSet("fefe40.voice", JSON.stringify(myVoice));
+      lsSet("fefe40.voiceUp", [...myVoiceUp].join(","));
+    }
+    // up they go, a few at a time; my record only lists the ones that made it, so nobody asks for a missing clip
+    let voiceUploading = false, voiceRetry = 0;
+    async function uploadVoice() {
+      if (voiceUploading || !store.shared) return;
+      voiceUploading = true;
+      clearTimeout(voiceRetry);
+      const todo = Object.keys(myVoice).filter((id) => !myVoiceUp.has(id));
+      let sent = 0, failed = false;
+      for (let i = 0; i < todo.length && !failed; i += 3) {
+        await Promise.all(todo.slice(i, i + 3).map(async (id) => {
+          try {
+            const r = await store.voicePut(myId, id, myVoice[id]);
+            if (r && r.ok === false) throw new Error("voice " + r.status);
+            myVoiceUp.add(id);
+            sent++;
+          } catch (e) { failed = true; }
+        }));
+      }
+      keepMyVoice();
+      voiceUploading = false;
+      if (sent && me) scheduleSave(300);
+      if (failed) voiceRetry = setTimeout(uploadVoice, 60000); // offline, or the database doesn't take voices yet
+    }
+    // AudioBuffers by "guest/line": null while loading or if it can't be had
+    const clipBufs = new Map();
+    function clipBuffer(owner, id) {
+      const k = owner + "/" + id, have = clipBufs.get(k);
+      if (have !== undefined) return have === "wait" ? null : have;
+      const ac = snd && snd.context();
+      if (!ac || !VOICE) return null;
+      clipBufs.set(k, "wait");
+      Promise.resolve(owner === myId ? myVoice[id] : store.voiceGet(owner, id))
+        .then((str) => clipBufs.set(k, VOICE.toBuffer(ac, str) || null))
+        .catch(() => clipBufs.set(k, null));
+      return null;
+    }
+    // whose clips an actor says, which lines they have, and how fast to play them
+    function voiceOf(a) {
+      if (!VOICE) return null;
+      if (a === me) return { owner: myId, ids: Object.keys(myVoice), rate: 1 };
+      const g = ghosts.get(a.key);
+      if (!g) return null;
+      if (g.npc) { const ids = Object.keys(myVoice); return ids.length ? { owner: myId, ids, rate: 0.78 + (parseInt(a.key.slice(3), 10) % 10) * 0.055 } : null; }
+      return g.voice && g.voice.length ? { owner: a.key, ids: g.voice, rate: 1 } : null;
+    }
+    const linesIn = (v, cats) => v.ids.filter((id) => { const l = VOICE.byId.get(id); return l && cats.indexOf(l.cat) >= 0; });
+    let heardMine = false;
+    // one of their own lines from these categories, if they recorded any (and one is loaded); false otherwise, so
+    // the phone's voice can say something instead
+    function voiceSay(a, cats, x, z, chance) {
+      if (!cats || !VOICE || !snd || !snd.enabled || Math.random() > chance) return false;
+      const v = voiceOf(a);
+      if (!v) return false;
+      const ids = linesIn(v, typeof cats === "string" ? [cats] : cats);
+      for (let n = ids.length; n > 0; n--) {
+        const id = ids.splice((Math.random() * n) | 0, 1)[0], buf = clipBuffer(v.owner, id);
+        if (!buf) continue;
+        if (!snd.playClip(buf, x, z, { rate: v.rate })) return false;
+        if (party) party.fx.icon(VOICE.byId.get(id).kind === "sing" ? "note" : "bubble", x, a.y + 2.7, z, { size: 0.3, vy: 0.8 });
+        if (a === me && !heardMine) { // the first time: point out whose voice that was
+          heardMine = true;
+          hint.textContent = "That was your voice! Record more lines with the microphone button.";
+          hint.classList.remove("gone");
+          clearTimeout(hintTimer);
+          hintTimer = setTimeout(dismissHint, 5000);
+        }
+        return true;
+      }
+      return false;
+    }
+    // what people say in their own voice while they're at it
+    const ACT_VOICE = {
+      disco: ["dance"], discomirror: ["dance"], line: ["dance"], wild: ["dance", "react"], pole: ["dance", "cheeky"], airguitar: ["dance"], robot: ["dance"], clap: ["dance"],
+      slowdance: ["kiss"], kiss: ["kiss"], makeup: ["kiss"], scene: ["cheeky", "kiss", "laugh"], steamy: ["cheeky", "kiss"],
+      conga: ["laugh", "dance"], surf: ["react", "laugh"], carry: ["react"], shove: ["react"], brawl: ["react", "drunk"],
+      paddle: ["swim"], swim: ["swim"], float: ["swim", "hot"], bomb: ["swim", "react"], splash: ["swim", "laugh"], ball: ["swim", "sport"],
+      chat: ["birthday", "greet", "laugh", "yum"], selfie: ["birthday", "laugh"], huddle: ["birthday", "cheers", "laugh"], cards: ["laugh", "react"],
+      sip: ["cheers"], horn: ["cheers", "drunk"], skal: ["cheers"], chug: ["cheers", "drunk"], helan: ["cheers", "sing"], toast: ["cheers", "birthday"], raiseglass: ["cheers", "birthday"],
+      cook: ["yum", "eat"], snack: ["eat", "yum"], taste: ["yum", "eat"], nibble: ["eat"], eat: ["eat", "yum"], fika: ["yum", "eat"], candy: ["candy", "eat"],
+      blow: ["birthday"], bdaysing: ["birthday", "sing"], cheer: ["sport", "react"], cheersit: ["sport", "cheers"], tabledance: ["dance", "drunk"], pong: ["sport"], cue: ["sport"],
+      paper: ["fart"], toilet: ["fart", "react"], puke: ["drunk"], toiletpuke: ["drunk"], hangover: ["drunk"],
+      jumpbed: ["laugh", "react"], pillow: ["laugh"], sleepover: ["laugh"], tv: ["laugh"], movie: ["laugh", "react"], gaming: ["react"],
+      serve: ["sport"], hoops: ["sport"], rally: ["sport"], watch: ["sport", "react"], swing: ["laugh"], seesaw: ["laugh"], run: ["laugh"],
+      photo: ["birthday", "greet"], peace: ["birthday", "laugh"], wave: ["greet", "birthday"], climb: ["react"], shower: ["hot", "sing"], smoke: ["react"], snus: ["react"]
+    };
+    // the phone voice's lines and the game's sounds, as categories of recorded lines
+    const LINE_VOICE = {
+      skal: ["cheers"], grattis: ["birthday"], helan: ["cheers", "sing"], leva: ["birthday"], hej: ["greet"], valkommen: ["greet"], tack: ["greet"],
+      oj: ["react"], nej: ["react"], kul: ["react", "laugh"], aj: ["react"], jaa: ["react"], lek: ["laugh"], heja: ["sport"], hockey: ["sport"],
+      fika: ["yum"], jattebra: ["yum"], kott: ["yum", "eat"], puss: ["kiss"], alskar: ["kiss"], godis: ["candy"], haha: ["laugh"], hihi: ["laugh"],
+      hick: ["drunk"], blah: ["drunk"], rap: ["eat"], prutt: ["fart"], plopp: ["fart"], plask: ["swim"], tut: ["drive"], brum: ["drive"], krasch: ["drive"],
+      dansa: ["dance"], sjung: ["sing"], aah: ["hot"], chatter: ["birthday", "greet", "yum", "laugh"]
+    };
+    const EFFECT_VOICE = {
+      laugh: ["laugh"], giggle: ["laugh"], cheer: ["react"], hiccup: ["drunk"], burp: ["eat"], babble: ["drunk"], vomit: ["drunk"], fart: ["fart"],
+      splash: ["swim"], cannonball: ["swim"], kiss: ["kiss"], chug: ["cheers"], clink: ["cheers"], horn: ["drive"], crash: ["drive"], bonk: ["react"],
+      wave: ["greet"], sparkle: ["candy"], shower: ["hot", "sing"], pillow: ["laugh"]
+    };
+    function voiceAct(a, act, x, z) {
+      // karaoke singers with sung lines sing with the choir on the beat instead (see updateChoir)
+      if ((act === "sing" || act === "sway") && VOICE) { const v = voiceOf(a); return !!(v && linesIn(v, ["sing"]).length); }
+      return voiceSay(a, ACT_VOICE[act], x, z, 0.55);
+    }
+    // The karaoke choir: everyone at the lounge who recorded sung lines sings together every couple of bars, the same
+    // line if they share one, over the original backing loop (unless the TV's music is on).
+    const LOUNGE = [38.5, 33.5];
+    const choir = { on: false, next: 0 };
+    function updateChoir() {
+      if (!party || !snd || !VOICE) return;
+      const voiced = [];
+      if (snd.enabled) actorList.forEach((a) => {
+        const act = party.actOf(a);
+        if (act !== "sing" && act !== "sway") return;
+        const v = voiceOf(a), sung = v ? linesIn(v, ["sing"]) : [];
+        if (sung.length) voiced.push({ a, v, sung });
+      });
+      const near = Math.hypot(view.target.x - OX - LOUNGE[0], view.target.z - OZ - LOUNGE[1]) < 24;
+      const music = voiced.length > 0 && near && !(jb && jb.playing);
+      if (music !== choir.on) { choir.on = music; snd.setMusic(music, LOUNGE[0], LOUNGE[1]); choir.next = 0; }
+      if (!voiced.length || !near) return;
+      const t = snd.now();
+      if (t < choir.next) return;
+      const at = music ? snd.nextBar() : t + 0.05;
+      choir.next = at + (music ? 4.2 : 5);
+      const count = new Map();
+      voiced.forEach((s) => s.sung.forEach((id) => count.set(id, (count.get(id) || 0) + 1)));
+      const top = [...count.entries()].sort((p, q) => q[1] - p[1] || (Math.random() < 0.5 ? -1 : 1))[0][0];
+      voiced.forEach(({ a, v, sung }) => {
+        const id = sung.indexOf(top) >= 0 ? top : sung[(Math.random() * sung.length) | 0], buf = clipBuffer(v.owner, id);
+        if (buf && snd.playClip(buf, a.x, a.z, { rate: v.rate, choir: true, at, vol: 1.2 })) party.fx.icon("note", a.x, a.y + 2.8, a.z, { size: 0.35, vy: 1 });
+      });
+    }
 
     // ---------- cars: tap one to get in, drive it about, crash it ----------
     const carMats = {};
@@ -2737,7 +2903,7 @@
     function crash(c, hit, speed) {
       const fx = party && party.fx, hard = Math.abs(speed), y = c.y + 0.9;
       c.speed = -speed * 0.3;
-      sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
+      if (!(c === drive.car && me && hard > 2.5 && voiceSay(me, ["drive", "react"], hit.px, hit.pz, 0.8))) sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
       if (!fx) return;
       if (hit.what === "person") { fx.icon("bang", hit.px, y + 1.6, hit.pz, { size: 0.45 }); c.speed = 0; return; }
       if (hard < 2.5) { fx.icon("bang", hit.px, y + 1, hit.pz, { size: 0.3 }); return; }
@@ -3161,6 +3327,7 @@
       if (me) actorList.push(me);
       ghosts.forEach((g) => actorList.push(g.actor));
       party.update(dt, actorList, Date.now() - PARTY_EPOCH);
+      updateChoir();
       separate(dt);
       actorList.forEach((a) => faceCamera(a, dt));
     }
@@ -3219,14 +3386,19 @@
     const stepPhoto = $("step-photo"), stepWait = $("step-wait"), stepDress = $("step-dress");
     const video = $("cam"), shot = $("shot"), camMsg = $("cam-msg"), guide = $("guide");
     const snapBtn = $("snap"), retakeBtn = $("retake"), fileIn = $("file"), nameIn = $("guest-name"), makeBtn = $("make");
-    const previewCanvas = $("preview"), bodyM = $("body-m"), bodyF = $("body-f"), guessNote = $("guess-note");
+    const previewCanvas = $("preview");
+    // Phones take the photo with the camera; picking a file is for computers (or when the camera won't open), since on
+    // a phone it only muddles things.
+    const fileBtn = $("file-btn"), onPhone = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches && matchMedia("(hover: none)").matches);
     const outfitName = $("outfit-name"), outfitCount = $("outfit-count"), waitMsg = $("wait-msg");
     let stream = null, photo = null, draft = null;
     nameIn.value = lsGet("fefe40.name") || "";
     $("solo-note").hidden = store.shared;
 
+    const stepVoice = $("step-voice");
     function showStep(which) {
       stepPhoto.hidden = which !== "photo";
+      stepVoice.hidden = which !== "voice";
       stepWait.hidden = which !== "wait";
       stepDress.hidden = which !== "dress";
     }
@@ -3245,6 +3417,8 @@
       joinEl.hidden = true;
       stopCamera();
       stopPreview();
+      if (voiceUI) voiceUI.close();
+      if (voiceDone) voiceDone();
     }
     enterBtn.addEventListener("click", openJoin);
     $("join-cancel").addEventListener("click", closeJoin);
@@ -3253,6 +3427,7 @@
     nameIn.addEventListener("keydown", (e) => { if (e.key === "Enter" && !makeBtn.disabled) makeBtn.click(); });
 
     function noCamera(msg) {
+      fileBtn.hidden = false;
       camMsg.textContent = msg;
       camMsg.hidden = false;
       video.hidden = true;
@@ -3266,6 +3441,7 @@
       retakeBtn.hidden = true;
       snapBtn.hidden = false;
       snapBtn.disabled = true;
+      fileBtn.hidden = onPhone;
       guide.hidden = false;
       video.hidden = false;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -3562,14 +3738,83 @@
       };
       out.skin = [skinTone(), avg(10, 18, 21, 23)].find(skinLike) || "#C98F6B";
       out.hair = avg(4, 0, 27, 3);
+      const hair = hairTone(src, cx, cy, size, out.skin);
       // the sharp face: a small JPEG/WebP string of up to 96 x 96 pixels that fits the shared record (avatar.js)
       if (FefeAvatar.faceFromImage) {
         try {
-          const hd = FefeAvatar.faceFromImage(src, box);
+          const hd = FefeAvatar.faceFromImage(src, box, hair ? { hair: parseInt(hair.slice(1), 16) } : undefined);
           if (hd && hd.face) { out.face = hd.face; out.hair = hd.hair || out.hair; }
         } catch (e) { /* keep the pixel face */ }
       }
+      if (hair) out.hair = hair;
       return out;
+    }
+
+    // The hair colour, from around the head rather than inside the face crop: above the brows up to the crown and down
+    // beside the face, leaving out anything skin-coloured (forehead, ears) or the colour of the background (sampled
+    // further out, past the head). What's left is grouped into colours and the biggest group is the hair. Null when
+    // there isn't enough to go on (then the face crop's own guess stands).
+    function hairTone(src, cx, cy, size, skinHex) {
+      const W = src.naturalWidth || src.width, H = src.naturalHeight || src.height;
+      // back to a face box: brows to chin, the way the face finder draws it
+      const fw = size / 1.18, fx = cx - fw / 2, fy = cy - 0.4 * fw;
+      const U0 = -0.9, U1 = 1.9, V0 = -1, V1 = 0.9, GW = 84, GH = Math.round((GW * (V1 - V0)) / (U1 - U0));
+      const c = document.createElement("canvas");
+      c.width = GW;
+      c.height = GH;
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.imageSmoothingEnabled = true;
+      g.drawImage(src, fx + U0 * fw, fy + V0 * fw, (U1 - U0) * fw, (V1 - V0) * fw, 0, 0, GW, GH);
+      const d = g.getImageData(0, 0, GW, GH).data;
+      // sRGB to CIE Lab, so "close colours" means close to the eye
+      const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+      const lab = (r, gr, b) => {
+        const R = lin(r), G = lin(gr), B = lin(b);
+        const X = f((0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.9505), Y = f(0.2126 * R + 0.7152 * G + 0.0722 * B), Z = f((0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.089);
+        return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
+      };
+      const dE = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+      const sv = parseInt(skinHex.slice(1), 16), skin = lab(sv >> 16, (sv >> 8) & 255, sv & 255);
+      const top = [], side = [], ring = [];
+      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+        const u = U0 + ((x + 0.5) / GW) * (U1 - U0), v = V0 + ((y + 0.5) / GH) * (V1 - V0);
+        const sx = fx + u * fw, sy = fy + v * fw;
+        if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue; // off the photo (drawn as nothing)
+        const i = (y * GW + x) * 4;
+        if (d[i + 3] < 250) continue;
+        const p = { rgb: [d[i], d[i + 1], d[i + 2]], lab: lab(d[i], d[i + 1], d[i + 2]) };
+        if (u > -0.05 && u < 1.05 && v > -0.75 && v < -0.12) top.push(p);
+        else if (((u > -0.3 && u < 0.02) || (u > 0.98 && u < 1.3)) && v > -0.2 && v < 0.55) side.push(p);
+        else if ((u < -0.6 || u > 1.6) && v < 0.3) ring.push(p);
+      }
+      // a few rounds of k-means over Lab colours; returns the groups biggest first
+      const groups = (pts, k) => {
+        if (!pts.length) return [];
+        let cs = [];
+        for (let j = 0; j < k; j++) cs.push(pts[Math.floor(((j + 0.5) / k) * pts.length)].lab.slice());
+        let sets = [];
+        for (let it = 0; it < 8; it++) {
+          sets = cs.map(() => []);
+          pts.forEach((p) => { let best = 0, bd = Infinity; cs.forEach((c2, j) => { const dd = dE(p.lab, c2); if (dd < bd) { bd = dd; best = j; } }); sets[best].push(p); });
+          cs = sets.map((s, j) => (s.length ? [0, 1, 2].map((q) => s.reduce((a, p) => a + p.lab[q], 0) / s.length) : cs[j]));
+        }
+        return sets.map((s, j) => ({ lab: cs[j], pts: s, share: s.length / pts.length })).filter((s2) => s2.pts.length).sort((a, b) => b.pts.length - a.pts.length);
+      };
+      const bg = groups(ring, 4).filter((s2) => s2.share > 0.1).map((s2) => s2.lab);
+      const around = top.concat(top, side); // the top counts double: that's where the hair nearly always is
+      if (around.length < 40) return null;
+      const notSkin = around.filter((p) => dE(p.lab, skin) > 16);
+      let pick = notSkin.filter((p) => bg.every((b) => dE(p.lab, b) > 14));
+      if (pick.length < around.length * 0.12) {
+        // hair the colour of the background, or not much hair: the non-skin colours above the brows, if there's plenty
+        pick = notSkin.filter((p) => top.indexOf(p) >= 0);
+        if (pick.length < top.length * 0.6) return null;
+      }
+      const best = groups(pick, 3)[0];
+      if (!best) return null;
+      const rgb = [0, 1, 2].map((q) => Math.round(best.pts.reduce((a, p) => a + p.rgb[q], 0) / best.pts.length));
+      return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
     }
 
     makeBtn.addEventListener("click", async () => {
@@ -3577,30 +3822,87 @@
       if (!myName) return;
       lsSet("fefe40.name", myName);
       stopCamera();
+      const job = analyse(photo, framing); // works out the face while they record their voice
+      if (voiceUI) {
+        await askVoice("join");
+        if (joinEl.hidden) return;
+      }
       waitMsg.textContent = "Finding your face and picking your pixels.";
       showStep("wait");
-      const res = await analyse(photo, framing);
+      const res = await job;
       if (joinEl.hidden) return;
       draft = { body: res.body || "m", outfit: res.body === "f" ? 3 : 0, skin: res.skin, hair: res.hair, face: res.face, cheeky: lsGet("fefe40.cheeky") === "1" };
       // height and weight come back from last time, otherwise they follow the body until moved
       sizeSet = !!lsGet("fefe40.h");
       draft.h = +lsGet("fefe40.h") || FefeAvatar.HEIGHT[draft.body];
       draft.wt = +lsGet("fefe40.wt") || FefeAvatar.WEIGHT[draft.body];
-      guessNote.textContent = res.body ? "Guessed from your photo. Tap to change." : photo ? "We couldn't spot a face, so pick one." : "Pick one.";
       setDressMode("join");
       showStep("dress");
       startPreview();
       refreshDress();
     });
+    // ---------- your voice: a fresh set of lines each time, read in one go (voice.js) ----------
+    const voiceBtn = $("voice-btn");
+    let voiceDone = null;
+    const voiceUI = VOICE && (window.AudioContext || window.webkitAudioContext) && navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+      ? VOICE.createStep({
+          intro: $("voice-intro"), live: $("voice-live"), review: $("voice-review"), peek: $("voice-peek"), error: $("voice-error"),
+          go: $("voice-go"), skip: $("voice-skip"), stop: $("voice-stop"), again: $("voice-again"), redo: $("voice-redo"), done: $("voice-done"),
+          list: $("voice-list"), summary: $("voice-summary"), count: $("voice-countdown"), card: $("voice-card"), line: $("voice-line"),
+          en: $("voice-en"), hint: $("voice-hint"), fill: $("voice-fill"), level: $("voice-level"), progress: $("voice-progress")
+        }, {
+          onDone(clips) {
+            Object.keys(clips).forEach((id) => { myVoice[id] = clips[id]; myVoiceUp.delete(id); clipBufs.delete(myId + "/" + id); });
+            lsSet("fefe40.voiceRound", String(+(lsGet("fefe40.voiceRound") || 0) + 1));
+            keepMyVoice();
+            uploadVoice();
+            if (voiceDone) voiceDone();
+          },
+          onSkip() { if (voiceDone) voiceDone(); }
+        })
+      : null;
+    // Shows the voice step and resolves once they've recorded, skipped or closed it. mode "join" is step 2 of joining;
+    // "more" is from the microphone button at the party.
+    function askVoice(mode) {
+      return new Promise((resolve) => {
+        const have = new Set(Object.keys(myVoice)), cheeky = lsGet("fefe40.cheeky") === "1" || !!(myLook && myLook.cheeky);
+        const lines = VOICE.pickSet(myId + ":" + (lsGet("fefe40.voiceRound") || "0"), have, cheeky, 20);
+        if (!lines.length) { resolve(); return; } // they've recorded every line there is
+        voiceDone = () => { voiceDone = null; resolve(); };
+        voiceUI.open({ lines });
+        $("voice-step").hidden = mode !== "join";
+        $("voice-title").textContent = have.size ? "Record " + lines.length + " more lines?" : "Now lend us your voice!";
+        $("voice-forget").hidden = !have.size;
+        $("voice-skip").textContent = mode === "join" ? (have.size ? "Keep my voice" : "Skip") : "Close";
+        $("voice-done").textContent = mode === "join" ? "Save and pick my outfit" : "Save my voice";
+        showStep("voice");
+      });
+    }
+    $("voice-forget").addEventListener("click", () => {
+      Promise.resolve(store.voiceDrop(myId)).catch(() => {});
+      [...clipBufs.keys()].forEach((k) => { if (k.indexOf(myId + "/") === 0) clipBufs.delete(k); });
+      myVoice = {};
+      myVoiceUp.clear();
+      keepMyVoice();
+      if (me) scheduleSave(200);
+      $("voice-forget").hidden = true;
+      $("voice-title").textContent = "Now lend us your voice!";
+      if ($("voice-skip").textContent === "Keep my voice") $("voice-skip").textContent = "Skip";
+    });
+    voiceBtn.addEventListener("click", async () => {
+      if (!me || !voiceUI || !joinEl.hidden) return;
+      joinEl.hidden = false;
+      await askVoice("more");
+      if (voiceUI) voiceUI.close();
+      joinEl.hidden = true;
+    });
     // The outfit screen doubles as the bedroom wardrobe once you're at the party.
     let dressMode = "join";
     function setDressMode(mode) {
       dressMode = mode;
-      $("dress-step").hidden = mode !== "join";
-      $("dress-title").textContent = mode === "join" ? "Pick your outfit" : "Change your outfit";
+      $("dress-step").textContent = mode === "join" ? "Step 3 of 3 · Outfit" : "Wardrobe";
       $("back").textContent = mode === "join" ? "Back" : "Cancel";
       $("drop").textContent = mode === "join" ? "OK, drop me in" : "Wear it";
-      guessNote.hidden = mode !== "join";
     }
     function openWardrobe() {
       if (!me) return;
@@ -3640,21 +3942,12 @@
 
     function refreshDress() {
       showSizes();
-      bodyM.setAttribute("aria-pressed", String(draft.body === "m"));
-      bodyF.setAttribute("aria-pressed", String(draft.body === "f"));
       outfitName.textContent = FefeAvatar.OUTFITS[draft.outfit].name;
       outfitCount.textContent = draft.outfit + 1 + " / " + FefeAvatar.OUTFITS.length;
       cheekyIn.checked = !!draft.cheeky;
       rebuildPreview();
     }
     let sizeSet = false;
-    function pickBody(b) {
-      draft.body = b;
-      if (!sizeSet) { draft.h = FefeAvatar.HEIGHT[b]; draft.wt = FefeAvatar.WEIGHT[b]; }
-      refreshDress();
-    }
-    bodyM.addEventListener("click", () => pickBody("m"));
-    bodyF.addEventListener("click", () => pickBody("f"));
     const hIn = $("h-in"), wtIn = $("wt-in"), hOut = $("h-out"), wtOut = $("wt-out");
     function showSizes() {
       const sh = FefeAvatar.bodyShape(draft);
@@ -3739,6 +4032,8 @@
       startRecording(sx, sz);
       enterBtn.hidden = true;
       findBtn.hidden = false;
+      voiceBtn.hidden = !voiceUI;
+      uploadVoice(); // anything recorded that didn't make it up last time
       exitBtn.hidden = false;
       clearSelection();
       follow = true;
@@ -3770,6 +4065,7 @@
       follow = false;
       enterBtn.hidden = false;
       findBtn.hidden = true;
+      voiceBtn.hidden = true;
       exitBtn.hidden = true;
       wardrobeBtn.hidden = true;
       hint.textContent = coarse ? "Drag to explore · Pinch to zoom · Tap a place" : "Drag to explore · Scroll to zoom · Q / E to rotate · Click a place";
@@ -3820,6 +4116,8 @@
       cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car, !!c.fogged, +c.g.rotation.z.toFixed(3), +c.g.position.y.toFixed(3)]),
       holds: () => actorList.map((a) => [a.name, a.av.holding(), !!a.hiddenAct]),
       goCar: (i) => goToCar(carList[i]),
+      voice: () => ({ mine: Object.keys(myVoice).length, up: myVoiceUp.size, choir: choir.on, bufs: [...clipBufs.values()].filter((b) => b && b !== "wait").length }),
+      sayAs: (i, cats) => { const a = [...ghosts.values()][i]; return !!a && voiceSay(a.actor, cats, a.actor.x, a.actor.z, 1); },
       carScreen: (i) => { const c = carList[i], v = new T.Vector3(c.x + OX, c.y + 1, c.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
@@ -3888,7 +4186,7 @@
       updateJukebox(now / 1000);
       if (snd && snd.enabled) {
         snd.setListener(view.target.x - OX, view.target.z - OZ, view.fit);
-        snd.setMusicLevel(Math.min(1, danceCrowd / 6));
+        snd.setMusicLevel(choir.on ? 0.45 : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
         snd.update(dt);
       }
       updateFeed(now / 1000);

@@ -1,6 +1,7 @@
 /* FEFE40 sound: party effects, the disco loop and Swedish voice lines, all synthesized live (Web Audio + speechSynthesis), no audio files.
    Exposes window.FefeSound = { create() }. The engine: { enabled, enable(), disable(), setListener(x, z, fit), setNight(b),
-   setMusicLevel(v), play(name, x, z, opts), say(key, x, z), update(dt) }. Call enable() from inside a tap/click handler. */
+   setMusicLevel(v), play(name, x, z, opts), say(key, x, z), update(dt), context(), now(), playClip(buffer, x, z, opts),
+   setMusic(on, x, z), nextBar() }. Call enable() from inside a tap/click handler. */
 (function () {
   const AC = window.AudioContext || window.webkitAudioContext;
   const SS = window.speechSynthesis && window.SpeechSynthesisUtterance ? window.speechSynthesis : null;
@@ -73,6 +74,8 @@
     let voices = [];
     const recent = {};
     let lastSay = -1e9, svVoice = null, enVoice = null, voicesSeen = 0, queued = 0, speechUnlocked = false;
+    let clips = [], lastClip = -1e9;
+    const spot = { x: FLOOR_X, z: FLOOR_Z }; // where the music comes from
 
     // ---------- building blocks ----------
     const hz = (f) => clamp(f * pm, 10, nyq);
@@ -502,9 +505,10 @@
       return (1 - u * u * (3 - 2 * u)) * zoomQuiet();
     }
     function musicVol() {
-      const d = Math.sqrt((L.x - FLOOR_X) * (L.x - FLOOR_X) + (L.z - FLOOR_Z) * (L.z - FLOOR_Z));
+      if (!musicOn) return 0;
+      const d = Math.sqrt((L.x - spot.x) * (L.x - spot.x) + (L.z - spot.z) * (L.z - spot.z));
       const near = Math.max(0, 1 - d / 15);
-      return (0.1 + 0.08 * energy) * (1 + 1.2 * near) * Math.sqrt(zoomQuiet());
+      return (0.1 + 0.08 * energy) * (1 + 1.2 * near) * Math.sqrt(zoomQuiet()) * (d > 26 ? 0 : 1);
     }
 
     // ---------- context lifecycle ----------
@@ -655,6 +659,51 @@
       SS.speak(u);
     }
 
+    // ---------- guests' own recorded lines ----------
+    function context() {
+      if (!ctx && (AC || (opts && opts.context))) build();
+      return ctx;
+    }
+    // A recorded clip from somewhere in the world. At most three at once and not too close together, so the party
+    // doesn't turn into a wall of voices; the karaoke choir (o.choir) sings together on the beat (o.at) regardless.
+    function playClip(buf, x, z, o) {
+      if (!eng.enabled || !ctx || !buf || !running()) return false;
+      const g = place(x, z) * (o && o.vol != null ? clamp(+o.vol || 0, 0, 1.5) : 1);
+      if (g < 0.04) return false;
+      const t0 = ctx.currentTime, choir = !!(o && o.choir), ms = nowMs();
+      clips = clips.filter((end) => end > t0);
+      if (!choir && (clips.length >= 3 || ms - lastClip < 700)) return false;
+      const s = ctx.createBufferSource(), out = ctx.createGain();
+      s.buffer = buf;
+      s.playbackRate.value = clamp((o && +o.rate) || 1, 0.5, 2);
+      out.gain.value = Math.min(1.4, g * 1.15);
+      s.connect(out);
+      out.connect(fxBus);
+      const at = o && o.at > t0 ? o.at : t0;
+      s.start(at);
+      clips.push(at + buf.duration / s.playbackRate.value);
+      lastClip = ms;
+      lastSay = ms; // and no phone voice on top of a real one
+      s.onended = () => { try { out.disconnect(); } catch (e) { /* gone */ } };
+      return true;
+    }
+    // The original loop (not anyone's song) as a backing track, e.g. for the karaoke singalong at (x, z).
+    function setMusic(on, x, z) {
+      if (typeof x === "number" && isFinite(x)) spot.x = x;
+      if (typeof z === "number" && isFinite(z)) spot.z = z;
+      if (!!on === musicOn) return;
+      musicOn = !!on;
+      if (musicOn && ctx) { step = 0; nextT = ctx.currentTime + 0.1; }
+    }
+    // when the next bar of the loop starts, for singing along on the beat
+    function nextBar() {
+      if (!ctx) return 0;
+      if (!musicOn) return ctx.currentTime + 0.05;
+      let s = step, t = nextT;
+      while ((s & 15) !== 0) { t += stepDur(); s = (s + 1) & 127; }
+      return t;
+    }
+
     function update(dt) {
       if (!ctx || !eng.enabled) return;
       dt = typeof dt === "number" && dt > 0 && isFinite(dt) ? Math.min(dt, 0.25) : 0.016;
@@ -692,7 +741,12 @@
       setMusicLevel: safe(setMusicLevel),
       play: safe(play),
       say: safe(say),
-      update: safe(update)
+      update: safe(update),
+      context: safe(context),
+      now: safe(() => (ctx ? ctx.currentTime : 0)),
+      playClip: safe(playClip),
+      setMusic: safe(setMusic),
+      nextBar: safe(nextBar)
     };
     return eng;
   }

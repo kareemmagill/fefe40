@@ -1489,7 +1489,7 @@
         s.slipped = true;
         fx.block("#FFFFFF", bx + 0.3, by + 0.03, bz + 0.2, { g: 0, size: 0.7, life: 3.5, max: 3.5, flat: true });
         fx.icon("bang", bx, by + 2.9, bz, { size: 0.5 });
-        if (ctx.say) ctx.say("oj", bx, bz);
+        if (ctx.say) ctx.say("oj", bx, bz, a);
       }
       a.av.parts.armR.rotation.set(-0.35, 0, 0.35);
       a.av.parts.armL.rotation.set(-0.35, 0, -0.35);
@@ -1510,7 +1510,7 @@
         a.av.rig.position.y = Math.abs(Math.sin(env.t * 12)) * 0.25;
         if (Math.random() < dt * 2) {
           fx.icon(Math.random() < 0.5 ? "star" : "heart", a.x, a.y + 2.8, a.z, { size: 0.3 });
-          if (ctx.sound && Math.random() < 0.4) ctx.sound("sparkle", a.x, a.z);
+          if (ctx.sound && Math.random() < 0.4) ctx.sound("sparkle", a.x, a.z, a);
         }
       }
       if (buzz) {
@@ -1524,7 +1524,7 @@
         a.av.rig.rotation.z = Math.sin(env.t * 3.2) * 0.06 * lv;
         if (Math.random() < dt * 0.8) {
           fx.icon("bubble", a.x, a.y + 2.5, a.z, { size: 0.25 });
-          if (ctx.sound) ctx.sound(Math.random() < 0.4 ? "hiccup" : "babble", a.x, a.z); // hic, or drunken börk-börk babble
+          if (ctx.sound) ctx.sound(Math.random() < 0.4 ? "hiccup" : "babble", a.x, a.z, a); // hic, or drunken börk-börk babble
         }
       }
     }
@@ -1651,7 +1651,8 @@
       if (snd && env.t >= s.sndAt) { // either the act's line or its sound, never both at once
         const repeat = snd[1] > 0;
         s.sndAt = repeat ? env.t + snd[1] * (0.8 + Math.random() * 0.4) : Infinity;
-        if (snd[2] && ctx.say && Math.random() < (repeat ? (snd[3] !== undefined ? snd[3] : 0.25) : 1)) ctx.say(snd[2], m.x, m.z);
+        if (ctx.voice && ctx.voice(a, asg.act, m.x, m.z)) { /* their own recorded line (app.js) */ }
+        else if (snd[2] && ctx.say && Math.random() < (repeat ? (snd[3] !== undefined ? snd[3] : 0.25) : 1)) ctx.say(snd[2], m.x, m.z);
         else if (!repeat && ctx.say) ctx.say(snd[0], m.x, m.z);
         else if (snd[0] && ctx.sound) ctx.sound(snd[0], m.x, m.z);
       }
