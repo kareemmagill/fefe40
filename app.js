@@ -3154,6 +3154,13 @@
     // The DJ decks on the dance floor: a tap starts the club music (our own house loop, nobody else's song) and gets
     // the dance floor dancing; another tap stops it and everyone goes back to chatting.
     const dj = { on: false };
+    // The club music carries over the dance floor, the pool and the pickleball court, fading out a few metres beyond.
+    const DJ_AREA = [[43, 24, 50, 34], [51, 15, 69, 33], [46, 38, 69, 53]];
+    function djArea(x, z) {
+      let d = Infinity;
+      DJ_AREA.forEach(([x0, z0, x1, z1]) => { d = Math.min(d, Math.hypot(Math.max(x0 - x, 0, x - x1 - 1), Math.max(z0 - z, 0, z - z1 - 1))); });
+      return Math.max(0, 1 - d / 6);
+    }
     // the booth with its speakers, as a box to hit (it's made of props, which voxel picking doesn't see)
     const deckBox = new T.Box3(new T.Vector3(44 + OX, 1, 24.9 + OZ), new T.Vector3(50 + OX, 2.6, 26.1 + OZ)), deckHit = new T.Vector3();
     function tapDecks(cx, cy) {
@@ -3251,7 +3258,8 @@
         jb.player.loadPlaylist(jbList(), 0);
         jb.player.setLoop(true);
       }
-      const vol = Math.round(100 * Math.max(0.15, Math.min(1, 1 - (musicDistance() - 7) / 19)));
+      // at 70% tops, full across most of the pavilion, fading out beyond it
+      const vol = Math.round(70 * Math.max(0.15, Math.min(1, 1 - (musicDistance() - 12) / 18)));
       if (vol !== jb.vol) { jb.vol = vol; jb.player.setVolume(vol); }
       if (jb.playing) jb.stuck = 0;
       else if (!jb.blocked) {
@@ -4303,7 +4311,8 @@
       updateKaraoke(now / 1000);
       updateTV(now / 1000);
       if (snd && snd.enabled) {
-        snd.setListener(view.target.x - OX, view.target.z - OZ, view.fit);
+        snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit); // you hear from where your avatar is
+        snd.setMusicArea(dj.on ? djArea(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ) : -1);
         snd.setMusicLevel(choir.on ? 0.45 : dj.on ? Math.max(0.65, Math.min(1, danceCrowd / 6)) : Math.min(1, danceCrowd / 6)); // under a singalong: the loop without its tune
         snd.update(dt);
       }
@@ -4313,11 +4322,11 @@
           m.material.map.offset.x += dt * (0.03 + i * 0.01);
           m.material.map.offset.y += dt * 0.018;
         });
-        disco.rotation.y += dt * (danceCrowd ? 2.4 : 1.2);
+        if (dj.on) disco.rotation.y += dt * (danceCrowd ? 2.4 : 1.6); // the ball spins while the DJ plays
       }
       danceClock += dt;
       const beat = reduceMotion ? 1.5 : danceCrowd ? 0.2 : 0.28;
-      if (danceClock > beat) {
+      if (dj.on && danceClock > beat) { // and the floor lights up with it
         danceClock = 0;
         paintDance(++danceStep);
       }

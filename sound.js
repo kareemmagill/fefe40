@@ -76,7 +76,7 @@
     let lastSay = -1e9, svVoice = null, enVoice = null, voicesSeen = 0, queued = 0, speechUnlocked = false;
     let clips = [], lastClip = -1e9;
     const spot = { x: FLOOR_X, z: FLOOR_Z }; // where the music comes from
-    let club = false;
+    let club = false, musicArea = -1; // musicArea: 0-1 from the game, or -1 to go by distance from the spot
 
     // ---------- building blocks ----------
     const hz = (f) => clamp(f * pm, 10, nyq);
@@ -497,16 +497,19 @@
 
     // ---------- mixing and position ----------
     const zoomQuiet = () => (L.fit > 40 ? Math.max(0.3, 40 / L.fit) : 1);
+    // People's sounds fade with distance from the listener (your avatar, once you've joined): clear up close, gone by
+    // about 14 m, however far out the camera is.
     function place(x, z) {
       if (typeof x !== "number" || typeof z !== "number" || !isFinite(x) || !isFinite(z)) return zoomQuiet();
       const d = Math.sqrt((x - L.x) * (x - L.x) + (z - L.z) * (z - L.z));
-      const near = Math.max(2, L.fit * 0.35), far = Math.max(near + 4, L.fit * 0.9);
+      const near = 3, far = 14;
       if (d >= far) return 0;
       const u = d <= near ? 0 : (d - near) / (far - near);
       return (1 - u * u * (3 - 2 * u)) * zoomQuiet();
     }
     function musicVol() {
       if (!musicOn) return 0;
+      if (musicArea >= 0) return (0.1 + 0.08 * energy) * 2.2 * musicArea; // the game says how much of its area we're in
       const d = Math.sqrt((L.x - spot.x) * (L.x - spot.x) + (L.z - spot.z) * (L.z - spot.z));
       const near = Math.max(0, 1 - d / 15);
       return (0.1 + 0.08 * energy) * (1 + 1.2 * near) * Math.sqrt(zoomQuiet()) * (d > 26 ? 0 : 1);
@@ -748,6 +751,7 @@
       now: safe(() => (ctx ? ctx.currentTime : 0)),
       playClip: safe(playClip),
       setMusic: safe(setMusic),
+      setMusicArea: safe((g) => { musicArea = typeof g === "number" && isFinite(g) ? clamp(g, -1, 1) : -1; }),
       nextBar: safe(nextBar)
     };
     return eng;
