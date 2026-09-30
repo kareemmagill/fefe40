@@ -33,18 +33,19 @@
   // A set of n lines nobody else is likely to get the same of: the category quotas (lots of birthday wishes, cheers
   // and singing), drawn at random for this guest and round, skipping lines they've already recorded. It opens with an
   // easy warm-up, keeps the singing for the second half and ends on a birthday wish.
-  function pickSet(seed, have, cheeky, n) {
+  // host: the birthday boy, who reads only his own lines (thank-yous and the like), and nobody else gets those
+  function pickSet(seed, have, cheeky, n, host) {
     n = n || 20;
     have = have || new Set();
     const r = rng(hash(String(seed)));
     const pool = new Map();
     LINES.forEach((l) => {
-      if (have.has(l.id) || (l.cheeky && !cheeky)) return;
+      if (have.has(l.id) || (l.cheeky && !cheeky) || !l.host !== !host) return;
       if (!pool.has(l.cat)) pool.set(l.cat, []);
       pool.get(l.cat).push(l);
     });
     pool.forEach((list) => shuffle(list, r));
-    const quotas = Object.assign({}, DATA.quotas);
+    const quotas = Object.assign({}, host && DATA.hostQuotas ? DATA.hostQuotas : DATA.quotas);
     if (!cheeky && quotas.cheeky) { quotas.react = (quotas.react || 0) + Math.ceil(quotas.cheeky / 2); quotas.laugh = (quotas.laugh || 0) + Math.floor(quotas.cheeky / 2); delete quotas.cheeky; }
     const out = [];
     Object.keys(quotas).forEach((cat) => {
@@ -281,7 +282,8 @@
       clips = {};
       pcmClips = {};
       els.peek.innerHTML = lines.slice(0, 3).map((l) => "<li>" + escape(l.text) + (l.en ? " <span>" + escape(l.en) + "</span>" : "") + "</li>").join("") + "<li class=\"more\">… and " + (lines.length - 3) + " more</li>";
-      els.intro.querySelector(".voice-count-n").textContent = lines.length;
+      const count = els.intro.querySelector(".voice-count-n");
+      if (count) count.textContent = lines.length;
       els.error.hidden = true;
       show("intro");
     }

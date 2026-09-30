@@ -1697,7 +1697,7 @@
       else if (k === "+" || k === "=") goal.fit = clampFit(goal.fit / 1.25);
       else if (k === "-" || k === "_") goal.fit = clampFit(goal.fit * 1.25);
       else if (k === "r") setInside(!seeInside);
-      else if (k === "n") setNight(!night);
+      else if (k === "n" && !night) setNight(true); // once it's night it stays night
       else if (k === "m") soundBtn.click();
       else if (k === "h") goHome();
       else if (k === "f") findMe();
@@ -4386,19 +4386,23 @@
       : null;
     // Shows the voice step and resolves once they've recorded, skipped or closed it. mode "join" is step 2 of joining;
     // "more" is from the microphone button at the party.
+    // The birthday boy is anyone called FiFi, however they spell it: Fifi, Fefe, Feefee, Fiefie, Phiphi, Fyfy...
+    const isBirthdayBoy = (name) => /^(f|ph)(i|ee|e|ie|y|ea)(f|ph)(i|ee|e|ie|y|ea)$/.test(String(name || "").toLowerCase().replace(/[^a-z]/g, ""));
     function askVoice(mode) {
       return new Promise((resolve) => {
         const have = new Set(Object.keys(myVoice)), cheeky = lsGet("fefe40.cheeky") === "1" || !!(myLook && myLook.cheeky);
         // ten at a time: a set of twenty thinned to its warm-up, every other line of the middle and the birthday finale
-        const full = VOICE.pickSet(myId + ":" + (lsGet("fefe40.voiceRound") || "0"), have, cheeky, 20);
+        const host = isBirthdayBoy(myName);
+        const full = VOICE.pickSet(myId + ":" + (lsGet("fefe40.voiceRound") || "0"), have, cheeky, 20, host);
         const lines = full.length > 10 ? [full[0]].concat(full.slice(1, -1).filter((l, i) => i % 2 === 0).slice(0, 8), full[full.length - 1]) : full;
         if (!lines.length) { resolve(); return; } // they've recorded every line there is
         voiceDone = () => { voiceDone = null; resolve(); };
         voiceUI.open({ lines });
         $("voice-step").hidden = mode !== "join";
-        $("voice-title").textContent = mode === "again" ? "Time for " + lines.length + " more lines!" : have.size ? "Record " + lines.length + " more lines?" : "Now lend us your voice!";
-        $("voice-forget").hidden = !have.size;
-        $("voice-skip").textContent = mode === "join" && have.size ? "Keep my voice" : "Skip";
+        $("voice-title").textContent = host ? (mode === "again" ? lines.length + " more lines for your guests!" : "Happy birthday! Thank your guests") : mode === "again" ? "Time for " + lines.length + " more lines!" : "Record your voice?";
+        $("voice-about").innerHTML = host
+          ? "You're the birthday boy! Read <b><span class=\"voice-count-n\">" + lines.length + "</span> short lines</b> to your guests, one at a time. Your avatar says them at the party."
+          : "Read <b><span class=\"voice-count-n\">" + lines.length + "</span> short lines</b> out loud, one at a time, in your best Swedish accent. Your avatar says them at the party.";
         $("voice-skip").hidden = false;
         voiceForced = false;
         // the party goes quiet while they record, so its sounds don't end up in their clips
@@ -4411,17 +4415,6 @@
         showStep("voice");
       });
     }
-    $("voice-forget").addEventListener("click", () => {
-      Promise.resolve(store.voiceDrop(myId)).catch(() => {});
-      [...clipBufs.keys()].forEach((k) => { if (k.indexOf(myId + "/") === 0) clipBufs.delete(k); });
-      myVoice = {};
-      myVoiceUp.clear();
-      keepMyVoice();
-      if (me) scheduleSave(200);
-      $("voice-forget").hidden = true;
-      $("voice-title").textContent = "Now lend us your voice!";
-      if ($("voice-skip").textContent === "Keep my voice") $("voice-skip").textContent = "Skip";
-    });
     // Every 4 minutes at the party it stops for ten more lines; after the first 4 minutes (the day loop) it's night.
     let voicePlay = 0, voiceAsks = 0, voiceForced = false;
     function voiceClock(dt) {
@@ -4435,7 +4428,7 @@
         voiceForced = false;
         if (voiceUI) voiceUI.close();
         joinEl.hidden = true;
-        if (first && !night) setNight(true);
+        if (first && !night) { setNight(true); lsSet("fefe40.night", "1"); } // and from now on it stays night
       });
     }
     voiceBtn.addEventListener("click", async () => {
@@ -4809,6 +4802,7 @@
     }
     function start(data) {
       data = data || {};
+      if (lsGet("fefe40.night") === "1") setNight(true); // been here past the first 4 minutes: it's night
       if (location.hash === "#wipe-everything") setTimeout(wipeEverything, 500);
       if (typeof data.az === "number") {
         finishBuild();
