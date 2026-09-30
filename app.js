@@ -3605,7 +3605,7 @@
       const roof = buildings.get("pavilion");
       const cut = Math.max(0, Math.min(1, (TV.y + TV.h / 2 - clipPlane.constant) / TV.h)); // share of the screen above the close-up slice
       tv.view = ux * vy - uy * vx > 0 && // facing us
-        Math.hypot(ux, uy) >= (tv.view ? 110 : 120) && // big enough to watch properly (a little slack once on, so it doesn't flicker)
+        Math.hypot(ux, uy) >= (tv.view ? 34 : 40) && // big enough to make out (a little slack once on, so it doesn't flicker)
         mx > 0 && mx < w && my > 0 && my < h && // on screen
         !!roof && roof.fade > 0.5 && // the pavilion roof is off
         buildClock.value > karaoke.land && // the TV has landed after the build-in
@@ -3642,8 +3642,9 @@
         jb.player.loadPlaylist(jbList(), 0);
         jb.player.setLoop(true);
       }
-      // at 70% tops, full across most of the pavilion, fading out beyond it
-      const vol = Math.round(70 * Math.max(0.15, Math.min(1, 1 - (musicDistance() - 12) / 18)));
+      // at 70% tops, full across most of the pavilion, fading slowly beyond it, and quieter the further you zoom out
+      const zoomOut = view.fit > 24 ? Math.max(0.3, 24 / view.fit) : 1;
+      const vol = Math.round(70 * zoomOut * Math.max(0.12, Math.min(1, 1 - (musicDistance() - 12) / 40)));
       if (vol !== jb.vol) { jb.vol = vol; jb.player.setVolume(vol); }
       if (jb.playing) jb.stuck = 0;
       else if (!jb.blocked) {
