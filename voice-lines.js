@@ -237,6 +237,8 @@ window.FefeVoiceLines = {
     { id: "x5", cat: "cheeky", text: "Stör ej!", en: "Do not disturb!", hint: "stur ay", kind: "say", dur: 0.8, cheeky: true },
     { id: "x6", cat: "cheeky", text: "Hallå där, snygging!", en: "Hello there, gorgeous!", hint: "hah-LOH dair, SNEWG-ing", kind: "say", dur: 1.3, cheeky: true, note: "smooth voice" },
     { id: "x7", cat: "cheeky", text: "Ska vi mysa?", en: "Shall we cuddle up?", hint: "skah vee MEW-sah", kind: "say", dur: 1.0, cheeky: true },
-    { id: "x8", cat: "cheeky", text: "We love pussy!", note: "FiFi's other meaning", kind: "say", dur: 1.1, cheeky: true }
+    { id: "x8", cat: "cheeky", text: "We love pussy!", note: "FiFi's other meaning", kind: "say", dur: 1.1, cheeky: true },
+    { id: "x9", cat: "cheeky", text: "We love Fita!", kind: "say", dur: 1.1, cheeky: true },
+    { id: "x10", cat: "cheeky", text: "Fita is the man!", kind: "say", dur: 1.2, cheeky: true }
   ]
 };
