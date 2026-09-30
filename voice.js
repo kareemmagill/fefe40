@@ -292,6 +292,7 @@
       } catch (e) {
         els.error.textContent = e && e.name === "NotAllowedError" ? "The microphone wasn't allowed. You can allow it in your browser settings, or skip this." : "No microphone here. You can skip this.";
         els.error.hidden = false;
+        els.skip.hidden = false; // no microphone: there has to be a way out
         return;
       }
       const todo = which || lines;

@@ -3588,6 +3588,7 @@
       dismissHint();
     }
     function closeJoin() {
+      if (voiceForced && !stepVoice.hidden) return; // the 4-minute lines have to be read
       joinEl.hidden = true;
       stopCamera();
       stopPreview();
@@ -4049,7 +4050,9 @@
         $("voice-step").hidden = mode !== "join";
         $("voice-title").textContent = mode === "again" ? "Time for " + lines.length + " more lines!" : have.size ? "Record " + lines.length + " more lines?" : "Now lend us your voice!";
         $("voice-forget").hidden = !have.size;
-        $("voice-skip").textContent = mode === "join" ? (have.size ? "Keep my voice" : "Skip") : mode === "again" ? "Not now" : "Close";
+        $("voice-skip").textContent = mode === "join" ? (have.size ? "Keep my voice" : "Skip") : "Close";
+        $("voice-skip").hidden = mode === "again"; // every 4 minutes it isn't optional (unless the microphone won't work)
+        voiceForced = mode === "again";
         $("voice-done").textContent = mode === "join" ? "Save and pick my outfit" : "Save my voice";
         showStep("voice");
       });
@@ -4066,7 +4069,7 @@
       if ($("voice-skip").textContent === "Keep my voice") $("voice-skip").textContent = "Skip";
     });
     // Every 4 minutes at the party it stops for ten more lines; after the first 4 minutes (the day loop) it's night.
-    let voicePlay = 0, voiceAsks = 0;
+    let voicePlay = 0, voiceAsks = 0, voiceForced = false;
     function voiceClock(dt) {
       if (!me || !voiceUI || !joinEl.hidden || document.visibilityState === "hidden") return;
       voicePlay += dt;
@@ -4075,6 +4078,7 @@
       const first = voiceAsks === 1;
       joinEl.hidden = false;
       askVoice("again").then(() => {
+        voiceForced = false;
         if (voiceUI) voiceUI.close();
         joinEl.hidden = true;
         if (first && !night) setNight(true);
