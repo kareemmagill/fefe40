@@ -1977,8 +1977,12 @@
         me.y = c.y;
         me.moving = false;
         me.idleT = 0;
-        placeDriver();
-        tickRecording(dt, false);
+        placeDriver(me, c, drive.steer);
+        const moving = Math.abs(c.speed) > 0.2;
+        tickRecording(dt, moving);
+        // the drive goes into the loop too: a node every few metres, and wherever the car comes to a stop
+        const last = rec && rec.nodes[rec.nodes.length - 1], cx = Math.floor(c.x), cz = Math.floor(c.z);
+        if (last && (Math.abs(cx - last[1]) + Math.abs(cz - last[2]) >= 3 || (!moving && (cx !== last[1] || cz !== last[2] || last[4] !== hdg64(c.h))))) recHere();
         if (follow) { goal.target.set(c.x + OX, c.y + 1, c.z + OZ); clampTarget(goal.target); }
         heartbeat(performance.now());
         updateWardrobe();
@@ -2016,11 +2020,11 @@
     function nightChanged() {
       if (me && recs) {
         const x = Math.floor(me.x), z = Math.floor(me.z), mode = night ? "night" : "day";
-        recNode(x, z);
+        recHere();
         if (!recs[mode]) recs[mode] = newRec(x, z);
         rec = recs[mode];
         rec.idle = 0;
-        recNode(x, z);
+        recHere();
         scheduleSave(800);
         lastBeat = 0; // tell everyone straight away which time of day we're live in
       }
@@ -2037,12 +2041,21 @@
         if (rec.idle >= IDLE_MAX) scheduleSave(500); // keep the whole standstill in the shared loop
       }
     }
-    function recNode(x, z) {
+    // A node is [time, x, z], or [time, x, z, car, heading] while driving: car is its number from 1 and heading
+    // is in 64ths of a turn.
+    function recNode(x, z, car, h) {
       if (!rec || rec.nodes.length >= 1500) return;
       const last = rec.nodes[rec.nodes.length - 1];
       const t = Math.max(last[0], Math.round(rec.clock * 10));
-      if (last[0] === t && last[1] === x && last[2] === z) return;
-      rec.nodes.push([t, x, z]);
+      if (last[0] === t && last[1] === x && last[2] === z && (last[3] || 0) === (car || 0) && (last[4] || 0) === (h || 0)) return;
+      rec.nodes.push(car ? [t, x, z, car, h] : [t, x, z]);
+    }
+    const hdg64 = (h) => ((Math.round((h / (2 * Math.PI)) * 64) % 64) + 64) % 64;
+    // where I am right now: in my car if I'm driving
+    function recHere() {
+      const c = me.inCar;
+      if (c) recNode(Math.floor(c.x), Math.floor(c.z), c.idx + 1, hdg64(c.h));
+      else recNode(Math.floor(me.x), Math.floor(me.z));
     }
 
     // ---------- sharing ----------
@@ -2100,7 +2113,7 @@
     // the recorded nodes, plus the time spent standing at the last one so the loop lingers there too
     function trackOf(r) {
       const nodes = r.nodes.slice(), end = nodes[nodes.length - 1], t = Math.round(r.clock * 10);
-      if (!myPath.length && t > end[0]) nodes.push([t, end[1], end[2]]);
+      if (!myPath.length && t > end[0]) nodes.push([t].concat(end.slice(1)));
       return nodes.map((n) => n.join(",")).join(";");
     }
     function saveMe(leaving) {
@@ -2149,10 +2162,11 @@
         const nodes = [];
         if (typeof track !== "string" || track.length > 30000) return nodes;
         track.split(";").slice(0, 1500).forEach((part) => {
-          const [t, x, z] = part.split(",").map(Number);
-          if (![t, x, z].every(Number.isFinite) || !inMap(x, z) || heightAt(x, z) === NONE) return;
+          const [t, x, z, c, h] = part.split(",").map(Number);
+          const car = Number.isInteger(c) && c >= 1 && c <= carList.length ? c : 0;
+          if (![t, x, z].every(Number.isFinite) || !inMap(x, z) || (!car && heightAt(x, z) === NONE)) return;
           if (nodes.length && t < nodes[nodes.length - 1][0]) return;
-          nodes.push([t, x | 0, z | 0]);
+          nodes.push(car ? [t, x | 0, z | 0, car, Number.isFinite(h) ? (((h | 0) % 64) + 64) % 64 : 0] : [t, x | 0, z | 0]);
         });
         return nodes;
       };
@@ -2166,9 +2180,14 @@
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
+    function dropGhost(id, g) {
+      leaveCar(g);
+      removeActor(g.actor);
+      ghosts.delete(id);
+    }
     function upsertGhost(id, clean, at) {
       let g = ghosts.get(id);
-      if (g && g.key !== clean.key) { removeActor(g.actor); ghosts.delete(id); g = null; }
+      if (g && g.key !== clean.key) { dropGhost(id, g); g = null; }
       const day = clean.nodes.length ? clean.nodes : clean.nodesN.length ? clean.nodesN : [[0, SPAWN[0][0], SPAWN[0][1]]];
       if (!g) {
         const actor = makeActor(clean.name, clean.look, false, id);
@@ -2209,6 +2228,27 @@
       const a = g.actor, now = liveMap[id];
       if (liveHere(id)) {
         const cell = now.x + "," + now.z;
+        if (now.c) { // driving right now: their car heads for the latest spot they sent
+          if (!g.live) { g.live = true; a.tag.classList.add("live"); a.drop = 0; }
+          const c = rideCar(g, now.c - 1, now.x + 0.5, now.z + 0.5, now.h);
+          if (!c) return;
+          const dx = now.x + 0.5 - c.x, dz = now.z + 0.5 - c.z, d = Math.hypot(dx, dz);
+          const step = Math.min(d, Math.min(12, 2 + d * 0.9) * dt);
+          const h = d > 1.5 ? Math.atan2(dx, dz) : (now.h / 64) * 2 * Math.PI;
+          if (d > 1e-3) { c.x += (dx / d) * step; c.z += (dz / d) * step; }
+          c.h += Math.atan2(Math.sin(h - c.h), Math.cos(h - c.h)) * Math.min(1, dt * 4);
+          seatDriver(g, c, dt, d > 0.3);
+          g.cell = "";
+          return;
+        }
+        if (g.car) { // out of the car again: they climb out where they are now
+          leaveCar(g);
+          a.x = now.x + 0.5;
+          a.z = now.z + 0.5;
+          a.y = worldY(now.x, now.z);
+          g.path = [];
+          g.cell = cell;
+        }
         if (!g.live) {
           g.live = true;
           a.tag.classList.add("live");
@@ -2236,21 +2276,40 @@
         a.tag.classList.remove("live");
         g.t = 0;
         g.i = 0;
+        leaveCar(g);
         a.drop = 12;
         a.dropV = 0;
       }
       const n = g.nodes;
       g.t += dt;
-      if (g.t >= g.dur) { g.t = 0; g.i = 0; a.drop = 12; a.dropV = 0; }
+      if (g.t >= g.dur) { g.t = 0; g.i = 0; leaveCar(g); a.drop = 12; a.dropV = 0; }
       const t10 = g.t * 10;
       if (g.i >= n.length || n[g.i][0] > t10) g.i = 0;
       while (g.i < n.length - 1 && n[g.i + 1][0] <= t10) {
         g.i++;
-        // a jump in the track (they flipped day and night somewhere else) replays as a fresh drop-in
+        // a jump in the track (they flipped day and night somewhere else) replays as a fresh drop-in; getting
+        // into a car or out of one doesn't
         const p0 = n[g.i - 1], p1 = n[g.i];
-        if (Math.abs(p1[1] - p0[1]) > 1 || Math.abs(p1[2] - p0[2]) > 1) { a.drop = 12; a.dropV = 0; }
+        if (!p0[3] && !p1[3] && (Math.abs(p1[1] - p0[1]) > 1 || Math.abs(p1[2] - p0[2]) > 1)) { a.drop = 12; a.dropV = 0; }
       }
       const p = n[g.i], q = n[Math.min(g.i + 1, n.length - 1)];
+      if (p[3]) { // driving: the car follows the recorded route, turning the way they turned
+        const f = q !== p && q[3] === p[3] ? Math.min(1, Math.max(0, (t10 - p[0]) / Math.max(1, q[0] - p[0]))) : 0;
+        const h0 = (p[4] / 64) * 2 * Math.PI, h1 = f ? (q[4] / 64) * 2 * Math.PI : h0;
+        const x = p[1] + 0.5 + (f ? (q[1] - p[1]) * f : 0), z = p[2] + 0.5 + (f ? (q[2] - p[2]) * f : 0);
+        const c = rideCar(g, p[3] - 1, x, z, p[4]);
+        if (c) {
+          c.x = x;
+          c.z = z;
+          c.h = h0 + Math.atan2(Math.sin(h1 - h0), Math.cos(h1 - h0)) * f;
+          seatDriver(g, c, dt, f > 0 && f < 1 && (q[1] !== p[1] || q[2] !== p[2]));
+          return;
+        }
+      } else if (g.car) {
+        const c = g.car;
+        leaveCar(g);
+        poof(c.x, c.y, c.z);
+      }
       let moving = false, heading;
       if (q !== p && (q[1] !== p[1] || q[2] !== p[2])) {
         const f = Math.min(1, Math.max(0, (t10 - p[0]) / Math.max(1, q[0] - p[0])));
@@ -2264,6 +2323,72 @@
       }
       poseActor(a, dt, moving, heading);
     }
+    // A replay (or a live guest) driving takes the real car if nobody else has it, so the car ends up wherever they
+    // leave it; otherwise they get a copy of it that only exists for the ride.
+    function rideCar(g, idx, x, z, h64) {
+      const real = carList[idx];
+      if (!real || !real.g.visible) return null; // cars haven't been built in yet
+      let c = g.car;
+      if (c && c.idx === idx && (c.clone || drive.car !== real)) return c;
+      leaveCar(g);
+      if (drive.car !== real && !real.rider) {
+        c = real;
+        c.rider = g;
+        c.speed = c.vx = c.vz = 0;
+        if (Math.hypot(c.x - x, c.z - z) > 2.5) { // it's somewhere else: drop it in at their route
+          c.x = x;
+          c.z = z;
+          c.h = (h64 / 64) * 2 * Math.PI;
+          c.drop = 8;
+          c.dropV = 0;
+        }
+      } else {
+        c = buildCar(CAR_SPECS[idx], idx);
+        c.clone = true;
+        c.x = x;
+        c.z = z;
+        c.h = (h64 / 64) * 2 * Math.PI;
+        const gy = carGround(x, z);
+        c.y = gy === null ? 1 : gy;
+      }
+      c.top.forEach((m) => { m.visible = false; });
+      g.car = c;
+      g.actor.inCar = c;
+      g.actor.blendX = g.actor.blendZ = 0;
+      return c;
+    }
+    function leaveCar(g) {
+      const c = g.car;
+      if (!c) return;
+      g.car = null;
+      g.actor.inCar = null;
+      if (c.clone) scene.remove(c.g);
+      else {
+        c.rider = null;
+        c.speed = c.vx = c.vz = 0;
+        c.top.forEach((m) => { m.visible = true; });
+      }
+    }
+    // the car where the ride has put it, and the guest at the wheel
+    function seatDriver(g, c, dt, moving) {
+      const a = g.actor, gy = carGround(c.x, c.z);
+      if (gy !== null) c.y += (gy - c.y) * Math.min(1, dt * 10);
+      if (c.clone) carDrop(c, dt);
+      const lastH = c.lastH === undefined ? c.h : c.lastH, turn = Math.atan2(Math.sin(c.h - lastH), Math.cos(c.h - lastH)) / Math.max(dt, 1e-3);
+      c.lastH = c.h;
+      c.steer = (c.steer || 0) + (Math.max(-1, Math.min(1, turn)) - (c.steer || 0)) * Math.min(1, dt * 6);
+      const bump = moving ? Math.sin(performance.now() / 1000 * 23) * 0.015 : 0;
+      c.g.position.set(c.x + OX, c.y + c.drop + bump, c.z + OZ);
+      c.g.rotation.set(0, c.h, (c.dmg % 2 ? 1 : -1) * c.dmg * 0.012);
+      a.x = c.x;
+      a.z = c.z;
+      a.y = c.y;
+      a.drop = 0;
+      a.moving = false;
+      a.idleT = 0;
+      placeDriver(a, c, c.steer);
+      if (moving && Math.random() < dt * 0.1) sfx("engine", c.x, c.z, { pitch: 1.1 });
+    }
     // Live guests send a heartbeat with their current cell: every couple of seconds while moving, every 8 s when still.
     const LIVE_MS = 20000;
     let liveMap = {}, lastBeat = 0, lastBeatCell = "";
@@ -2276,7 +2401,9 @@
       if (now - lastBeat < 1500 || (cell === lastBeatCell && now - lastBeat < 8000)) return;
       lastBeat = now;
       lastBeatCell = cell;
-      Promise.resolve(store.beat(myId, { t: Date.now(), x, z, n: night ? 1 : 0 })).catch(() => {});
+      const beat = { t: Date.now(), x, z, n: night ? 1 : 0 };
+      if (me.inCar) { beat.c = me.inCar.idx + 1; beat.h = hdg64(me.inCar.h); } // which car they're driving, and which way
+      Promise.resolve(store.beat(myId, beat)).catch(() => {});
     }
     let polling = false;
     async function pollLive() {
@@ -2289,7 +2416,8 @@
           const l = data[id];
           if (!ID_RE.test(id) || !l || typeof l !== "object") return;
           const t = +l.t, x = Math.floor(+l.x), z = Math.floor(+l.z);
-          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0 };
+          const c = l.c | 0;
+          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64 };
         });
         liveMap = clean;
         if (Object.keys(clean).some((id) => id !== myId && liveHere(id) && !ghosts.has(id))) syncGuests();
@@ -2347,7 +2475,7 @@
         const at = (id) => +idx[id] || 0;
         const ids = Object.keys(idx).filter((id) => ID_RE.test(id) && id !== myId).sort((a, b) => at(b) - at(a)).slice(0, MAX_GHOSTS);
         const keep = new Set(ids);
-        ghosts.forEach((g, id) => { if (!keep.has(id) && !g.npc) { removeActor(g.actor); ghosts.delete(id); } });
+        ghosts.forEach((g, id) => { if (!keep.has(id) && !g.npc) dropGhost(id, g); });
         const stale = ids.filter((id) => !ghosts.has(id) || ghosts.get(id).at !== at(id));
         for (let i = 0; i < stale.length; i += 6) {
           await Promise.all(stale.slice(i, i + 6).map(async (id) => {
@@ -2548,7 +2676,7 @@
     const carMat = (c, kind) => carMats[c + kind] || (carMats[c + kind] = kind === "glow" ? new T.MeshBasicMaterial({ color: c })
       : new T.MeshLambertMaterial({ color: c, transparent: kind === "clear", opacity: kind === "clear" ? 0.5 : 1 }));
     const carBox = new T.BoxGeometry(1, 1, 1);
-    carList = CAR_SPECS.map((sp) => {
+    function buildCar(sp, idx) {
       const g = new T.Group(), top = [], glass = [];
       sp.parts.forEach(([x, y, z, w, h, d, color, kind]) => {
         const m = new T.Mesh(carBox, carMat(color, kind));
@@ -2559,17 +2687,17 @@
         if (y >= 0.95) top.push(m); // cabin glass and roof: hidden while someone drives, so it's a convertible
         if (kind === "clear") glass.push(m);
       });
-      g.visible = false;
       scene.add(g);
-      return { g, top, glass, x: sp.x, z: sp.z, h: 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
-    });
+      return { g, top, glass, idx, x: sp.x, z: sp.z, h: 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
+    }
+    carList = CAR_SPECS.map((sp, i) => { const c = buildCar(sp, i); c.g.visible = false; return c; });
     // steamy car: fogged windows and a rocking body while Cheeky guests are inside (see actions.js)
     const fogGlass = new T.MeshLambertMaterial({ color: 0xf2f5f8, transparent: true, opacity: 0.92 });
     let steamyCars = [];
     function nearestParkedCar(x, z) {
       let best = null, bd = 7;
       carList.forEach((c) => {
-        if (c === drive.car || c.drop > 0 || !c.g.visible || Math.abs(c.speed) > 0.2) return;
+        if (c === drive.car || c.rider || c.drop > 0 || !c.g.visible || Math.abs(c.speed) > 0.2) return;
         const d = Math.hypot(c.x - x, c.z - z);
         if (d < bd) { bd = d; best = c; }
       });
@@ -2600,7 +2728,7 @@
         }
         for (let j = 0; j < actorList.length; j++) {
           const a = actorList[j];
-          if (a === me || a.inCar || a.drop > 0) continue;
+          if (a === me || a.inCar || a.drop > 0 || a.hiddenAct) continue;
           if (Math.hypot(a.x - px, a.z - pz) < 0.45) return { what: "person", px, pz };
         }
       }
@@ -2633,10 +2761,17 @@
         o.dmg = Math.min(8, o.dmg + 1);
       }
     }
+    function carDrop(c, dt) {
+      if (!(c.drop > 0)) return;
+      c.dropV = (c.dropV || 0) + 30 * dt;
+      c.drop = Math.max(0, c.drop - c.dropV * dt);
+      if (c.drop === 0) { c.dropV = 0; poof(c.x, c.y, c.z); }
+    }
     function updateCars(dt, t) {
       carList.forEach((c) => {
         if (!c.g.visible) return;
-        if (c.drop > 0) { c.dropV = (c.dropV || 0) + 30 * dt; c.drop = Math.max(0, c.drop - c.dropV * dt); if (c.drop === 0) { c.dropV = 0; poof(c.x, c.y, c.z); } }
+        carDrop(c, dt);
+        if (c.rider) return; // a guest's replay is driving it (see rideCar)
         const driving = c === drive.car;
         let acc = 0;
         if (driving) {
@@ -2679,16 +2814,16 @@
       drive.shake = Math.max(0, drive.shake - dt * 1.6);
     }
     // the driver sits behind the wheel, hands on it
-    function placeDriver() {
-      const c = me.inCar, av = me.av, cs = Math.cos(c.h), sn = Math.sin(c.h), lx = -0.42, lz = c.l > 5 ? 1.6 : 0.2;
+    function placeDriver(a, c, steer) {
+      const av = a.av, cs = Math.cos(c.h), sn = Math.sin(c.h), lx = -0.42, lz = c.l > 5 ? 1.6 : 0.2;
       av.setPose(0, false);
       av.root.position.set(c.x + lx * cs + lz * sn + OX, c.y + c.drop, c.z - lx * sn + lz * cs + OZ);
       av.root.rotation.y = c.h;
       av.rig.position.y = 0.42 - 0.825 * (av.scale || 1);
       av.parts.legR.rotation.set(-Math.PI / 2, 0, 0.05);
       av.parts.legL.rotation.set(-Math.PI / 2, 0, -0.05);
-      av.parts.armR.rotation.set(-1.25, 0, 0.25 + drive.steer * 0.15);
-      av.parts.armL.rotation.set(-1.25, 0, -0.25 + drive.steer * 0.15);
+      av.parts.armR.rotation.set(-1.25, 0, 0.25 + steer * 0.15);
+      av.parts.armL.rotation.set(-1.25, 0, -0.25 + steer * 0.15);
     }
     function carFromTap(cx, cy) {
       setRay(cx, cy);
@@ -2705,8 +2840,11 @@
     function enterCar(c) {
       pendingCar = null;
       myPath = [];
+      if (c.rider) leaveCar(c.rider); // take it off a guest's replay: they carry on in a copy
       recNode(Math.floor(me.x), Math.floor(me.z));
       me.inCar = c;
+      recHere(); // the replay hops in here
+      lastBeat = 0;
       me.blendX = me.blendZ = 0;
       drive.car = c;
       drive.gas = drive.steer = 0;
@@ -2719,10 +2857,12 @@
     function getOut() {
       const c = drive.car;
       if (!c || !me) return;
+      recHere(); // where the car was left
       c.top.forEach((m) => { m.visible = true; });
       drive.car = null;
       drive.gas = drive.steer = 0;
       me.inCar = null;
+      lastBeat = 0;
       const side = [c.x - Math.cos(c.h) * (c.w / 2 + 0.6), c.z + Math.sin(c.h) * (c.w / 2 + 0.6)];
       const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1])) || nearestReachable(Math.floor(c.x), Math.floor(c.z)) || SPAWN[0];
       me.x = at[0] + 0.5;
@@ -2730,7 +2870,7 @@
       me.y = worldY(at[0], at[1]);
       me.blendX = me.blendZ = 0;
       poof(me.x, me.y, me.z);
-      recNode(at[0], at[1]); // the replay jumps here with a fresh drop-in
+      recNode(at[0], at[1]); // and the replay climbs out here
       scheduleSave(800);
       driveEl.hidden = true;
       document.body.classList.remove("driving");
@@ -3518,13 +3658,14 @@
       clampTarget(goal.target);
     }
     findBtn.addEventListener("click", findMe);
-    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, dayNodes: recs && recs.day ? recs.day.nodes.length : 0, nightNodes: recs && recs.night ? recs.night.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
+    window.fefeDebug = { me: () => me && { x: me.x, z: me.z, y: me.y, drop: me.drop, walking: myPath.length > 0, nodes: rec ? rec.nodes.length : 0, dayNodes: recs && recs.day ? recs.day.nodes.length : 0, nightNodes: recs && recs.night ? recs.night.nodes.length : 0, outfit: myLook.outfit }, ghosts: () => ghosts.size, ghostPos: () => [...ghosts.values()].map((g) => [+g.actor.x.toFixed(2), +g.actor.z.toFixed(2), g.nodes.length, !!g.live, g.car ? (g.car.clone ? "copy" : "car") + g.car.idx : ""]), height: heightAt, reach: (x, z) => !!reach[cellIdx(x, z)],
       acts: () => actorList.map((a) => [a.name, party ? party.actOf(a) : null]),
       trees: () => TREES.map((t) => [t.x, t.z, t.palm, nearestReachable(Math.floor(t.x), Math.floor(t.z))]),
       speeds: () => actorList.map((a) => [a.name, a.speedMul || 1]),
       cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car, !!c.fogged, +c.g.rotation.z.toFixed(3), +c.g.position.y.toFixed(3)]),
       holds: () => actorList.map((a) => [a.name, a.av.holding(), !!a.hiddenAct]),
       goCar: (i) => goToCar(carList[i]),
+      carScreen: (i) => { const c = carList[i], v = new T.Vector3(c.x + OX, c.y + 1, c.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
 
