@@ -3542,7 +3542,8 @@
     })();
     // Music left on for three hours with nobody touching the decks goes off by itself.
     function djFromServer(d) {
-      if (Date.now() - dj.mine < 4000) return;
+      const t = d && Number.isFinite(+d.t) ? +d.t : 0;
+      if (dj.mine && t < dj.mine - 2000) return; // older than my own tap: a check that crossed with it on a slow line
       const on = !!(d && d.on === true && Number.isFinite(+d.t) && Date.now() - +d.t < 3 * 3600 * 1000);
       setDj(on);
     }
@@ -3559,7 +3560,7 @@
     // 1 zoomed in, down to 0.15 fully zoomed out
     const zoomFade = () => Math.max(0.15, Math.min(1, 1 - (view.fit - 16) / 60));
     // the booth with its speakers, as a box to hit (it's made of props, which voxel picking doesn't see)
-    const deckBox = new T.Box3(new T.Vector3(44 + OX, 1, 24.9 + OZ), new T.Vector3(50 + OX, 2.6, 26.1 + OZ)), deckHit = new T.Vector3();
+    const deckBox = new T.Box3(new T.Vector3(43.8 + OX, 1, 24.8 + OZ), new T.Vector3(50.2 + OX, 3.1, 26.4 + OZ)), deckHit = new T.Vector3(); // speakers too
     function tapDecks(cx, cy) {
       setRay(cx, cy);
       if (!raycaster.ray.intersectBox(deckBox, deckHit)) return false;
@@ -4754,6 +4755,11 @@
       if (snd && snd.enabled) {
         snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
         snd.setEngine(!!(me && me.inCar), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);
+        // which music should be on, every frame: the sound engine forgets it whenever sound is switched off for a
+        // moment (a voice recording, say), and the DJ has to come back afterwards
+        if (dj.on) snd.setMusic(true, DANCE_CENTER[0], DANCE_CENTER[1], true);
+        else if (choir.on) snd.setMusic(true, LOUNGE[0], LOUNGE[1], false);
+        else snd.setMusic(false);
         // a bedroom scene nearby: the slow jam, from the nearest one
         let loveAt = null, loveD = Infinity;
         loveRooms.forEach((i) => { const l = bedLights[i]; if (!l) return; const d = me ? Math.hypot(l.position.x - OX - me.x, l.position.z - OZ - me.z) : Infinity; if (d < loveD) { loveD = d; loveAt = l.position; } });
