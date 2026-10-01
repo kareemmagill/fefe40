@@ -3226,21 +3226,23 @@
     }
 
     // ---------- the oompah band ----------
-    // Every three minutes a German oompah band marches in at the gate, round the party and back out the way it came:
-    // the singer in a dirndl carrying the German flag, two trumpets, an accordion, a tuba and the big drum, in lederhosen
-    // and dirndls. It runs on the party clock, so every phone sees and hears them at the same spot; nothing is saved.
-    const BAND_EVERY = 180, BAND_SPEED = 1.3;
-    const BAND_ROUTE = [[30, 58], [30, 46], [33, 39], [45, 38], [47, 32], [52, 28], [61, 28], [58, 37], [57, 46], [45, 47], [33, 52], [30, 58]];
+    // Every minute a German oompah band marches in at the gate, across the dance floor to the pool and back out: the
+    // singer in a dirndl carrying the German flag, two trumpets, an accordion, a tuba, the big drum and a beer maid with
+    // an armful of steins, in lederhosen and dirndls. Everyone they pass gets a beer. It runs on the party clock, so
+    // every phone sees and hears them at the same spot; nothing is saved.
+    const BAND_EVERY = 60, BAND_SPEED = 1.65;
+    const BAND_ROUTE = [[30, 58], [30, 46], [33, 39], [45, 38], [47, 32], [52, 28], [49, 38], [40, 46], [33, 52], [30, 58]];
     const BAND = [
       { kit: "flag", s: 0, side: 0, look: { body: "f", outfit: FefeAvatar.dirndl("#1C1C1C", "#B3202A", "#F2C230"), skin: "#F0C8A8", hair: "#D9B060", h: 168 } },
       { kit: "trumpet", s: 1.7, side: -0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#C8302C"), skin: "#E8C4A0", hair: "#6B4A2E" } },
       { kit: "trumpet", s: 1.7, side: 0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#2F6FB5"), skin: "#D9A57E", hair: "#2B1B12" } },
       { kit: "accordion", s: 3.4, side: -0.55, look: { body: "f", outfit: FefeAvatar.dirndl("#2F5233", "#1F3C66", "#9FC5E8"), skin: "#E8C4A0", hair: "#7A4A22" } },
       { kit: "tuba", s: 3.4, side: 0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#3E8E41"), skin: "#E8C4A0", hair: "#B5651D", wt: 112 } },
-      { kit: "drum", s: 5.1, side: 0, look: { body: "m", outfit: FefeAvatar.lederhosen("#C8302C"), skin: "#B97A56", hair: "#1A1A1A", wt: 95 } }
+      { kit: "drum", s: 5.1, side: -0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#C8302C"), skin: "#B97A56", hair: "#1A1A1A", wt: 95 } },
+      { kit: "beer", s: 5.1, side: 0.55, look: { body: "f", outfit: FefeAvatar.dirndl("#B3202A", "#2B2B2B", "#F4F4F0"), skin: "#F0C8A8", hair: "#E3C16F" } }
     ];
-    const KIT = { flag: { R: "deflag" }, trumpet: { head: "trumpet" }, accordion: { body: "accordion" }, tuba: { body: "tuba" }, drum: { body: "bassdrum", R: "mallet" } };
-    const band = { route: null, len: 0, on: false, shift: 0, noteAt: 0, x: 0, z: 0 };
+    const KIT = { flag: { R: "deflag" }, trumpet: { head: "trumpet" }, accordion: { body: "accordion" }, tuba: { body: "tuba" }, drum: { body: "bassdrum", R: "mallet" }, beer: { body: "steins" } };
+    const band = { route: null, len: 0, on: false, shift: 0, noteAt: 0, boomAt: 0, x: 0, z: 0, served: new WeakMap() };
     // the route as a smoothed line through walkable cells, with distances along it
     function bandRoute() {
       let pts = [];
@@ -3312,7 +3314,8 @@
         else if (m.kit === "trumpet") { P.armR.rotation.set(-1.75, 0, 0.32); P.armL.rotation.set(-1.75, 0, -0.32); P.head.rotation.x = -0.1 - 0.06 * Math.abs(Math.sin(phase)); }
         else if (m.kit === "accordion") { const sq = 0.16 + 0.07 * Math.sin(phase / 2); P.armR.rotation.set(-0.7, 0, sq); P.armL.rotation.set(-0.7, 0, -sq); }
         else if (m.kit === "tuba") { P.armR.rotation.set(-0.6, 0, 0.3); P.armL.rotation.set(-0.6, 0, -0.3); }
-        else if (m.kit === "drum") { P.armL.rotation.set(-0.55, 0, -0.25); P.armR.rotation.set(-0.45 - 0.6 * (t % 1), 0, 0.35); }
+        else if (m.kit === "drum") { P.armL.rotation.set(-0.55, 0, -0.25); P.armR.rotation.set(-0.45 - 0.6 * ((t * 2) % 1), 0, 0.35); } // a boom every beat
+        else if (m.kit === "beer") { P.armR.rotation.set(-0.5, 0, 0.1); P.armL.rotation.set(-0.5, 0, -0.1); }
         m.x = x; m.z = z;
         cx += x; cz += z; n++;
       });
@@ -3323,7 +3326,24 @@
         band.noteAt = t;
         party.fx.icon("note", singer.x, singer.y + 2.9, singer.z, { size: 0.35, vy: 1 });
       }
-      if (n === 0) band.noteAt = 0;
+      if (n === 0) { band.noteAt = 0; band.boomAt = 0; }
+      const drummer = BAND[5];
+      if (party && drummer.av.root.visible && t - band.boomAt >= 2) {
+        band.boomAt = Math.floor(t / 2) * 2;
+        party.fx.icon("boom", drummer.x, drummer.y + 2.7, drummer.z, { size: 0.45, vy: 0.9, life: 0.9, max: 0.9 });
+      }
+      // a beer for everyone they pass, once a lap, handed over by the beer maid
+      const maid = BAND[6], lap = Math.floor(((Date.now() - PARTY_EPOCH) / 1000 + band.shift) / BAND_EVERY);
+      if (party && n > 0) actorList.forEach((a) => {
+        if (a.drop > 0 || a.inCar || !a.av.root.visible || band.served.get(a) === lap) return;
+        if (!BAND.some((m) => m.av.root.visible && Math.hypot(m.x - a.x, m.z - a.z) < 2.2)) return;
+        band.served.set(a, lap);
+        if (!party.giveBeer(a)) return;
+        const from = maid.av.root.visible ? maid : BAND.find((m) => m.av.root.visible);
+        party.fx.arc("#E8A317", [from.x, from.y + 1.2, from.z], [a.x, a.y + 1.3, a.z], 0.55, 1.1, 0.22);
+        party.fx.icon("beer", a.x, a.y + 2.7, a.z, { size: 0.4, vy: 0.9 });
+        if (!voiceSay(a, ["cheers"], a.x, a.z, 0.8)) sfx("clink", a.x, a.z);
+      });
       if (snd && snd.enabled) snd.setBand(n > 0, band.x, band.z, t);
     }
 
@@ -5194,7 +5214,7 @@
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
     window.fefeDebug.tv = tvState;
-    window.fefeDebug.band = () => ({ on: band.on, t: +bandClock().toFixed(2), len: +band.len.toFixed(1), at: [+band.x.toFixed(2), +band.z.toFixed(2)], shown: BAND.filter((m) => m.av && m.av.root.visible).length });
+    window.fefeDebug.band = () => ({ on: band.on, t: +bandClock().toFixed(2), len: +band.len.toFixed(1), at: [+band.x.toFixed(2), +band.z.toFixed(2)], shown: BAND.filter((m) => m.av && m.av.root.visible).length, beers: actorList.filter((a) => a.av.holding().R === "stein").length });
     window.fefeDebug.bandAt = (sec) => { band.shift = 0; band.shift = sec - bandClock(); };
 
     // test hooks for clothes: walk me somewhere, who's wearing what (and how many looks they keep), the piles, where a

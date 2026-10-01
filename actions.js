@@ -67,16 +67,33 @@
     sock: ["#FFFFFF", [".###....", ".###....", ".###....", ".####...", ".######.", ".######."]],
     blush: ["#FF8FB1", ["........", "##....##", "##....##", "........"]],
     flash: ["#FFFFFF", ["#..#..#.", ".#.#.#..", "..###...", "#######.", "..###...", ".#.#.#..", "#..#..#."]],
-    puff: ["#E6E6E6", ["..###...", ".#####..", "#######.", "#######.", ".#####..", "..###..."]]
+    puff: ["#E6E6E6", ["..###...", ".#####..", "#######.", "#######.", ".#####..", "..###..."]],
+    beer: ["#FFC02E", [".###....", "#####...", "####.##.", "####..#.", "####.##.", "####...."]]
   };
-  const WIDE = { dnd: 2.6, censored: 2.6 }; // text signs are wider than tall
+  const WIDE = { dnd: 2.6, censored: 2.6, boom: 2.6 }; // text signs are wider than tall
   function makeFx(T, scene, OX, OZ) {
     const texCache = {}, matCache = {};
     function iconTex(type) {
       if (texCache[type]) return texCache[type];
       const c = document.createElement("canvas");
       let tex;
-      if (type === "dnd" || type === "censored") {
+      if (type === "boom") { // the big drum: a comic-book BOOM!
+        c.width = 128;
+        c.height = 48;
+        const g = c.getContext("2d");
+        g.fillStyle = "#FFD400";
+        g.beginPath();
+        for (let i = 0; i < 20; i++) {
+          const ang = (i / 20) * Math.PI * 2, r = i % 2 ? 0.62 : 1;
+          g.lineTo(64 + Math.cos(ang) * 62 * r, 24 + Math.sin(ang) * 23 * r);
+        }
+        g.fill();
+        g.fillStyle = "#D7141A";
+        g.font = "900 24px sans-serif";
+        g.textAlign = "center";
+        g.fillText("BOOM!", 64, 33);
+        tex = new T.CanvasTexture(c);
+      } else if (type === "dnd" || type === "censored") {
         c.width = 128;
         c.height = 48;
         const g = c.getContext("2d");
@@ -1508,6 +1525,22 @@
       fx.keep("censor" + a.key, "censored", bx, by + 0.75, bz, 0.38);
       if (Math.random() < 0.05) fx.icon("blush", bx, by + 2.6, bz, { size: 0.35 });
     }
+    // A beer from the oompah band: a stein in the right hand for a while (unless an act needs that hand), and a swig
+    // every few seconds while they walk or stand about
+    const beerR = (s) => (s.beerUntil > env.t ? "stein" : null);
+    function beer(a, s) {
+      const on = s.beerUntil > env.t && !a.inCar && a.drop === 0 && !a.hiddenAct;
+      if (!on) {
+        if (s.beerHeld) { s.beerHeld = false; if (a.av.holding().R === "stein") a.av.hold("R", null); }
+        return;
+      }
+      s.beerHeld = true;
+      if (s.on) return; // in an act: run() puts it in the hand when the act leaves the hand free
+      a.av.hold("R", "stein");
+      if (s.sugarUntil > env.t || s.buzzUntil > env.t) return; // arms busy
+      const lift = toMouth(env.t, 5, hashStr(a.key) * 5);
+      a.av.parts.armR.rotation.set(-0.45 - 2.0 * lift, 0, 0.35 * lift);
+    }
     function walkingExtras(a, s, dt) {
       const lv = env.drunk(a);
       const shame = s.shameUntil > env.t;
@@ -1570,6 +1603,15 @@
       close(a) { const s = states.get(a); return !!(s && s.act && CLOSE_ACTS.has(s.act)); },
       swingAngle,
       pileSpot(a) { return pileSpot(a, st(a)); }, // where their clothes would land now (for live guests)
+      // the oompah band hands them a beer: 45 s with a stein, and a level tipsier (false if they've still got one)
+      giveBeer(a) {
+        const s = st(a);
+        if (s.beerUntil > env.t) return false;
+        s.beerUntil = env.t + 45;
+        s.bar = Math.min(5, env.drunk(a) + 1);
+        s.barAt = env.t;
+        return true;
+      },
       update(dt, actors, nowMs) {
         const t = nowMs / 1000;
         env.t = t;
@@ -1581,7 +1623,7 @@
         actors.forEach((a) => {
           const s = st(a);
           if (a.drop > 0) {
-            if (!s.dropping) { if (s.act) stop(a, s); s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.towelUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
+            if (!s.dropping) { if (s.act) stop(a, s); s.dropping = true; s.bar = 0; s.shameUntil = 0; s.buzzUntil = 0; s.sugarUntil = 0; s.towelUntil = 0; s.beerUntil = 0; s.tache = false; a.av.moustache(false); lastDrop = { x: a.x, z: a.z, t }; }
           } else s.dropping = false;
           s.on = false;
           if (a.drop > 0 || a.idleT < 0.35 || a.inCar) return;
@@ -1601,6 +1643,7 @@
           if (!s.on && a.moving) walkingExtras(a, s, dt);
           towel(a, s);
           clothes(a, s);
+          beer(a, s);
         });
         scenes.forEach(({ room, count }) => {
           const [bx, bz] = room.beds[0];
@@ -1667,7 +1710,7 @@
         const hh = Math.atan2(gx, gz);
         s.h += Math.atan2(Math.sin(hh - s.h), Math.cos(hh - s.h)) * Math.min(1, dt * 10);
         s.walk = (s.walk || 0) + dt * 10;
-        a.av.hold("R", null);
+        a.av.hold("R", beerR(s));
         a.av.hold("L", null);
         a.av.setPose(s.walk, true);
         a.av.root.position.set(s.vx + OX, a.y, s.vz + OZ);
@@ -1707,7 +1750,7 @@
         else if (!repeat && ctx.say) ctx.say(snd[0], m.x, m.z);
         else if (snd[0] && ctx.sound) ctx.sound(snd[0], m.x, m.z);
       }
-      a.av.hold("R", out.R || null);
+      a.av.hold("R", out.R || beerR(s));
       a.av.hold("L", out.L || null);
       a.av.hold("head", out.head || out.headL || (!out.hide && s.towelUntil > env.t && asg.act !== "shower" ? "turban" : null));
       if (out.skinny && Math.random() < dt * 0.6) fx.icon("blush", m.x, a.y + 2.6, m.z, { size: 0.35 });

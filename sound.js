@@ -818,6 +818,19 @@
         if (len > 0.3) lfo(o.detune, t + 0.15, 5.5, 14, len);
       });
     }
+    // the big drum: a deep boom, a punchier body that phone speakers can play, and the felt beater
+    function boom(t, v) {
+      const k = tone(bandBus, t, "sine", 95, 0, v, 0.004, 0.5);
+      k.frequency.exponentialRampToValueAtTime(42, t + 0.28);
+      const m = tone(bandBus, t, "triangle", 190, 0, v * 0.5, 0.003, 0.2);
+      m.frequency.exponentialRampToValueAtTime(85, t + 0.16);
+      hiss(bandBus, t, "lowpass", 900, 200, 0.8, v * 0.35, 0.002, 0.08);
+    }
+    // the whole band shouting "Hey!": a few voices, low and high, on "eh" sliding up
+    function hey(t) {
+      [[125, 0.9], [160, 0.8], [210, 0.7], [270, 0.6]].forEach(([f, v], i) => vowel(bandBus, t + i * 0.013, f, f * 1.18, 560, 1900, v, 0.012, 0.16, 0.09));
+      hiss(bandBus, t, "bandpass", 2400, 3200, 1, 0.06, 0.005, 0.1); // breath on the "h"
+    }
     function bandStep(t, silent) {
       const sd = 60 / 120 / 2, s = band.step, bar = (s >> 2) & 15, b = s & 3, round = (s >> 6) & 1;
       if (silent) { band.step = (s + 1) & 127; return sd; } // out of earshot: keep time, build nothing
@@ -834,8 +847,11 @@
         ch[2].forEach((m) => brass(t, m, sd * 0.45, 0.03, 1400));
         hiss(bandBus, t, "highpass", 6500, 0, 0.7, 0.045, 0.002, 0.12);
       }
-      // the big drum, with a roll into the top of the tune
-      if (b === 0) { const k = tone(bandBus, t, "sine", 120, 0, 0.5, 0.003, 0.28); k.frequency.exponentialRampToValueAtTime(45, t + 0.12); hiss(bandBus, t, "lowpass", 300, 0, 0.7, 0.15, 0.002, 0.08); }
+      // the big drum: boom on every beat, a crash at the top of each phrase, "Hey!" at the end of one, and a roll into
+      // the top of the tune
+      if (b === 0 || b === 2) boom(t, b === 0 ? 0.75 : 0.55);
+      if (b === 0 && (bar === 0 || bar === 8)) hiss(bandBus, t, "highpass", 4500, 0, 0.6, 0.13, 0.002, 1.3);
+      if ((bar === 7 || bar === 15) && b === 2) hey(t);
       if (bar === 15 && b >= 2) for (let i = 0; i < 4; i++) hiss(bandBus, t + (i * sd) / 4, "bandpass", 2600, 0, 1.2, 0.05 + i * 0.012, 0.002, 0.05);
       // trumpets, and the singer the second time round
       BAND_MEL[bar].forEach(([at, m, n]) => {

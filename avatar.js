@@ -359,6 +359,20 @@
       add(-0.6, 18.5, 0.9, 1.2, 1.2, 1.2, GOLD);
       ["#151515", "#DD0000", "#FFCE00"].forEach((c, i) => add(-0.15, 15.5 - i * 3, -11.8, 0.3, 3, 13, c));
     },
+    // a Maß of beer in the hand, and the beer maid's armful: three steins each side, held out in front (on the body)
+    stein: (add) => {
+      add(-1.3, -14.2, 0.7, 2.6, 3.4, 2.6, "#E8A317");
+      add(-1.4, -10.8, 0.6, 2.8, 1, 2.8, "#FFFFFF");
+      add(-0.9, -10.1, 1.1, 1.6, 0.5, 1.6, "#FFFFFF");
+      add(1.3, -13.4, 1.5, 0.7, 2.2, 0.7, "#D9EEF7");
+    },
+    steins: (add) => {
+      [-1, 1].forEach((side) => [[3.9, 4.6], [5.9, 6.2], [3.9, 7.8]].forEach(([x, z]) => {
+        const cx = side * x;
+        add(cx - 1.1, -2.6, z - 1.1, 2.2, 3, 2.2, "#E8A317");
+        add(cx - 1.2, 0.4, z - 1.2, 2.4, 0.9, 2.4, "#FFFFFF");
+      }));
+    },
     mallet: (add) => { add(-0.3, -15.5, 1, 0.6, 4.5, 0.6, "#8A5A2B"); add(-1, -17.5, 0.3, 2, 2, 2, "#F2EEE4"); },
     trumpet: (add) => {
       add(-0.25, 1.55, 3.6, 0.5, 0.5, 0.8, "#C9CED6");
