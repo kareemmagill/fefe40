@@ -1587,6 +1587,7 @@
       if (me && me.inCar) return; // driving: the pedals do the work
       pendingPile = null;
       if (me && me.drop === 0) {
+        if (bearFromTap(cx, cy)) { goToBear(); clearSelection(); return; }
         const c = carFromTap(cx, cy);
         if (c) { goToCar(c); clearSelection(); return; }
         if (planeFromTap(cx, cy)) { goToPlane(); clearSelection(); return; }
@@ -2048,6 +2049,21 @@
         heartbeat(performance.now());
         return;
       }
+      if (me.inCar === bear) { // up on the giant teddy bear: it walks, I ride (posed in updateBear)
+        walkBear(dt);
+        strideBear(dt, Math.abs(bear.speed) * dt);
+        me.x = bear.x;
+        me.z = bear.z;
+        me.moving = false;
+        me.idleT = 0;
+        if (follow) { goal.target.set(bear.x + OX, bear.y + 6, bear.z + OZ); clampTarget(goal.target); }
+        heartbeat(performance.now());
+        return;
+      }
+      if (pendingBear && !myPath.length && me.drop === 0) {
+        if (Math.hypot(bear.x - me.x, bear.z - me.z) < 7) boardBear();
+        else pendingBear = false;
+      }
       if (pendingPlane && !myPath.length && me.drop === 0) {
         if (Math.hypot(plane.x - me.x, plane.z - me.z) < 5) boardPlane();
         else pendingPlane = false;
@@ -2163,7 +2179,7 @@
     // where I am right now: in my car if I'm driving
     function recHere() {
       const c = me.inCar;
-      if (c && c.isPlane) return; // flights aren't in the loop
+      if (c && (c.isPlane || c.isBear)) return; // flights and bear rides aren't in the loop
       if (c) recNode(Math.floor(c.x), Math.floor(c.z), c.idx + 1, hdg64(c.h));
       else recNode(Math.floor(me.x), Math.floor(me.z));
     }
@@ -2380,6 +2396,22 @@
       const a = g.actor, now = liveMap[id];
       if (liveHere(id)) {
         const cell = now.x + "," + now.z;
+        if (now.tb) { // riding the giant teddy bear
+          if (!g.live) { g.live = true; a.tag.classList.add("live"); a.drop = 0; }
+          leaveCar(g);
+          landGhostPlane(g);
+          rideGhostBear(g, now, dt);
+          g.cell = "";
+          return;
+        }
+        if (a.inCar === bear) { // climbed down: there they are
+          a.inCar = null;
+          a.x = now.x + 0.5;
+          a.z = now.z + 0.5;
+          a.y = worldY(now.x, now.z);
+          g.path = [];
+          g.cell = cell;
+        }
         if (now.pl) { // flying: a copy of the plane where their phone says
           if (!g.live) { g.live = true; a.tag.classList.add("live"); a.drop = 0; }
           leaveCar(g);
@@ -2441,6 +2473,7 @@
       if (g.live) {
         g.live = false;
         landGhostPlane(g);
+        if (a.inCar === bear) a.inCar = null;
         a.tag.classList.remove("live");
         g.t = 0;
         g.i = 0;
@@ -2570,7 +2603,8 @@
       lastBeat = now;
       lastBeatCell = cell;
       const beat = { t: Date.now(), x, z, n: night ? 1 : 0 };
-      if (me.inCar && me.inCar.isPlane) { beat.pl = 1; beat.y = Math.round(me.inCar.alt * 2) / 2; beat.h = hdg64(me.inCar.h); } // flying, how high, which way
+      if (me.inCar === bear) { beat.tb = 1; beat.h = hdg64(bear.h); if (bear.dance) { beat.td = bear.dance; beat.tds = bear.danceT0; } } // riding the bear, and dancing
+      else if (me.inCar && me.inCar.isPlane) { beat.pl = 1; beat.y = Math.round(me.inCar.alt * 2) / 2; beat.h = hdg64(me.inCar.h); } // flying, how high, which way
       else if (me.inCar) { beat.c = me.inCar.idx + 1; beat.h = hdg64(me.inCar.h); } // which car they're driving, and which way
       clothesBeat(beat); // what I'm wearing, and where my clothes are while they're off
       if (myFire && Date.now() - myFire.t < FIRE_BURN * 1000) { beat.f = myFire.i + 1; beat.ft = myFire.t; } // a tree I set on fire
@@ -2589,7 +2623,8 @@
           if (!ID_RE.test(id) || !l || typeof l !== "object") return;
           const t = +l.t, x = Math.floor(+l.x), z = Math.floor(+l.z);
           const c = l.c | 0;
-          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64, pl: l.pl === 1 ? 1 : 0, y: Math.max(0, Math.min(30, +l.y || 0)) };
+          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64, pl: l.pl === 1 ? 1 : 0, y: Math.max(0, Math.min(30, +l.y || 0)),
+            tb: l.tb === 1 ? 1 : 0, td: (l.td | 0) >= 1 && (l.td | 0) <= 5 ? l.td | 0 : 0, tds: Number.isFinite(+l.tds) ? +l.tds : 0 };
           if (clean[id]) cleanWear(clean[id], l); // what they're wearing, and where their clothes are
           const f = l.f | 0, ft = +l.ft;
           if (clean[id] && f >= 1 && f <= TREES.length && Number.isFinite(ft) && Math.abs(Date.now() - ft) < FIRE_BURN * 1000) { clean[id].f = f; clean[id].ft = ft; }
@@ -3427,6 +3462,7 @@
           if (st > -50 && st < 1) return { what: "pool", px, pz };
         } else if (gy === null || Math.abs(gy - c.y) > 0.55) {
           const tree = TREES.find((t) => Math.hypot(t.x - px, t.z - pz) < 1.3);
+          if (tree && crushedTrees.has(TREES.indexOf(tree))) continue; // flattened by the bear: nothing there now
           return { what: tree ? "tree" : "wall", px, pz, tree };
         }
         for (let j = 0; j < carList.length; j++) {
@@ -3630,6 +3666,7 @@
     }
     function getOut() {
       if (flyingMe()) { leavePlane(); return; }
+      if (ridingBear()) { leaveBear(); return; }
       const c = drive.car;
       if (!c || !me) return;
       recHere(); // where the car was left
@@ -3717,7 +3754,7 @@
             A[v] = Math.min(255, r); A[v + 1] = Math.min(255, g); A[v + 2] = Math.min(255, b);
           }
           // burnt leaves fall away: squash most of them to nothing, and bring them back when it regrows
-          const gone = mode === "char" && leaf[n] && h < 0.72 * burnt;
+          const gone = mode === "crush" || (mode === "char" && leaf[n] && h < 0.72 * burnt);
           if (gone !== (PA[o] !== PO[o] || PA[o + 3] !== PO[o + 3] || PA[o + 7] !== PO[o + 7])) {
             moved = true;
             const cx = (PO[o] + PO[o + 3] + PO[o + 6] + PO[o + 9]) / 4, cy = (PO[o + 1] + PO[o + 4] + PO[o + 7] + PO[o + 10]) / 4, cz = (PO[o + 2] + PO[o + 5] + PO[o + 8] + PO[o + 11]) / 4;
@@ -3876,8 +3913,9 @@
     });
     document.getElementById("get-out").addEventListener("click", getOut);
     function driveKeys(e, down) {
-      if (!drive.car && !flyingMe()) return false;
+      if (!drive.car && !flyingMe() && !ridingBear()) return false;
       const k = e.key.toLowerCase();
+      if (ridingBear() && /^[1-5]$/.test(k)) { if (down) { bear.speed = 0; setDance(bear.dance === +k ? 0 : +k); } e.preventDefault(); return true; } // dances
       if (down && (k === "e" || k === "escape")) { getOut(); return true; }
       if ((k === "f" || k === " ") && drive.car && drive.car.tank) { if (down) shoot(); e.preventDefault(); return true; }
       const map = { arrowup: ["gas", 1], w: ["gas", 1], arrowdown: ["gas", -1], s: ["gas", -1], arrowleft: ["steer", 1], a: ["steer", 1], arrowright: ["steer", -1], d: ["steer", -1] }[k];
@@ -4081,6 +4119,343 @@
       if (plane.g.visible) posePlane(plane);
     }
 
+
+    // ---------- the giant teddy bear ----------
+    // Taller than the trees, on the pickleball court. Only girls can ride it: tap it, and you climb up onto its head;
+    // the pedals walk it, the wheel turns it, and the buttons above them make it dance (wave, disco, spin, jump, floss).
+    // Every step it takes crushes what's underfoot: trees go flat (and grow back), cars get squashed, and people get
+    // flattened like pancakes for a few seconds. Houses stop it. One rider at a time; whoever's riding sends it in their
+    // live heartbeat, so everyone sees the bear walk and dance in the same place.
+    const BEAR_HOME = { x: 57.5, z: 45.5, h: Math.PI * 0.25 };
+    const BEAR_DANCES = ["", "wave", "disco", "spin", "jump", "floss"];
+    const furTex = (() => { // a speckled fur, tinted per colour by the material
+      const c = document.createElement("canvas");
+      c.width = c.height = 16;
+      const g = c.getContext("2d");
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = 205 + Math.floor(hash01(x * 31 + y * 17) * 50);
+        g.fillStyle = "rgb(" + v + "," + v + "," + v + ")";
+        g.fillRect(x, y, 1, 1);
+      }
+      const t = new T.CanvasTexture(c);
+      t.magFilter = T.NearestFilter;
+      t.minFilter = T.NearestFilter;
+      return t;
+    })();
+    const furMats = {};
+    const furMat = (col) => furMats[col] || (furMats[col] = new T.MeshLambertMaterial({ color: col, map: furTex }));
+    function buildBear() {
+      const FUR = "#A8693B", LIGHT = "#EBC594", DARK = "#2B1D14", PINK = "#FF6FB5";
+      const grp = (parent, x, y, z) => { const g = new T.Group(); g.position.set(x, y, z); parent.add(g); return g; };
+      const blk = (parent, x, y, z, w, h, d, col, plain) => {
+        const m = new T.Mesh(carBox, plain ? carMat(col, "solid") : furMat(col));
+        m.scale.set(w, h, d);
+        m.position.set(x, y, z);
+        m.castShadow = true;
+        parent.add(m);
+        return m;
+      };
+      // a box with its edges rounded off: three overlapping boxes
+      const round = (parent, x, y, z, w, h, d, col, r) => {
+        r = r || Math.min(w, h, d) * 0.18;
+        blk(parent, x, y, z, w - 2 * r, h, d - 2 * r, col);
+        blk(parent, x, y, z, w, h - 2 * r, d - 2 * r, col);
+        blk(parent, x, y, z, w - 2 * r, h - 2 * r, d, col);
+      };
+      const g = new T.Group();
+      const hip = grp(g, 0, 3.2, 0);
+      round(hip, 0, 2.5, 0, 5.4, 5.2, 4.4, FUR); // body
+      round(hip, 0, 2.2, 1.9, 3.8, 3.8, 1.0, LIGHT, 0.5); // tummy
+      blk(hip, -0.35, 2.6, 2.42, 0.6, 0.5, 0.06, PINK, true); // a little heart on it
+      blk(hip, 0.35, 2.6, 2.42, 0.6, 0.5, 0.06, PINK, true);
+      blk(hip, 0, 2.25, 2.42, 0.7, 0.5, 0.06, PINK, true);
+      blk(hip, 0, 4.85, 2.3, 0.9, 0.9, 0.5, PINK, true); // a bow at the neck
+      [-1, 1].forEach((s) => { blk(hip, s * 1.0, 4.85, 2.25, 1.3, 1.2, 0.4, PINK, true); blk(hip, s * 0.45, 4.15, 2.27, 0.4, 0.9, 0.3, PINK, true); });
+      const legs = [-1, 1].map((s) => {
+        const leg = grp(g, s * 1.5, 3.2, 0);
+        round(leg, 0, -1.5, 0, 2.3, 3.1, 2.5, FUR);
+        round(leg, 0, -2.85, 0.45, 2.4, 0.7, 3.1, FUR, 0.25); // foot
+        blk(leg, 0, -2.75, 2.02, 1.5, 0.7, 0.06, LIGHT); // the paw pad
+        return leg;
+      });
+      const arms = [-1, 1].map((s) => {
+        const arm = grp(hip, s * 3.1, 4.2, 0);
+        round(arm, s * 0.1, -1.9, 0, 1.8, 4.2, 1.9, FUR);
+        blk(arm, s * 0.1, -3.55, 0.97, 1.1, 0.9, 0.06, LIGHT);
+        arm.rotation.z = s * 0.22;
+        return arm;
+      });
+      const head = grp(hip, 0, 5.2, 0);
+      round(head, 0, 2.2, 0.1, 5.6, 4.6, 4.8, FUR);
+      round(head, 0, 1.25, 2.6, 2.5, 1.8, 1.3, LIGHT, 0.3); // muzzle
+      blk(head, 0, 1.75, 3.27, 0.95, 0.6, 0.12, DARK, true); // nose
+      blk(head, 0, 1.05, 3.27, 0.14, 0.55, 0.08, DARK, true); // mouth
+      blk(head, -0.35, 0.8, 3.26, 0.6, 0.14, 0.08, DARK, true);
+      blk(head, 0.35, 0.8, 3.26, 0.6, 0.14, 0.08, DARK, true);
+      [-1, 1].forEach((s) => {
+        blk(head, s * 1.2, 2.85, 2.53, 0.62, 0.78, 0.12, DARK, true); // eyes, with a glint
+        blk(head, s * 1.2 - 0.12, 3.05, 2.6, 0.2, 0.2, 0.04, "#FFFFFF", true);
+        blk(head, s * 1.95, 1.55, 2.52, 0.85, 0.42, 0.06, "#F28CA8", true); // blushing cheeks
+        round(head, s * 2.35, 4.55, 0, 1.8, 1.8, 1.1, FUR, 0.3); // ears
+        blk(head, s * 2.35, 4.5, 0.57, 1.0, 1.0, 0.06, LIGHT);
+      });
+      return { g, hip, head, legs, arms };
+    }
+    const bearBits = buildBear();
+    const bear = Object.assign(bearBits, { isBear: true, idx: -2, x: BEAR_HOME.x, z: BEAR_HOME.z, h: BEAR_HOME.h, y: 1, speed: 0, phase: 0, dance: 0, danceT0: 0, lastStep: 0, hop: 0, idleSince: 0, rider: null });
+    bear.g.visible = false;
+    scene.add(bear.g);
+    let pendingBear = false;
+    const ridingBear = () => !!(me && me.inCar === bear);
+    const isGirl = () => !!(myLook && myLook.body === "f");
+    const bearTaken = () => Object.keys(liveMap).some((id) => id !== myId && isLive(id) && liveMap[id].tb);
+    function bearFromTap(cx, cy) {
+      if (!bear.g.visible) return false;
+      setRay(cx, cy);
+      return raycaster.intersectObject(bear.g, true).length > 0;
+    }
+    function goToBear() {
+      if (!isGirl() || bearTaken()) { // girls only (and one at a time): it shakes its head
+        bear.noUntil = performance.now() + 1200;
+        if (party) party.fx.icon("bang", bear.x, 13.5, bear.z, { size: 0.8 });
+        return;
+      }
+      const sn = Math.sin(bear.h), cs = Math.cos(bear.h);
+      const at = nearestReachable(Math.floor(bear.x + sn * 3.5), Math.floor(bear.z + cs * 3.5));
+      pendingBear = true;
+      if (at && walkTo(at[0], at[1])) follow = true;
+    }
+    function boardBear() {
+      pendingBear = false;
+      if (bearTaken() || !isGirl()) return;
+      myPath = [];
+      recNode(Math.floor(me.x), Math.floor(me.z));
+      me.inCar = bear;
+      me.blendX = me.blendZ = 0;
+      bear.speed = 0;
+      setDance(0);
+      drive.gas = drive.steer = 0;
+      driveEl.hidden = false;
+      dancesEl.hidden = false;
+      fireBtn.hidden = true;
+      document.body.classList.add("driving");
+      follow = true;
+      goal.fit = Math.max(goal.fit, 34);
+      lastBeat = 0;
+      poof(me.x, me.y, me.z);
+    }
+    function leaveBear() {
+      if (!ridingBear()) return;
+      me.inCar = null;
+      bear.speed = 0;
+      setDance(0);
+      drive.gas = drive.steer = 0;
+      const sn = Math.sin(bear.h), cs = Math.cos(bear.h);
+      const at = nearestReachable(Math.floor(bear.x + sn * 4), Math.floor(bear.z + cs * 4)) || SPAWN[0];
+      me.x = at[0] + 0.5;
+      me.z = at[1] + 0.5;
+      me.y = worldY(at[0], at[1]);
+      me.av.root.scale.set(1, 1, 1);
+      poof(me.x, me.y, me.z);
+      recNode(at[0], at[1]);
+      scheduleSave(800);
+      lastBeat = 0;
+      driveEl.hidden = true;
+      dancesEl.hidden = true;
+      document.body.classList.remove("driving");
+      bear.idleSince = performance.now();
+    }
+    function setDance(n) {
+      bear.dance = n;
+      bear.danceT0 = Date.now();
+      lastBeat = 0;
+      if (dancesEl) dancesEl.querySelectorAll("button").forEach((b) => b.classList.toggle("down", +b.dataset.dance === n && n > 0));
+    }
+    // where a foot of the bear is (side -1 right, 1 left)
+    const bearFoot = (side) => { const sn = Math.sin(bear.h), cs = Math.cos(bear.h); return [bear.x + cs * side * 1.5 + sn * 0.6, bear.z - sn * side * 1.5 + cs * 0.6]; };
+    // stomp: everything under the foot at (x, z) within r metres gets crushed
+    const crushedTrees = new Map(); // tree index -> when (ms); they grow back after three minutes
+    function crushAt(x, z, r) {
+      sfx("stomp", x, z);
+      if (party) for (let i = 0; i < 5; i++) party.fx.icon("puff", x + (Math.random() - 0.5) * 2.5, bear.y + 0.3, z + (Math.random() - 0.5) * 2.5, { size: 0.9, vy: 0.5, life: 1, max: 1 });
+      if (me && Math.hypot(me.x - x, me.z - z) < 25) drive.shake = Math.max(drive.shake, ridingBear() ? 0.25 : 0.4 * (1 - Math.hypot(me.x - x, me.z - z) / 25));
+      TREES.forEach((t, ti) => {
+        if (crushedTrees.has(ti) || Math.hypot(t.x - x, t.z - z) > r + 0.4) return;
+        if (fires.has(ti)) { paintTree(ti, "green"); fires.delete(ti); }
+        crushedTrees.set(ti, Date.now());
+        paintTree(ti, "crush");
+        sfx("crash", t.x, t.z, { pitch: 0.6 });
+        if (party) for (let i = 0; i < 30; i++) party.fx.block(i % 4 ? "#3F9A3A" : i % 3 ? "#6CC24A" : "#6B4A2A", t.tx + (Math.random() - 0.5) * 3, 1 + Math.random() * (t.top - 1), t.tz + (Math.random() - 0.5) * 3, { vy: Math.random() * 2, g: 6, vx: (Math.random() - 0.5) * 4, vz: (Math.random() - 0.5) * 4, size: 0.18, life: 1.6, max: 1.6 });
+      });
+      carList.forEach((c) => {
+        if (c.tank || c.sunk || c.flat || !c.g.visible || Math.hypot(c.x - x, c.z - z) > r + 0.6) return;
+        c.flat = Date.now(); // squashed flat; it pops back up in a minute
+        c.dmg = 8;
+        c.speed = 0;
+        sfx("crash", c.x, c.z);
+        if (party) party.fx.icon("bang", c.x, c.y + 1.5, c.z, { size: 0.6 });
+      });
+      actorList.forEach((a) => {
+        if (a === bear.rider || a.inCar || a.drop > 0 || Math.hypot(a.x - x, a.z - z) > r - 0.4) return;
+        if (!(a.squashUntil > Date.now())) { a.squashUntil = Date.now() + 4000; if (party) party.fx.icon("star", a.x, a.y + 0.8, a.z, { size: 0.4, vy: 1.5 }); }
+      });
+    }
+    // walking: houses (and the edge of the world) stop it; anything else it walks over
+    function bearBlocked(x, z) {
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2, px = x + Math.cos(a) * 2.6, pz = z + Math.sin(a) * 2.6;
+        if (!inMap(Math.floor(px), Math.floor(pz)) || inHouse(px, pz)) return true;
+      }
+      return false;
+    }
+    function poseBear(dt, moving, now) {
+      const b = bear, t = (Date.now() - b.danceT0) / 1000, d = BEAR_DANCES[b.dance] || "";
+      const [lL, lR] = [b.legs[1], b.legs[0]], [aL, aR] = [b.arms[1], b.arms[0]];
+      let hipY = 3.2, roll = 0, pitch = 0, spin = 0, hop = 0;
+      lL.rotation.set(0, 0, 0); lR.rotation.set(0, 0, 0);
+      aL.rotation.set(0, 0, 0.22); aR.rotation.set(0, 0, -0.22);
+      b.head.rotation.set(0, 0, 0);
+      if (moving) {
+        const s = Math.sin(b.phase);
+        lL.rotation.x = s * 0.42; lR.rotation.x = -s * 0.42;
+        aL.rotation.x = -s * 0.35; aR.rotation.x = s * 0.35;
+        hipY += Math.abs(Math.cos(b.phase)) * 0.25;
+        roll = s * 0.05;
+      } else if (d === "wave") {
+        aR.rotation.set(-2.7, 0, -0.35 - Math.sin(t * 5) * 0.45);
+        aL.rotation.set(-2.7, 0, 0.35 - Math.sin(t * 5) * 0.45);
+        roll = Math.sin(t * 2.5) * 0.12;
+        b.head.rotation.z = Math.sin(t * 2.5) * 0.15;
+      } else if (d === "disco") { // Saturday Night Fever: point up to the right, then down to the left
+        const up = Math.floor(t / 0.6) % 2 === 0;
+        aR.rotation.set(up ? -2.75 : -0.5, 0, up ? -0.55 : 0.55);
+        aL.rotation.set(-0.35, 0, 1.1);
+        roll = up ? -0.12 : 0.12;
+        b.head.rotation.z = up ? 0.15 : -0.12;
+        lR.rotation.z = up ? -0.18 : 0;
+      } else if (d === "spin") {
+        spin = t * 5;
+        aL.rotation.z = 1.45; aR.rotation.z = -1.45;
+        hipY += Math.abs(Math.sin(t * 5)) * 0.2;
+      } else if (d === "jump") {
+        const u = (t % 1.3) / 1.3;
+        hop = u < 0.6 ? Math.sin((u / 0.6) * Math.PI) * 2.6 : 0;
+        aL.rotation.set(-2.6, 0, 0.5); aR.rotation.set(-2.6, 0, -0.5);
+        lL.rotation.x = lR.rotation.x = hop > 0.2 ? -0.35 : 0;
+        if (u >= 0.6 && b.hopUp) { b.hopUp = false; crushAt(b.x, b.z, 3.4); } // landing
+        if (u < 0.6 && u > 0.05) b.hopUp = true;
+      } else if (d === "floss") {
+        const s = Math.sin(t * 7), c = Math.cos(t * 7);
+        aL.rotation.set(c > 0 ? 0.35 : -0.35, 0, 0.3 + s * 0.7);
+        aR.rotation.set(c > 0 ? -0.35 : 0.35, 0, -0.3 + s * 0.7);
+        roll = -s * 0.14;
+      } else { // standing about: breathing, a little sway
+        roll = Math.sin(now * 0.9) * 0.02;
+        b.head.rotation.z = Math.sin(now * 0.6) * 0.05;
+      }
+      if (b.noUntil > performance.now()) b.head.rotation.y = Math.sin(performance.now() / 70) * 0.35; // no!
+      b.hip.position.y = hipY;
+      b.hip.rotation.set(pitch, 0, roll);
+      b.g.position.set(b.x + OX, b.y + hop, b.z + OZ);
+      b.g.rotation.set(0, b.h + spin, 0);
+      if (d && party && Math.random() < dt * 2.5) party.fx.icon(Math.random() < 0.5 ? "note" : "heart", b.x + (Math.random() - 0.5) * 6, 12 + Math.random() * 3, b.z + (Math.random() - 0.5) * 6, { size: 0.7, vy: 1.2 });
+    }
+    // the rider sits on top of its head, holding on to an ear (and waving when it dances)
+    const seatV = new T.Vector3();
+    function placeBearRider(a) {
+      bear.g.updateMatrixWorld(true);
+      seatV.set(0, 4.65, -0.3);
+      bear.head.localToWorld(seatV);
+      const av = a.av;
+      av.setPose(0, false);
+      av.root.position.copy(seatV);
+      av.root.rotation.set(0, bear.g.rotation.y, 0);
+      av.rig.position.y = 0.42 - 0.825 * (av.scale || 1);
+      av.parts.legR.rotation.set(-Math.PI / 2, 0, 0.2);
+      av.parts.legL.rotation.set(-Math.PI / 2, 0, -0.2);
+      av.parts.armL.rotation.set(-0.9, 0, -0.5);
+      av.parts.armR.rotation.set(bear.dance ? -2.8 + Math.sin(performance.now() / 160) * 0.3 : -0.9, 0, bear.dance ? -0.3 : 0.5);
+      a.x = bear.x; a.z = bear.z; a.y = seatV.y; a.drop = 0; a.moving = false; a.idleT = 0;
+    }
+    // my bear: the pedals walk it, the wheel turns it
+    function walkBear(dt) {
+      const b = bear, gas = drive.gas, steer = drive.steer;
+      if (gas && b.dance) setDance(0); // walking off ends the dance
+      const want = gas > 0 ? 2.8 : gas < 0 ? -1.6 : 0;
+      b.speed += (want - b.speed) * Math.min(1, dt * 3);
+      b.h += steer * dt * 1.2;
+      if (Math.abs(b.speed) > 0.05) {
+        const nx = b.x + Math.sin(b.h) * b.speed * dt, nz = b.z + Math.cos(b.h) * b.speed * dt;
+        if (!bearBlocked(nx, nz)) { b.x = nx; b.z = nz; } else b.speed = 0;
+      }
+    }
+    // a stride, and a stomp at every footfall (on every phone, wherever the bear is seen walking)
+    function strideBear(dt, dist) {
+      const b = bear, before = Math.sin(b.phase);
+      b.phase += dist * 1.1;
+      const after = Math.sin(b.phase);
+      if (before * after < 0 || (before === 0 && after !== 0)) { const f = bearFoot(after > 0 ? 1 : -1); crushAt(f[0], f[1], 2.3); }
+      const gy = carGround(b.x, b.z);
+      if (gy !== null) b.y += (Math.max(-0.4, gy) - b.y) * Math.min(1, dt * 6);
+    }
+    // someone else is riding it: the bear goes where their heartbeat says, and dances what they dance
+    function rideGhostBear(g, now, dt) {
+      const a = g.actor, b = bear;
+      b.rider = a;
+      const tx = now.x + 0.5, tz = now.z + 0.5, dx = tx - b.x, dz = tz - b.z, d = Math.hypot(dx, dz);
+      const step = Math.min(d, Math.min(6, 1.5 + d) * dt);
+      if (d > 0.05) { b.x += (dx / d) * step; b.z += (dz / d) * step; }
+      const h = d > 1.2 ? Math.atan2(dx, dz) : (now.h / 64) * 2 * Math.PI;
+      b.h += Math.atan2(Math.sin(h - b.h), Math.cos(h - b.h)) * Math.min(1, dt * 3);
+      if (now.td !== b.dance || (now.td && now.tds !== b.danceT0)) { b.dance = now.td || 0; b.danceT0 = now.tds || Date.now(); }
+      b.speed = d > 0.3 ? 2.8 : 0;
+      if (b.speed) strideBear(dt, step);
+      a.inCar = b;
+      b.ghostAt = performance.now();
+    }
+    function updateBear(dt) {
+      const b = bear, now = performance.now();
+      bear.g.visible = !building;
+      if (building) return;
+      if (ridingBear()) { b.rider = me; }
+      else if (!(b.ghostAt > now - 1500)) { // nobody's riding it: it stands still, and after a while it's back home
+        if (b.rider) { b.rider = null; b.idleSince = now; b.speed = 0; b.dance = 0; }
+        if (b.idleSince && now - b.idleSince > 20000 && Math.hypot(b.x - BEAR_HOME.x, b.z - BEAR_HOME.z) > 1) {
+          poof(b.x, 6, b.z);
+          Object.assign(b, { x: BEAR_HOME.x, z: BEAR_HOME.z, h: BEAR_HOME.h, idleSince: 0 });
+          poof(b.x, 6, b.z);
+        }
+      }
+      poseBear(dt, Math.abs(b.speed) > 0.2, now / 1000);
+      // squashed things pop back up
+      const t = Date.now();
+      crushedTrees.forEach((at, ti) => { if (t - at > FIRE_REGROW * 1000) { crushedTrees.delete(ti); paintTree(ti, "green"); } });
+      carList.forEach((c) => {
+        if (!c.flat) return;
+        if (t - c.flat > 60000) { c.flat = 0; c.dmg = 0; c.g.scale.set(1, 1, 1); poof(c.x, c.y, c.z); }
+        else c.g.scale.set(1.15, 0.32, 1.1);
+      });
+    }
+    // people the bear stepped on: flat as a pancake for a few seconds, then back up with stars
+    function squashes() {
+      const t = Date.now();
+      actorList.forEach((a) => {
+        if (a.squashUntil > t) a.av.root.scale.set(1.4, 0.14, 1.4);
+        else if (a.squashUntil) {
+          a.squashUntil = 0;
+          a.av.root.scale.set(1, 1, 1);
+          if (party) for (let i = 0; i < 3; i++) party.fx.icon("star", a.x + (Math.random() - 0.5), a.y + 1.6, a.z + (Math.random() - 0.5), { size: 0.35, vy: 1.4 });
+        }
+      });
+    }
+    const dancesEl = document.getElementById("dances");
+    dancesEl.querySelectorAll("button").forEach((btn) => btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      if (!ridingBear()) return;
+      const n = +btn.dataset.dance;
+      bear.speed = 0;
+      setDance(bear.dance === n ? 0 : n);
+    }));
 
     // ---------- the sound of a place: tapping a place (joined or not) plays what it sounds like ----------
     // Dance floor and karaoke switch on the music (it plays on the karaoke TV while that's in view); everywhere else a
@@ -4588,6 +4963,7 @@
       updateClothes(dt);
       decks.update(dt, performance.now() / 1000);
       updatePlane(dt);
+      updateBear(dt);
       updateShells(dt);
       updateFires(dt);
       swings.update();
@@ -4596,6 +4972,8 @@
       if (me) actorList.push(me);
       ghosts.forEach((g) => actorList.push(g.actor));
       party.update(dt, actorList, Date.now() - PARTY_EPOCH);
+      if (bear.rider) placeBearRider(bear.rider);
+      squashes();
       updateChoir();
       separate(dt);
       actorList.forEach((a) => faceCamera(a, dt));
@@ -5492,6 +5870,12 @@
       },
       fires: () => [...fires.entries()].map(([i, f]) => [i, f.stage, f.gen, +((Date.now() - f.t0) / 1000).toFixed(1)]),
       burn: (i) => lightTree(TREES[i], true),
+      bear: () => ({ x: +bear.x.toFixed(2), z: +bear.z.toFixed(2), h: +bear.h.toFixed(2), y: +bear.y.toFixed(2), dance: bear.dance, riding: ridingBear(), visible: bear.g.visible, crushed: crushedTrees.size, flat: carList.filter((c) => c.flat).length, squashed: actorList.filter((a) => a.squashUntil > Date.now()).length }),
+      goBear: () => goToBear(),
+      setNight: (on) => setNight(!!on),
+      simBear: (gas, steer, secs) => { const g0 = drive.gas, s0 = drive.steer; drive.gas = gas; drive.steer = steer; for (let k = 0; k < Math.round(secs * 60); k++) { walkBear(1 / 60); strideBear(1 / 60, Math.abs(bear.speed) / 60); } drive.gas = g0; drive.steer = s0; },
+      putBear: (x, z, h) => { bear.x = x; bear.z = z; bear.h = h; },
+      bearDance: (n) => { if (ridingBear()) { bear.speed = 0; setDance(n); } },
       douse: (i) => { const f = fires.get(i); if (f) douse(i, f, (Date.now() - f.t0) / 1000); },
       fireAge: (i, sec) => { const f = fires.get(i); if (f) f.t0 = Date.now() - sec * 1000; },
       shoot: () => shoot(),
@@ -5591,7 +5975,7 @@
       updateBand(dt);
       if (snd && snd.enabled) {
         snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
-        snd.setEngine(!!(me && me.inCar), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);
+        snd.setEngine(!!(me && me.inCar && !me.inCar.isBear), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);
         // which music should be on, every frame: the sound engine forgets it whenever sound is switched off for a
         // moment (a voice recording, say), and the DJ has to come back afterwards
         if (dj.on) snd.setMusic(true, DANCE_CENTER[0], DANCE_CENTER[1], true);

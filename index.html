@@ -198,6 +198,11 @@ body {
 .pedal[hidden] { display: none; }
 .pedal.fire { background: #E5322D; color: #FFFFFF; }
 .drive-mid { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+/* the teddy bear's dances, in a row above the pedals */
+.dances { position: absolute; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%); display: flex; gap: 8px; }
+.dances[hidden] { display: none; }
+.dances button { width: 48px; height: 48px; border-radius: 50%; border: 3px solid var(--blue-edge); background: var(--white); font-size: 24px; line-height: 1; box-shadow: 0 3px 0 var(--blue-edge); touch-action: none; cursor: pointer; padding: 0; }
+.dances button.down { background: #FF6FB5; transform: translateY(2px); box-shadow: 0 1px 0 var(--blue-edge); }
 .pedal.down { transform: translateY(3px); box-shadow: 0 1px 0 var(--blue-edge); }
 body.driving .dock { display: none; }
 .hint {
@@ -581,6 +586,13 @@ body.driving .dock { display: none; }
       <button type="button" class="pedal fire" id="fire" aria-label="Fire the cannon" hidden><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 5.4L20 6l-3.3 4.6L22 13l-5.6 1.2L18 20l-5-3.2L8 21l.6-5.8L3 14l4.9-3.1L5 5.6l5.4 1.6z"/></svg></button>
       <button type="button" class="enter alt" id="get-out">Get out</button>
     </div>
+    <div class="dances" id="dances" role="group" aria-label="Dances" hidden>
+      <button type="button" data-dance="1" aria-label="Wave">👋</button>
+      <button type="button" data-dance="2" aria-label="Disco">🕺</button>
+      <button type="button" data-dance="3" aria-label="Spin">🌀</button>
+      <button type="button" data-dance="4" aria-label="Jump">🦘</button>
+      <button type="button" data-dance="5" aria-label="Floss">💃</button>
+    </div>
     <div class="pedals" role="group" aria-label="Pedals">
       <button type="button" class="pedal" id="brake" aria-label="Brake and reverse"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h16l-8 9z"/></svg></button>
       <button type="button" class="pedal go" id="gas" aria-label="Accelerate"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 15h16L12 6z"/></svg></button>
@@ -702,13 +714,13 @@ body.driving .dock { display: none; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202610011059"></script>
-<script src="outfits-hd.js?v=202610011059"></script>
-<script src="sound.js?v=202610011059"></script>
-<script src="flags.js?v=202610011059"></script>
-<script src="voice-lines.js?v=202610011059"></script>
-<script src="voice.js?v=202610011059"></script>
-<script src="actions.js?v=202610011059"></script>
-<script src="app.js?v=202610011059"></script>
+<script src="avatar.js?v=202610011126"></script>
+<script src="outfits-hd.js?v=202610011126"></script>
+<script src="sound.js?v=202610011126"></script>
+<script src="flags.js?v=202610011126"></script>
+<script src="voice-lines.js?v=202610011126"></script>
+<script src="voice.js?v=202610011126"></script>
+<script src="actions.js?v=202610011126"></script>
+<script src="app.js?v=202610011126"></script>
 </body>
 </html>

@@ -327,7 +327,7 @@
         hiss(d, t, "bandpass", 2500, 1800, 2, 0.3, 0.03, 0.25, 0.45);
         return 0.8;
       },
-      // the tank's gun going off, the shell landing, and a tree going up in flames
+      // the tank's gun going off and the shell landing
       cannon(d, t) {
         tone(d, t, "sine", 110, 32, 1, 0.003, 0.55);
         hiss(d, t, "lowpass", 3000, 180, 0.7, 0.9, 0.002, 0.5);
@@ -340,10 +340,13 @@
         for (let i = 0; i < 8; i++) hiss(d, t + 0.1 + rand() * 0.6, "bandpass", 1500 + rand() * 3000, 0, 3, 0.15, 0.001, 0.02);
         return 1.3;
       },
-      whoosh(d, t) {
-        hiss(d, t, "lowpass", 250, 2800, 0.8, 0.55, 0.3, 0.6);
-        tone(d, t, "sine", 70, 140, 0.3, 0.2, 0.6);
-        return 1;
+      // a giant teddy bear's footstep
+      stomp(d, t) {
+        const k = tone(d, t, "sine", 70, 0, 1, 0.004, 0.45);
+        k.frequency.exponentialRampToValueAtTime(30, t + 0.3);
+        tone(d, t, "triangle", 150, 60, 0.4, 0.003, 0.18);
+        hiss(d, t, "lowpass", 500, 120, 0.7, 0.5, 0.003, 0.3);
+        return 0.5;
       },
       bonk(d, t) {
         tone(d, t, "triangle", 440, 120, 0.6, 0.002, 0.2);
@@ -655,7 +658,7 @@
 
     // Effects are spoken: the synthesised versions didn't sound good enough, so each maps to a voice line (see SPOKEN).
     // (the car's noises stay real sounds: a horn, tyres, a crunch)
-    const CAR_FX = { horn: 1, crash: 1, skid: 1, bonk: 1, cannon: 1, blast: 1, whoosh: 1 };
+    const CAR_FX = { horn: 1, crash: 1, skid: 1, bonk: 1, cannon: 1, blast: 1, whoosh: 1, stomp: 1 };
     function play(name, x, z, o) {
       if (CAR_FX[name]) { playSynth(name, x, z, o); return; }
       if (name === "engine") return; // the running engine is its own sound (setEngine)
