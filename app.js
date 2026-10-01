@@ -1571,6 +1571,7 @@
       if (me && me.drop === 0) {
         const c = carFromTap(cx, cy);
         if (c) { goToCar(c); clearSelection(); return; }
+        if (planeFromTap(cx, cy)) { goToPlane(); clearSelection(); return; }
         const pile = pileFromTap(cx, cy); // a pile of clothes: go and put it on
         if (pile) { goToPile(pile); clearSelection(); return; }
       }
@@ -2005,6 +2006,22 @@
     }
     function updateMe(dt) {
       if (!me) return;
+      if (me.inCar === plane) { // flying: like driving, but up
+        flyPlane(dt);
+        me.x = plane.x;
+        me.z = plane.z;
+        me.y = 1 + plane.alt;
+        me.moving = false;
+        me.idleT = 0;
+        placePilot(me, plane, drive.steer);
+        if (follow) { goal.target.set(plane.x + OX, 1 + plane.alt * 0.6, plane.z + OZ); clampTarget(goal.target); }
+        heartbeat(performance.now());
+        return;
+      }
+      if (pendingPlane && !myPath.length && me.drop === 0) {
+        if (Math.hypot(plane.x - me.x, plane.z - me.z) < 3) boardPlane();
+        else pendingPlane = false;
+      }
       if (me.inCar) { // driving: the car moves, the guest rides along
         const c = me.inCar;
         me.x = c.x;
@@ -2116,6 +2133,7 @@
     // where I am right now: in my car if I'm driving
     function recHere() {
       const c = me.inCar;
+      if (c && c.isPlane) return; // flights aren't in the loop
       if (c) recNode(Math.floor(c.x), Math.floor(c.z), c.idx + 1, hdg64(c.h));
       else recNode(Math.floor(me.x), Math.floor(me.z));
     }
@@ -2274,6 +2292,7 @@
     const MAX_GHOSTS = 60;
     function dropGhost(id, g) {
       leaveCar(g);
+      landGhostPlane(g);
       removeActor(g.actor);
       ghosts.delete(id);
     }
@@ -2329,6 +2348,21 @@
       const a = g.actor, now = liveMap[id];
       if (liveHere(id)) {
         const cell = now.x + "," + now.z;
+        if (now.pl) { // flying: a copy of the plane where their phone says
+          if (!g.live) { g.live = true; a.tag.classList.add("live"); a.drop = 0; }
+          leaveCar(g);
+          flyGhostPlane(g, now, dt);
+          g.cell = "";
+          return;
+        }
+        if (g.plane) { // landed: out they get where they are now
+          landGhostPlane(g);
+          a.x = now.x + 0.5;
+          a.z = now.z + 0.5;
+          a.y = worldY(now.x, now.z);
+          g.path = [];
+          g.cell = cell;
+        }
         if (now.c) { // driving right now: their car heads for the latest spot they sent
           if (!g.live) { g.live = true; a.tag.classList.add("live"); a.drop = 0; }
           const c = rideCar(g, now.c - 1, now.x + 0.5, now.z + 0.5, now.h);
@@ -2374,6 +2408,7 @@
       }
       if (g.live) {
         g.live = false;
+        landGhostPlane(g);
         a.tag.classList.remove("live");
         g.t = 0;
         g.i = 0;
@@ -2503,7 +2538,8 @@
       lastBeat = now;
       lastBeatCell = cell;
       const beat = { t: Date.now(), x, z, n: night ? 1 : 0 };
-      if (me.inCar) { beat.c = me.inCar.idx + 1; beat.h = hdg64(me.inCar.h); } // which car they're driving, and which way
+      if (me.inCar && me.inCar.isPlane) { beat.pl = 1; beat.y = Math.round(me.inCar.alt * 2) / 2; beat.h = hdg64(me.inCar.h); } // flying, how high, which way
+      else if (me.inCar) { beat.c = me.inCar.idx + 1; beat.h = hdg64(me.inCar.h); } // which car they're driving, and which way
       clothesBeat(beat); // what I'm wearing, and where my clothes are while they're off
       Promise.resolve(store.beat(myId, beat)).catch(() => {});
     }
@@ -2520,7 +2556,7 @@
           if (!ID_RE.test(id) || !l || typeof l !== "object") return;
           const t = +l.t, x = Math.floor(+l.x), z = Math.floor(+l.z);
           const c = l.c | 0;
-          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64 };
+          if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64, pl: l.pl === 1 ? 1 : 0, y: Math.max(0, Math.min(30, +l.y || 0)) };
           if (clean[id]) cleanWear(clean[id], l); // what they're wearing, and where their clothes are
         });
         liveMap = clean;
@@ -3355,6 +3391,7 @@
       goal.fit = Math.min(goal.fit, 24);
     }
     function getOut() {
+      if (flyingMe()) { leavePlane(); return; }
       const c = drive.car;
       if (!c || !me) return;
       recHere(); // where the car was left
@@ -3385,7 +3422,7 @@
     });
     document.getElementById("get-out").addEventListener("click", getOut);
     function driveKeys(e, down) {
-      if (!drive.car) return false;
+      if (!drive.car && !flyingMe()) return false;
       const k = e.key.toLowerCase();
       if (down && (k === "e" || k === "escape")) { getOut(); return true; }
       const map = { arrowup: ["gas", 1], w: ["gas", 1], arrowdown: ["gas", -1], s: ["gas", -1], arrowleft: ["steer", 1], a: ["steer", 1], arrowright: ["steer", -1], d: ["steer", -1] }[k];
@@ -3398,6 +3435,180 @@
       return true;
     }
     window.addEventListener("keyup", (e) => driveKeys(e, false));
+
+    // ---------- the plane: parked in the car park, one pilot at a time ----------
+    // Tap it to climb in, then the same pedals and wheel as the cars: the throttle to roll down the lane between the
+    // parked rows and lift off, the brake to come down and land on any open ground, steer to bank and turn. Only one
+    // guest flies at once: while someone's up (their live heartbeat says so), it isn't there for anyone else.
+    const PLANE_HOME = { x: 15.5, z: 46.5, h: -Math.PI / 2 }; // nose west, down the lane
+    function buildPlane() {
+      const g = new T.Group();
+      const part = (x, y, z, w, h, d, color, kind) => {
+        const m = new T.Mesh(carBox, carMat(color, kind || "solid"));
+        m.scale.set(w, h, d);
+        m.position.set(x, y, z);
+        m.castShadow = kind !== "clear";
+        g.add(m);
+        return m;
+      };
+      // +z is the nose, y = 0 is where the wheels touch the ground
+      part(0, 0.95, 0, 0.9, 0.8, 3.0, "#F4F4F0"); // fuselage
+      part(0, 0.86, 0, 0.92, 0.18, 3.02, C.blue); // stripe
+      part(0, 0.95, 1.62, 0.72, 0.62, 0.26, C.fefe); // nose
+      part(0, 1.42, 0.55, 0.8, 0.42, 0.8, C.glassCar, "clear"); // cockpit glass
+      part(0, 1.74, 0.42, 4.2, 0.12, 0.9, C.fefe); // high wing
+      [-0.8, 0.8].forEach((x) => part(x, 1.32, 0.42, 0.06, 0.72, 0.06, "#9AA0A8")); // struts
+      part(0, 1.55, -1.38, 0.08, 0.8, 0.6, C.blue); // tail fin with a yellow cross: Sweden
+      part(0, 1.6, -1.38, 0.09, 0.12, 0.6, C.fefe);
+      part(0, 1.55, -1.3, 0.09, 0.8, 0.12, C.fefe);
+      part(0, 1.12, -1.42, 1.6, 0.08, 0.5, C.fefe); // tailplane
+      [-0.6, 0.6].forEach((x) => part(x, 0.18, 0.62, 0.15, 0.36, 0.36, C.tire)); // wheels
+      part(0, 0.1, -1.3, 0.1, 0.2, 0.2, C.tire);
+      const prop = part(0, 0.95, 1.8, 1.5, 0.12, 0.04, "#2A2D33");
+      return { g, prop };
+    }
+    const planeBits = buildPlane();
+    const plane = { isPlane: true, g: planeBits.g, prop: planeBits.prop, x: PLANE_HOME.x, z: PLANE_HOME.z, y: 1, h: PLANE_HOME.h, alt: 0, speed: 0, bank: 0, pitch: 0, landing: false, idx: -1 };
+    plane.g.visible = false;
+    plane.g.rotation.order = "YXZ";
+    scene.add(plane.g);
+    let pendingPlane = false;
+    const flyingMe = () => !!(me && me.inCar === plane);
+    // someone else is up in it right now
+    const planeTaken = () => Object.keys(liveMap).some((id) => id !== myId && isLive(id) && liveMap[id].pl);
+    // where it can come down: open ground, not under a roof, not on a car
+    function landable(x, z) {
+      const gy = carGround(x, z);
+      if (gy === null || Math.abs(gy - 1) > 0.01 || carAt(Math.floor(x), Math.floor(z))) return false;
+      for (const [bid] of buildings) {
+        const r = byId[bid] ? byId[bid].rect : CUT_RECTS[bid];
+        if (r && x >= r[0] && x <= r[2] + 1 && z >= r[1] && z <= r[3] + 1) return false;
+      }
+      return true;
+    }
+    function posePlane(p, t) {
+      p.g.position.set(p.x + OX, 1 + p.alt, p.z + OZ);
+      p.g.rotation.set(-p.pitch, p.h, p.bank);
+      p.prop.rotation.z += 0.016 * (p.speed > 0.2 || p.alt > 0 ? 8 + p.speed * 3 : 0);
+    }
+    // the pilot in the seat, hands on the yoke
+    function placePilot(a, p, steer) {
+      const av = a.av, cs = Math.cos(p.h), sn = Math.sin(p.h), back = 0.25;
+      av.setPose(0, false);
+      av.root.position.set(p.x + sn * back + OX, 1 + p.alt + 0.45, p.z + cs * back + OZ);
+      av.root.rotation.set(0, p.h, p.bank * 0.6);
+      av.rig.position.y = 0.42 - 0.825 * (av.scale || 1);
+      av.parts.legR.rotation.set(-Math.PI / 2, 0, 0.05);
+      av.parts.legL.rotation.set(-Math.PI / 2, 0, -0.05);
+      av.parts.armR.rotation.set(-1.3, 0, 0.2 + steer * 0.15);
+      av.parts.armL.rotation.set(-1.3, 0, -0.2 + steer * 0.15);
+    }
+    function planeFromTap(cx, cy) {
+      if (!plane.g.visible) return false;
+      setRay(cx, cy);
+      return raycaster.intersectObject(plane.g, true).length > 0;
+    }
+    function goToPlane() {
+      if (planeTaken()) { if (party) party.fx.icon("bang", plane.x, 3.2, plane.z, { size: 0.5 }); sfx("horn", plane.x, plane.z); return; }
+      const side = [plane.x - Math.cos(plane.h) * 1.4, plane.z + Math.sin(plane.h) * 1.4];
+      const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1]));
+      pendingPlane = true;
+      if (at && walkTo(at[0], at[1])) follow = true;
+    }
+    function boardPlane() {
+      pendingPlane = false;
+      if (planeTaken()) return;
+      myPath = [];
+      recNode(Math.floor(me.x), Math.floor(me.z));
+      me.inCar = plane;
+      me.blendX = me.blendZ = 0;
+      plane.landing = false;
+      drive.gas = drive.steer = 0;
+      driveEl.hidden = false;
+      document.body.classList.add("driving");
+      $("get-out").textContent = "Get out";
+      follow = true;
+      goal.fit = Math.max(goal.fit, 26);
+      lastBeat = 0;
+    }
+    // out on the ground beside it (in the air, the button lands first)
+    function leavePlane() {
+      if (!flyingMe()) return;
+      if (plane.alt > 0 || plane.speed > 1.5) { plane.landing = true; return; }
+      me.inCar = null;
+      plane.speed = 0;
+      drive.gas = drive.steer = 0;
+      const side = [plane.x - Math.cos(plane.h) * 1.6, plane.z + Math.sin(plane.h) * 1.6];
+      const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1])) || nearestReachable(Math.floor(plane.x), Math.floor(plane.z)) || SPAWN[0];
+      me.x = at[0] + 0.5;
+      me.z = at[1] + 0.5;
+      me.y = worldY(at[0], at[1]);
+      poof(me.x, me.y, me.z);
+      recNode(at[0], at[1]); // the replay drops in where the flight ended
+      scheduleSave(800);
+      lastBeat = 0;
+      driveEl.hidden = true;
+      document.body.classList.remove("driving");
+      $("get-out").textContent = "Get out";
+    }
+    // Flying it: arcade rules, no stalling, nothing to crash into up there.
+    function flyPlane(dt) {
+      const p = plane, steer = drive.steer, gas = p.landing ? -1 : drive.gas, onGround = p.alt <= 0.001;
+      if (gas > 0) p.speed = Math.min(16, p.speed + 5 * dt);
+      else if (gas < 0) p.speed = Math.max(onGround ? 0 : 7, p.speed - (onGround ? 8 : 4) * dt);
+      else p.speed += ((onGround ? 0 : 10) - p.speed) * Math.min(1, dt * (onGround ? 1.5 : 0.4));
+      p.h += steer * (onGround ? 0.9 * Math.min(1, p.speed / 3) : 1.1) * dt;
+      p.bank += ((onGround ? 0 : -steer * 0.45) - p.bank) * Math.min(1, dt * 3);
+      // up with the throttle open past take-off speed, down with the brake (or landing), level otherwise
+      let climb = 0;
+      if (gas > 0 && p.speed > 8) climb = Math.min(4, (p.speed - 8) * 0.9);
+      else if (gas < 0 && !onGround) climb = -3;
+      const floor = landable(p.x, p.z) ? 0 : 7; // over roofs, cars and the pool it won't come below 7 m
+      p.alt = Math.max(0, Math.min(24, p.alt + climb * dt));
+      if (p.alt < floor) p.alt += Math.min(floor - p.alt, 5 * dt);
+      p.pitch += (climb * 0.07 - p.pitch) * Math.min(1, dt * 3);
+      // keep over the villa: near the edge it turns back towards the middle
+      const out = p.x < X0 + 2 || p.x > X1 - 2 || p.z < Z0 + 2 || p.z > Z1 - 2;
+      if (out && !onGround) {
+        const want = Math.atan2(36 - p.x, 27 - p.z), d = Math.atan2(Math.sin(want - p.h), Math.cos(want - p.h));
+        p.h += Math.sign(d) * Math.min(Math.abs(d), 1.4 * dt);
+      }
+      const nx = Math.max(X0 + 1, Math.min(X1 - 1, p.x + Math.sin(p.h) * p.speed * dt)), nz = Math.max(Z0 + 1, Math.min(Z1 - 1, p.z + Math.cos(p.h) * p.speed * dt));
+      if (p.alt <= 0.001 && !landable(nx, nz) && p.speed > 0.1) { // taxiing into a car or off the ground: bump
+        if (p.speed > 2) { sfx("bonk", p.x, p.z); if (party) party.fx.icon("bang", nx, 2.4, nz, { size: 0.35 }); }
+        p.speed = 0;
+      } else { p.x = nx; p.z = nz; }
+      if (p.landing && p.alt <= 0.001 && p.speed <= 1.5) { p.landing = false; leavePlane(); return; }
+      $("get-out").textContent = p.alt > 0 ? "Land" : "Get out";
+    }
+    // Live pilots on other phones fly a copy of it where their heartbeat says
+    function flyGhostPlane(g, now, dt) {
+      if (!g.plane) { g.plane = Object.assign(buildPlane(), { x: now.x + 0.5, z: now.z + 0.5, h: (now.h / 64) * 2 * Math.PI, alt: now.y || 0, speed: 8, bank: 0, pitch: 0 }); g.plane.g.rotation.order = "YXZ"; scene.add(g.plane.g); }
+      const p = g.plane, a = g.actor, dx = now.x + 0.5 - p.x, dz = now.z + 0.5 - p.z, d = Math.hypot(dx, dz);
+      const step = Math.min(d, Math.min(18, 2 + d * 0.9) * dt);
+      if (d > 1e-3) { p.x += (dx / d) * step; p.z += (dz / d) * step; }
+      const h = d > 1.5 ? Math.atan2(dx, dz) : (now.h / 64) * 2 * Math.PI, turn = Math.atan2(Math.sin(h - p.h), Math.cos(h - p.h));
+      p.h += turn * Math.min(1, dt * 3);
+      p.bank += (-Math.max(-1, Math.min(1, turn)) * 0.45 - p.bank) * Math.min(1, dt * 3);
+      p.alt += ((now.y || 0) - p.alt) * Math.min(1, dt * 1.5);
+      p.speed = d > 0.3 ? 10 : 0;
+      posePlane(p, 0);
+      a.x = p.x; a.z = p.z; a.y = 1 + p.alt; a.drop = 0; a.moving = false; a.idleT = 0;
+      a.inCar = p;
+      placePilot(a, p, 0);
+    }
+    function landGhostPlane(g) {
+      if (!g.plane) return;
+      scene.remove(g.plane.g);
+      g.plane = null;
+      if (g.actor.inCar && g.actor.inCar.prop) g.actor.inCar = null;
+    }
+    function updatePlane(dt) {
+      if (flyingMe()) { posePlane(plane); plane.g.visible = true; return; }
+      plane.g.visible = !building && !planeTaken(); // someone else has it up in the air
+      if (plane.g.visible) posePlane(plane);
+    }
+
 
     // ---------- the sound of a place: tapping a place (joined or not) plays what it sounds like ----------
     // Dance floor and karaoke switch on the music (it plays on the karaoke TV while that's in view); everywhere else a
@@ -3904,6 +4115,7 @@
       updatePuffs(dt);
       updateClothes(dt);
       decks.update(dt, performance.now() / 1000);
+      updatePlane(dt);
       swings.update();
       if (!party) return;
       actorList.length = 0;
@@ -4771,6 +4983,9 @@
       cars: () => carList.map((c) => [+c.x.toFixed(2), +c.z.toFixed(2), +c.h.toFixed(2), +c.speed.toFixed(2), c.dmg, c === drive.car, !!c.fogged, +c.g.rotation.z.toFixed(3), +c.g.position.y.toFixed(3)]),
       holds: () => actorList.map((a) => [a.name, a.av.holding(), !!a.hiddenAct]),
       goCar: (i) => goToCar(carList[i]),
+      goPlane: () => goToPlane(),
+      plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible }),
+      planeScreen: () => { const v = new T.Vector3(plane.x + OX, 2, plane.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       voice: () => ({ mine: Object.keys(myVoice).length, up: myVoiceUp.size, choir: choir.on, bufs: [...clipBufs.values()].filter((b) => b && b !== "wait").length }),
       sayAs: (i, cats) => { const a = [...ghosts.values()][i]; return !!a && voiceSay(a.actor, cats, a.actor.x, a.actor.z, 1); },
       carScreen: (i) => { const c = carList[i], v = new T.Vector3(c.x + OX, c.y + 1, c.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
