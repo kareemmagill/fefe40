@@ -525,6 +525,163 @@
       }
     }
 
+    // ---------- the DJ's three tracks (all original), taking turns: 80s blues, a German flute Schlager, Swedish disco-pop ----------
+    // Each is a style: tempo, steps per bar, bars, and a player for one step. The game says which one (setMusic's style),
+    // the same for everyone; a change waits for the top of a bar.
+    function snare80(t, v) { // the big gated 80s snare
+      hiss(musicBus, t, "bandpass", 1900, 0, 0.7, v, 0.002, 0.07, 0.13);
+      tone(musicBus, t, "triangle", 210, 160, v * 0.6, 0.002, 0.1);
+    }
+    function tamb(t, v) { hiss(musicBus, t, "highpass", 8500, 0, 1, v, 0.001, 0.05); hiss(musicBus, t, "bandpass", 6200, 0, 6, v * 0.6, 0.001, 0.07); }
+    function organ(t, notes, len, v) {
+      const fl = ctx.createBiquadFilter(), g = ctx.createGain(), end = t + len + 0.06;
+      fl.type = "lowpass"; fl.frequency.value = 2400;
+      env(g.gain, t, v, 0.01, 0.05, len);
+      lfo(g.gain, t, 6.5, v * 0.25, len);
+      fl.connect(g); g.connect(musicBus);
+      notes.forEach((m) => { osc("square", mtof(m), t, end, fl).detune.value = -5; osc("sine", mtof(m + 12), t, end, fl); });
+    }
+    // a lead guitar: two saws through a wah-ish filter, bending up into the note
+    function guitar(t, m, len, v, bend) {
+      const fl = ctx.createBiquadFilter(), g = ctx.createGain(), end = t + len + 0.12;
+      fl.type = "lowpass"; fl.Q.value = 5;
+      fl.frequency.setValueAtTime(900, t);
+      fl.frequency.linearRampToValueAtTime(2600, t + 0.06);
+      fl.frequency.exponentialRampToValueAtTime(1400, end);
+      env(g.gain, t, v, 0.006, 0.12, len);
+      fl.connect(g); g.connect(musicBus);
+      [-7, 7].forEach((c) => {
+        const o = osc("sawtooth", mtof(m - (bend || 0)), t, end, fl);
+        o.detune.value = c;
+        if (bend) o.frequency.exponentialRampToValueAtTime(mtof(m), t + 0.09);
+        if (len > 0.3) lfo(o.detune, t + 0.18, 5.8, 18, len);
+      });
+    }
+    // a flute: a breathy sine with a little vibrato coming in; long notes start with a grace note from above
+    function flute(t, m, len, v) {
+      const g = ctx.createGain(), end = t + len + 0.1;
+      env(g.gain, t, v, 0.04, 0.1, len);
+      g.connect(musicBus);
+      const o = osc("sine", mtof(m), t, end, g);
+      osc("triangle", mtof(m), t, end, g).detune.value = 3;
+      if (len > 0.35) { o.frequency.setValueAtTime(mtof(m + 2), t); o.frequency.setValueAtTime(mtof(m), t + 0.05); lfo(o.detune, t + 0.2, 5.5, 14, len); }
+      hiss(musicBus, t, "bandpass", mtof(m) * 2, 0, 4, v * 0.12, 0.02, 0.08, len * 0.6); // breath
+    }
+    function accordion(t, notes, len, v) {
+      const fl = ctx.createBiquadFilter(), g = ctx.createGain(), end = t + len + 0.05;
+      fl.type = "bandpass"; fl.frequency.value = 1300; fl.Q.value = 0.6;
+      env(g.gain, t, v, 0.015, 0.05, len);
+      fl.connect(g); g.connect(musicBus);
+      notes.forEach((m) => [-9, 9].forEach((c) => { osc("sawtooth", mtof(m), t, end, fl).detune.value = c; }));
+    }
+    function piano(t, notes, len, v) {
+      notes.forEach((m) => {
+        tone(musicBus, t, "triangle", mtof(m), 0, v, 0.003, len);
+        tone(musicBus, t, "sine", mtof(m + 12), 0, v * 0.35, 0.002, len * 0.6);
+      });
+    }
+    function strings(t, notes, len, v) { chord(t, notes, v, "sawtooth", 1500, 0.25, Math.max(0.05, len - 0.4), 0.45, 10); }
+    function synthLead(t, m, len, v) {
+      chord(t, [m], v, "square", 2600, 0.01, Math.max(0.02, len * 0.75), 0.12, 6);
+      tone(musicBus, t, "sine", mtof(m + 12), 0, v * 0.5, 0.01, len);
+    }
+    const notesAt = (list, b) => list.filter((n) => n[0] === b);
+    const STYLES = [
+      { // 80s blues: a shuffle in A, 100 bpm, triplet eighths (12 a bar), twelve bars
+        bpm: 100, perBar: 12, bars: 12,
+        roots: [45, 45, 45, 45, 50, 50, 45, 45, 52, 50, 45, 52],
+        voice: { 45: [55, 61, 64, 67], 50: [57, 60, 62, 66], 52: [56, 59, 62, 64] },
+        licks: [
+          [[0, 69, 2, 0], [2, 72, 1, 0], [3, 74, 2, 1], [5, 75, 1, 0], [6, 76, 3, 2], [12, 74, 2, 0], [14, 72, 1, 0], [15, 69, 5, 0]],
+          [[0, 81, 3, 2], [3, 79, 2, 0], [5, 76, 1, 0], [6, 79, 2, 0], [8, 76, 1, 0], [9, 74, 2, 0], [11, 72, 1, 0], [12, 69, 6, 1]],
+          [[0, 74, 2, 0], [2, 77, 1, 0], [3, 78, 3, 1], [6, 74, 2, 0], [8, 72, 1, 0], [9, 69, 3, 0], [15, 72, 2, 0], [17, 74, 4, 2]],
+          [[0, 76, 3, 2], [3, 72, 2, 0], [5, 69, 1, 0], [6, 72, 2, 0], [8, 69, 1, 0], [9, 67, 3, 0], [12, 69, 8, 0]],
+          [[0, 76, 2, 0], [2, 79, 1, 0], [3, 80, 3, 1], [6, 76, 3, 0], [12, 74, 2, 0], [14, 78, 1, 0], [15, 81, 3, 2], [18, 78, 3, 0]],
+          [[0, 81, 1, 0], [1, 79, 1, 0], [2, 76, 1, 0], [3, 75, 1, 0], [4, 74, 1, 0], [5, 72, 1, 0], [6, 69, 3, 0], [12, 68, 3, 0], [15, 71, 3, 0], [18, 76, 6, 1]]
+        ],
+        play(bar, b, t, sd, e) {
+          const r = this.roots[bar], SH = [0, 2, 3, 5, 6, 8, 9, 11], k = SH.indexOf(b);
+          if (b === 0 || b === 6) kick(t, 0.7);
+          if (b === 3 || b === 9) snare80(t, 0.32);
+          if (k >= 0) {
+            hat(t, b % 3 === 0 ? 0.09 : 0.05, false);
+            bass(t, r + [0, 4, 7, 9, 10, 9, 7, 4][k], sd * 1.7, 0.24, false); // the boogie walk
+          }
+          if (b === 2 || b === 8) organ(t, this.voice[r], sd * 1.2, 0.035);
+          if (bar === 0 && b === 0) chord(t, [57, 61, 64, 69], 0.06, "sawtooth", 2200, 0.005, 0.15, 0.4, 9); // an 80s brass stab at the top
+          if (e > 0.3) notesAt(this.licks[bar >> 1], (bar & 1) * 12 + b).forEach(([, m, n, bend]) => guitar(t, m, n * sd * 0.95, 0.06, bend));
+        }
+      },
+      { // a German Schlager with a flute: G major, 126 bpm, four on the floor, sixteen bars
+        bpm: 126, perBar: 16, bars: 16,
+        roots: [43, 48, 50, 43, 40, 48, 50, 43, 48, 43, 50, 43, 48, 43, 50, 43],
+        chords: [[55, 59, 62], [55, 60, 64], [54, 57, 62], [55, 59, 62], [55, 59, 64], [55, 60, 64], [54, 57, 62], [55, 59, 62],
+          [55, 60, 64], [55, 59, 62], [54, 57, 62], [55, 59, 62], [55, 60, 64], [55, 59, 62], [54, 57, 60, 62], [55, 59, 62]],
+        tune: [
+          [[0, 79, 4], [4, 83, 4], [8, 86, 6], [14, 83, 2]], [[0, 84, 4], [4, 83, 2], [6, 81, 2], [8, 79, 8]],
+          [[0, 81, 2], [2, 83, 2], [4, 84, 2], [6, 86, 2], [8, 88, 4], [12, 86, 4]], [[0, 83, 6], [6, 79, 2], [8, 74, 8]],
+          [[0, 79, 2], [2, 81, 2], [4, 83, 4], [8, 88, 6], [14, 86, 2]], [[0, 84, 4], [4, 88, 4], [8, 91, 6], [14, 88, 2]],
+          [[0, 86, 2], [2, 84, 2], [4, 83, 2], [6, 81, 2], [8, 86, 8]], [[0, 91, 2], [2, 86, 2], [4, 83, 2], [6, 79, 2], [8, 79, 8]],
+          [[0, 88, 4], [4, 84, 4], [8, 79, 4], [12, 84, 4]], [[0, 83, 2], [2, 86, 2], [4, 91, 4], [8, 86, 8]],
+          [[0, 84, 2], [2, 86, 2], [4, 84, 2], [6, 83, 2], [8, 81, 4], [12, 78, 4]], [[0, 79, 8], [8, 83, 4], [12, 86, 4]],
+          [[0, 88, 2], [2, 91, 2], [4, 88, 2], [6, 84, 2], [8, 88, 8]], [[0, 86, 2], [2, 83, 2], [4, 79, 4], [8, 83, 4], [12, 86, 4]],
+          [[0, 84, 4], [4, 81, 2], [6, 84, 2], [8, 86, 4], [12, 90, 4]], [[0, 91, 6], [6, 86, 2], [8, 79, 4]]
+        ],
+        play(bar, b, t, sd, e) {
+          const r = this.roots[bar];
+          if ((b & 3) === 0) kick(t, 0.72);
+          if (b === 4 || b === 12) clapHit(musicBus, t, 0.28);
+          if ((b & 3) === 2) { hat(t, 0.09, true); accordion(t, this.chords[bar], sd * 1.3, 0.03); }
+          else if (b & 1) hat(t, 0.03, false);
+          if ((b & 1) === 0) bass(t, r + ((b & 3) === 2 ? 12 : 0), sd * 1.6, 0.24, true); // the octave disco bass
+          if (e > 0.3) notesAt(this.tune[bar], b).forEach(([, m, n]) => flute(t, m, n * sd * 0.92, 0.09));
+          if (bar === 15 && b === 12) [[125, 0.8], [165, 0.7], [220, 0.6]].forEach(([f, v], i) => vowel(musicBus, t + i * 0.012, f, f * 1.15, 560, 1900, v, 0.012, 0.16, 0.08)); // Hey!
+        }
+      },
+      { // Swedish disco-pop, 70s Stockholm style: D minor, 122 bpm, pumping piano, strings, tambourine, sixteen bars
+        bpm: 122, perBar: 16, bars: 16,
+        roots: [38, 46, 41, 48, 38, 46, 43, 45, 41, 48, 38, 46, 43, 48, 41, 45],
+        chords: [[62, 65, 69], [62, 65, 70], [60, 65, 69], [60, 64, 67], [62, 65, 69], [62, 65, 70], [62, 67, 70], [61, 64, 69],
+          [60, 65, 69], [60, 64, 67], [62, 65, 69], [62, 65, 70], [62, 67, 70], [60, 64, 67], [60, 65, 69], [61, 64, 67, 69]],
+        tune: [
+          [[0, 74, 3], [3, 77, 1], [4, 76, 4], [8, 74, 2], [10, 72, 2], [12, 69, 4]], [[0, 70, 2], [2, 72, 2], [4, 74, 4], [8, 77, 6], [14, 76, 2]],
+          [[0, 77, 4], [4, 76, 2], [6, 74, 2], [8, 72, 8]], [[0, 72, 2], [2, 74, 2], [4, 76, 4], [8, 79, 4], [12, 76, 4]],
+          [[0, 74, 3], [3, 77, 1], [4, 81, 4], [8, 79, 2], [10, 77, 2], [12, 76, 4]], [[0, 74, 4], [4, 77, 4], [8, 82, 6], [14, 81, 2]],
+          [[0, 79, 2], [2, 77, 2], [4, 74, 4], [8, 70, 4], [12, 74, 4]], [[0, 73, 8]],
+          [[0, 81, 4], [4, 81, 2], [6, 79, 2], [8, 77, 4], [12, 81, 4]], [[0, 79, 4], [4, 76, 2], [6, 77, 2], [8, 79, 8]],
+          [[0, 77, 4], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 77, 4]], [[0, 74, 4], [4, 72, 2], [6, 70, 2], [8, 74, 8]],
+          [[0, 74, 2], [2, 77, 2], [4, 82, 4], [8, 81, 2], [10, 79, 2], [12, 77, 4]], [[0, 76, 4], [4, 79, 4], [8, 84, 6], [14, 82, 2]],
+          [[0, 81, 4], [4, 77, 4], [8, 74, 4], [12, 72, 4]], [[0, 73, 4], [4, 76, 4], [8, 79, 4], [12, 81, 4]]
+        ],
+        play(bar, b, t, sd, e) {
+          const r = this.roots[bar], ch = this.chords[bar];
+          if ((b & 3) === 0) kick(t, 0.72);
+          if (b === 4 || b === 12) { snare80(t, 0.2); clapHit(musicBus, t, 0.18); }
+          tamb(t, (b & 1) ? 0.05 : 0.025);
+          if ((b & 3) === 2) hat(t, 0.08, true);
+          if ((b & 1) === 0) { bass(t, r + ((b & 3) === 2 ? 12 : 0), sd * 1.6, 0.24, true); piano(t, ch, sd * 1.4, 0.022); }
+          if (b === 0) strings(t, ch.map((m) => m + 12), sd * 16, 0.022);
+          if (bar >= 8 && b === 0) ch.forEach((m, i) => vowel(musicBus, t + i * 0.02, mtof(m), 0, 760, 1150, 0.18, 0.3, 0.5, sd * 12)); // "aah" in the chorus
+          if (bar === 7 && b >= 8) piano(t, [[57, 61, 64, 69], [61, 64, 69, 73], [64, 69, 73, 76], [69, 73, 76, 81]][(b - 8) >> 1].slice((b & 1) * 2, (b & 1) * 2 + 2), sd * 0.9, 0.03); // a glissando up into the chorus
+          if (e > 0.3) notesAt(this.tune[bar], b).forEach(([, m, n]) => synthLead(t, m, n * sd * 0.9, 0.05));
+        }
+      }
+    ];
+    const dj = { style: 0, want: 0, step: 0 };
+    function clubStep(t) {
+      let S = STYLES[dj.style];
+      if (dj.step % S.perBar === 0 && dj.want !== dj.style) { // a new track, from the top of a bar
+        dj.style = dj.want;
+        dj.step = 0;
+        S = STYLES[dj.style];
+        hiss(musicBus, t, "highpass", 4000, 0, 0.6, 0.12, 0.002, 1.2); // with a crash
+      }
+      const sd = 60 / S.bpm / (S.perBar / 4), bar = Math.floor(dj.step / S.perBar) % S.bars, b = dj.step % S.perBar;
+      S.play(bar, b, t, sd, energy);
+      dj.step = (dj.step + 1) % (S.perBar * S.bars);
+      return sd;
+    }
+
     // ---------- mixing and position ----------
     const zoomQuiet = () => (L.fit > 40 ? Math.max(0.3, 40 / L.fit) : 1);
     // People's sounds fade with distance from the listener (your avatar, once you've joined): clear up close, gone by
@@ -771,13 +928,14 @@
       return true;
     }
     // The original loop (not anyone's song) as a backing track, e.g. for the karaoke singalong at (x, z).
-    function setMusic(on, x, z, asClub) {
+    function setMusic(on, x, z, asClub, style) {
       club = !!asClub;
+      if (typeof style === "number" && STYLES[style]) dj.want = style;
       if (typeof x === "number" && isFinite(x)) spot.x = x;
       if (typeof z === "number" && isFinite(z)) spot.z = z;
       if (!!on === musicOn) return;
       musicOn = !!on;
-      if (musicOn && ctx) { step = 0; nextT = ctx.currentTime + 0.1; }
+      if (musicOn && ctx) { step = 0; nextT = ctx.currentTime + 0.1; dj.style = dj.want; dj.step = 0; }
     }
     // An original slow jam for the bedrooms: warm electric-piano chords (Dmaj7, Bm7, Em7, A7) with a tremolo, a soft
     // bass and a gentle rim click, at 66 bpm.
@@ -994,6 +1152,7 @@
       if (nextT < now - 0.2) nextT = now + 0.05; // skipped frames: jump ahead instead of a burst
       const ahead = now + clamp(dt * 2 + 0.05, 0.1, 0.35);
       while (nextT < ahead) {
+        if (club) { nextT += clubStep(nextT); continue; } // the DJ's tracks
         schedule(step, nextT);
         nextT += stepDur();
         step = (step + 1) & 127;

@@ -2811,7 +2811,7 @@
       const r = a.av.root.position; // where the body is drawn, which an action may have nudged off its cell
       tagV.set(r.x, r.y + a.av.height + 0.5, r.z).project(cam);
       const x = ((tagV.x + 1) / 2) * w, y = ((1 - tagV.y) / 2) * h;
-      const show = !a.hiddenAct && view.fit < 70 && x > -60 && x < w + 60 && y > -20 && y < h + 30;
+      const show = !a.hiddenAct && view.fit < 70 && (a.tagged !== false || view.fit < CLOSE_FIT) && x > -60 && x < w + 60 && y > -20 && y < h + 30;
       if (a.tag.hidden === show) a.tag.hidden = !show;
       if (show) a.tag.style.transform = "translate(" + x.toFixed(1) + "px," + y.toFixed(1) + "px) translate(-50%, -100%)";
     }
@@ -5052,8 +5052,13 @@
       head.y += a.headYaw;
       if (want !== 0) head.x -= 0.28 * Math.min(1, 1.6 - Math.abs(a.headYaw));
     }
+    // Name tags: only the 20 guests most recently online wear one (everyone else is just a face in the crowd), unless
+    // the view is zoomed right in, close and intimate, when everyone in it shows their name.
+    const TAGGED = 20, CLOSE_FIT = 14;
+    let tagRankAt = 0;
     function updateTags() {
-      const w = canvas.clientWidth, h = canvas.clientHeight;
+      const w = canvas.clientWidth, h = canvas.clientHeight, t = performance.now();
+      if (t > tagRankAt) { tagRankAt = t + 2000; guestRows().forEach((r, i) => { r.actor.tagged = i < TAGGED; }); }
       if (me) placeTag(me, w, h);
       ghosts.forEach((g) => placeTag(g.actor, w, h));
     }
@@ -6015,7 +6020,7 @@
         snd.setEngine(!!(me && me.inCar && !me.inCar.isBear), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);
         // which music should be on, every frame: the sound engine forgets it whenever sound is switched off for a
         // moment (a voice recording, say), and the DJ has to come back afterwards
-        if (dj.on) snd.setMusic(true, DANCE_CENTER[0], DANCE_CENTER[1], true);
+        if (dj.on) snd.setMusic(true, DANCE_CENTER[0], DANCE_CENTER[1], true, djTrack()); // the DJ's track of the moment (see sound.js)
         else if (choir.on) snd.setMusic(true, LOUNGE[0], LOUNGE[1], false);
         else snd.setMusic(false);
         // a bedroom scene nearby: the slow jam, from the nearest one
@@ -6045,6 +6050,9 @@
       renderer.render(scene, cam);
       requestAnimationFrame(frame);
     }
+
+    // The DJ's three tracks take turns, two minutes each, on the party clock: the same one on every phone.
+    const djTrack = () => Math.floor((Date.now() - PARTY_EPOCH) / 120000) % 3;
 
     // ---------- keeping it smooth ----------
     // A governor watches how long frames really take. When the phone can't keep up, it steps the quality down (fewer
