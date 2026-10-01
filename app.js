@@ -3243,6 +3243,14 @@
       return { g, top, glass, idx, tank: !!sp.tank, x: sp.x, z: sp.z, h: sp.tank ? -Math.PI / 2 : 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
     }
     carList = CAR_SPECS.map((sp, i) => { const c = buildCar(sp, i); c.g.visible = false; return c; });
+    // Martin sank the tank in the pool once already: there it stays
+    carList.forEach((c) => {
+      if (!c.tank) return;
+      try {
+        const s = JSON.parse(lsGet("fefe40.tankSunk") || "null");
+        if (s && Number.isFinite(s.x) && Number.isFinite(s.z)) Object.assign(c, { sunk: true, x: s.x, z: s.z, h: +s.h || 0, y: -0.6 });
+      } catch (e) { /* never sunk */ }
+    });
     // steamy car: fogged windows and a rocking body while Cheeky guests are inside (see actions.js)
     const fogGlass = new T.MeshLambertMaterial({ color: 0xf2f5f8, transparent: true, opacity: 0.92 });
     let steamyCars = [];
@@ -3268,7 +3276,11 @@
         const cx = Math.floor(px), cz = Math.floor(pz);
         if (!inMap(cx, cz)) return { what: "wall", px, pz };
         const gy = carGround(px, pz);
-        if (gy === null || Math.abs(gy - c.y) > 0.55) {
+        if (c.tank) { // the tank rolls through trees, bushes and garden bits; houses stop it, and the pool swallows it
+          if (inHouse(px, pz)) return { what: "wall", px, pz };
+          const st = heightAt(cx, cz);
+          if (st > -50 && st < 1) return { what: "pool", px, pz };
+        } else if (gy === null || Math.abs(gy - c.y) > 0.55) {
           const tree = TREES.find((t) => Math.hypot(t.x - px, t.z - pz) < 1.3);
           return { what: tree ? "tree" : "wall", px, pz, tree };
         }
@@ -3286,7 +3298,27 @@
       }
       return null;
     }
+    // inside one of the houses (or under the cabana's roof)
+    function inHouse(x, z) {
+      for (const [bid] of buildings) {
+        const r = byId[bid] ? byId[bid].rect : CUT_RECTS[bid];
+        if (r && x >= r[0] && x <= r[2] + 1 && z >= r[1] && z <= r[3] + 1) return true;
+      }
+      return false;
+    }
+    // Into the pool it goes, and down: bubbles, the driver bobs up, and that's the end of the tank (on this phone, for good)
+    function sinkTank(c, px, pz) {
+      if (c.sunk) return;
+      c.sunk = true;
+      c.speed = c.vx = c.vz = 0;
+      c.x += Math.sin(c.h) * 1.2; // nose first over the edge
+      c.z += Math.cos(c.h) * 1.2;
+      sfx("cannonball", px, pz);
+      lsSet("fefe40.tankSunk", JSON.stringify({ x: +c.x.toFixed(2), z: +c.z.toFixed(2), h: +c.h.toFixed(3) }));
+      if (drive.car === c) setTimeout(() => { if (drive.car === c) getOut(); }, 900);
+    }
     function crash(c, hit, speed) {
+      if (hit.what === "pool" && c.tank) { sinkTank(c, hit.px, hit.pz); return; }
       const fx = party && party.fx, hard = Math.abs(speed), y = c.y + 0.9;
       c.speed = -speed * 0.3;
       sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
@@ -3325,6 +3357,14 @@
       carList.forEach((c) => {
         if (!c.g.visible) return;
         carDrop(c, dt);
+        if (c.sunk) { // at the bottom of the pool, nose down, the odd bubble coming up
+          const gy = carGround(c.x, c.z);
+          c.y += ((gy === null ? -0.6 : gy - 0.3) - c.y) * Math.min(1, dt * 1.2);
+          c.g.position.set(c.x + OX, c.y + c.drop, c.z + OZ);
+          c.g.rotation.set(0.22, c.h, 0.1);
+          if (party && Math.random() < dt * 2.5) party.fx.icon("bubble", c.x + (Math.random() - 0.5) * 2, 1.0, c.z + (Math.random() - 0.5) * 2, { vy: 0.8, size: 0.3, life: 1.2, max: 1.2 });
+          return;
+        }
         if (c.rider) return; // a guest's replay is driving it (see rideCar)
         const driving = c === drive.car;
         let acc = 0;
@@ -3350,6 +3390,12 @@
         }
         const gy = carGround(c.x, c.z);
         if (gy !== null) c.y += (gy - c.y) * Math.min(1, dt * 10);
+        if (c.tank && Math.abs(c.speed) > 0.5 && party) TREES.forEach((tr) => { // ploughing through a tree: leaves and twigs everywhere
+          if (Math.hypot(tr.x - c.x, tr.z - c.z) > 2 || t < (tr.crunchAt || 0)) return;
+          tr.crunchAt = t + 1.2;
+          sfx("bonk", tr.x, tr.z);
+          for (let i = 0; i < 22; i++) party.fx.block(i % 4 ? "#3F9A3A" : i % 7 ? "#6CC24A" : "#6B4A2A", tr.tx + (Math.random() - 0.5) * 3, Math.max(2, tr.top - Math.random() * 2), tr.tz + (Math.random() - 0.5) * 3, { vy: 0.5 + Math.random(), g: 3, vx: (Math.random() - 0.5) * 2, vz: (Math.random() - 0.5) * 2, size: 0.14, life: 2, max: 2 });
+        });
         const bump = driving && Math.abs(c.speed) > 1 ? Math.sin(t * 23) * 0.015 : 0;
         const steamy = !driving && steamyCars.indexOf(c) >= 0, n = steamy ? c.steamyCount || 2 : 0;
         const rock = steamy ? Math.abs(Math.sin(t * (8 + n))) * 0.07 : 0;
@@ -3395,6 +3441,7 @@
     }
     const isMartin = (name) => /^martin/.test(String(name || "").trim().toLowerCase());
     function goToCar(c) {
+      if (c.sunk) return; // at the bottom of the pool
       if (c.tank && !isMartin(myName)) { // it's Martin's: a toot, and nobody else gets in
         sfx("horn", c.x, c.z);
         if (party) party.fx.icon("bang", c.x, 3.2, c.z, { size: 0.5 });
@@ -5030,6 +5077,8 @@
       holds: () => actorList.map((a) => [a.name, a.av.holding(), !!a.hiddenAct]),
       goCar: (i) => goToCar(carList[i]),
       goPlane: () => goToPlane(),
+      putCar: (i, x, z, h) => { const c = carList[i]; c.x = x; c.z = z; c.h = h; c.speed = 0; },
+      treesNear: (x, z, d) => TREES.filter((t) => Math.hypot(t.x - x, t.z - z) < d).map((t) => [t.x, t.z]),
       plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible }),
       planeScreen: () => { const v = new T.Vector3(plane.x + OX, 2, plane.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       voice: () => ({ mine: Object.keys(myVoice).length, up: myVoiceUp.size, choir: choir.on, bufs: [...clipBufs.values()].filter((b) => b && b !== "wait").length }),
