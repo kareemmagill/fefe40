@@ -288,6 +288,21 @@
       box(x + 0.3, 1.55, z + 3.88, 0.35, 0.2, 0.05, C.bulb, glow);
       box(x + 1.35, 1.55, z + 3.88, 0.35, 0.2, 0.05, C.bulb, glow);
     }
+    // Martin's tank (only a guest called Martin can drive it): tracks, hull, a turret with a Swedish flag, a long gun
+    function tank(x, z) {
+      const box = carParts(x, z, 2.4, 4.4, "#4B5B2E"), G = "#4B5B2E", G2 = "#5C6E38", DK = "#2E3820", TR = "#23252B";
+      CAR_SPECS[CAR_SPECS.length - 1].tank = true;
+      box(x, 1, z, 0.62, 0.72, 4.4, TR);
+      box(x + 1.78, 1, z, 0.62, 0.72, 4.4, TR);
+      for (let i = 0; i < 8; i++) { box(x - 0.02, 1.08, z + 0.2 + i * 0.52, 0.04, 0.5, 0.3, "#3A3D44"); box(x + 2.38, 1.08, z + 0.2 + i * 0.52, 0.04, 0.5, 0.3, "#3A3D44"); }
+      box(x + 0.45, 1.25, z + 0.15, 1.5, 0.62, 4.1, G);
+      box(x + 0.5, 1.6, z + 3.9, 1.4, 0.2, 0.4, G2);
+      box(x + 0.6, 1.87, z + 1.3, 1.2, 0.58, 1.6, G2);
+      box(x + 1.1, 2.06, z + 2.9, 0.2, 0.2, 2.3, DK);
+      box(x + 1.05, 2.01, z + 5.1, 0.3, 0.3, 0.2, DK);
+      box(x + 0.85, 2.45, z + 1.55, 0.7, 0.08, 0.7, DK);
+      [x + 0.58, x + 1.8].forEach((sx) => { box(sx, 2.0, z + 1.75, 0.04, 0.32, 0.5, C.blue); box(sx - 0.005, 2.12, z + 1.75, 0.05, 0.08, 0.5, C.fefe); box(sx - 0.005, 2.0, z + 1.87, 0.05, 0.32, 0.08, C.fefe); });
+    }
     function jeepney(x, z) {
       const box = carParts(x, z, 2, 6, C.chrome);
       box(x + 0.15, 1.25, z + 0.1, 1.7, 1.45, 5.0, C.chrome);
@@ -805,6 +820,7 @@
     jeepney(3, 48);
     car(8, 49, C.car[3]);
     car(12, 49, C.car[4]);
+    tank(13.8, 44.3); // turned to lie along the lane between the rows (see carList)
 
     // lamps
     [[6, 24], [14, 24], [29, 40], [32, 46], [29, 52], [51, 35], [69, 35]].forEach(([x, z]) => lamp(x, z));
@@ -2008,18 +2024,19 @@
       if (!me) return;
       if (me.inCar === plane) { // flying: like driving, but up
         flyPlane(dt);
+        if (me.inCar !== plane) return; // just landed and stepped out onto the deck
         me.x = plane.x;
         me.z = plane.z;
-        me.y = 1 + plane.alt;
+        me.y = WATER_Y + plane.alt;
         me.moving = false;
         me.idleT = 0;
         placePilot(me, plane, drive.steer);
-        if (follow) { goal.target.set(plane.x + OX, 1 + plane.alt * 0.6, plane.z + OZ); clampTarget(goal.target); }
+        if (follow) { goal.target.set(plane.x + OX, WATER_Y + plane.alt * 0.6, plane.z + OZ); clampTarget(goal.target); }
         heartbeat(performance.now());
         return;
       }
       if (pendingPlane && !myPath.length && me.drop === 0) {
-        if (Math.hypot(plane.x - me.x, plane.z - me.z) < 3) boardPlane();
+        if (Math.hypot(plane.x - me.x, plane.z - me.z) < 5) boardPlane();
         else pendingPlane = false;
       }
       if (me.inCar) { // driving: the car moves, the guest rides along
@@ -3219,11 +3236,11 @@
         m.position.set(x + w / 2, y + h / 2, z + d / 2);
         m.castShadow = kind === "solid";
         g.add(m);
-        if (y >= 0.95) top.push(m); // cabin glass and roof: hidden while someone drives, so it's a convertible
+        if (y >= 0.95 && !sp.tank) top.push(m); // cabin glass and roof: hidden while someone drives, so it's a convertible
         if (kind === "clear") glass.push(m);
       });
       scene.add(g);
-      return { g, top, glass, idx, x: sp.x, z: sp.z, h: 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
+      return { g, top, glass, idx, tank: !!sp.tank, x: sp.x, z: sp.z, h: sp.tank ? -Math.PI / 2 : 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
     }
     carList = CAR_SPECS.map((sp, i) => { const c = buildCar(sp, i); c.g.visible = false; return c; });
     // steamy car: fogged windows and a rocking body while Cheeky guests are inside (see actions.js)
@@ -3232,7 +3249,7 @@
     function nearestParkedCar(x, z) {
       let best = null, bd = 7;
       carList.forEach((c) => {
-        if (c === drive.car || c.rider || c.drop > 0 || !c.g.visible || Math.abs(c.speed) > 0.2) return;
+        if (c === drive.car || c.rider || c.tank || c.drop > 0 || !c.g.visible || Math.abs(c.speed) > 0.2) return;
         const d = Math.hypot(c.x - x, c.z - z);
         if (d < bd) { bd = d; best = c; }
       });
@@ -3277,7 +3294,7 @@
       if (!fx) return;
       if (hit.what === "person") { fx.icon("bang", hit.px, y + 1.6, hit.pz, { size: 0.45 }); c.speed = 0; return; }
       if (hard < 2.5) { fx.icon("bang", hit.px, y + 1, hit.pz, { size: 0.3 }); return; }
-      c.dmg = Math.min(8, c.dmg + (hard > 7 ? 2 : 1));
+      if (!c.tank) c.dmg = Math.min(8, c.dmg + (hard > 7 ? 2 : 1)); // nothing dents the tank
       drive.shake = Math.min(0.7, hard * 0.07);
       for (let i = 0; i < 8 + hard * 2; i++) {
         fx.block(i % 3 ? c.color : "#9AA0A8", hit.px, y, hit.pz, { vx: (Math.random() - 0.5) * 5, vz: (Math.random() - 0.5) * 5, vy: 2 + Math.random() * 3, g: 9, size: 0.1 + Math.random() * 0.15, life: 1, max: 1 });
@@ -3292,9 +3309,10 @@
       }
       if (hit.what === "car" && hit.other) { // shunt the other car
         const o = hit.other;
-        o.vx += Math.sin(c.h) * speed * 0.6;
-        o.vz += Math.cos(c.h) * speed * 0.6;
-        o.dmg = Math.min(8, o.dmg + 1);
+        const k = c.tank ? 1.8 : o.tank ? 0 : 0.6; // the tank shoves cars aside; nothing shoves the tank
+        o.vx += Math.sin(c.h) * speed * k;
+        o.vz += Math.cos(c.h) * speed * k;
+        if (!o.tank) o.dmg = Math.min(8, o.dmg + (c.tank ? 2 : 1));
       }
     }
     function carDrop(c, dt) {
@@ -3319,7 +3337,7 @@
         if (driving && drive.steer && Math.abs(c.speed) > 6 && t > (c.skidAt || 0)) { c.skidAt = t + 0.7; sfx("skid", c.x, c.z); }
         const friction = driving && drive.gas ? 0.5 : 4;
         c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), friction * dt);
-        c.speed = Math.max(-5, Math.min(11, c.speed));
+        c.speed = c.tank ? Math.max(-3, Math.min(6, c.speed)) : Math.max(-5, Math.min(11, c.speed)); // the tank is slow and steady
         const k = Math.exp(-dt * 3);
         c.vx *= k;
         c.vz *= k;
@@ -3351,6 +3369,15 @@
     }
     // the driver sits behind the wheel, hands on it
     function placeDriver(a, c, steer) {
+      if (c.tank) { // up out of the hatch, waving
+        const av = a.av, cs = Math.cos(c.h), sn = Math.sin(c.h), lz = -0.05;
+        av.setPose(0, false);
+        av.root.position.set(c.x + lz * sn + OX, c.y + c.drop + 0.62, c.z + lz * cs + OZ);
+        av.root.rotation.y = c.h;
+        av.parts.armR.rotation.set(-2.8 + Math.sin(performance.now() / 180) * 0.3, 0, -0.3);
+        av.parts.armL.rotation.set(-0.4, 0, -0.2 + steer * 0.2);
+        return;
+      }
       const av = a.av, cs = Math.cos(c.h), sn = Math.sin(c.h), lx = -0.42, lz = c.l > 5 ? 1.6 : 0.2;
       av.setPose(0, false);
       av.root.position.set(c.x + lx * cs + lz * sn + OX, c.y + c.drop, c.z - lx * sn + lz * cs + OZ);
@@ -3366,7 +3393,13 @@
       const hits = raycaster.intersectObjects(carList.filter((c) => c.g.visible).map((c) => c.g), true);
       return hits.length ? carList.find((c) => c.g === hits[0].object.parent) : null;
     }
+    const isMartin = (name) => /^martin/.test(String(name || "").trim().toLowerCase());
     function goToCar(c) {
+      if (c.tank && !isMartin(myName)) { // it's Martin's: a toot, and nobody else gets in
+        sfx("horn", c.x, c.z);
+        if (party) party.fx.icon("bang", c.x, 3.2, c.z, { size: 0.5 });
+        return;
+      }
       const side = [c.x - Math.cos(c.h) * (c.w / 2 + 0.7), c.z + Math.sin(c.h) * (c.w / 2 + 0.7)];
       const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1]));
       pendingCar = c;
@@ -3436,11 +3469,15 @@
     }
     window.addEventListener("keyup", (e) => driveKeys(e, false));
 
-    // ---------- the plane: parked in the car park, one pilot at a time ----------
-    // Tap it to climb in, then the same pedals and wheel as the cars: the throttle to roll down the lane between the
-    // parked rows and lift off, the brake to come down and land on any open ground, steer to bank and turn. Only one
-    // guest flies at once: while someone's up (their live heartbeat says so), it isn't there for anyone else.
-    const PLANE_HOME = { x: 15.5, z: 46.5, h: -Math.PI / 2 }; // nose west, down the lane
+    // ---------- the seaplane: moored on the swimming pool, one pilot at a time ----------
+    // Tap it to climb in, then the same pedals and wheel as the cars: the throttle to skim down the pool and lift off,
+    // steer to bank and turn, the brake (or Land) to come down. It only takes off from and lands on the pool; Land flies
+    // it back there by itself. Only one guest flies at once: while someone's up (their live heartbeat says so), it
+    // isn't on the pool for anyone else.
+    const PLANE_HOME = { x: 62.5, z: 21, h: -Math.PI / 2 }; // nose west, the length of the pool ahead
+    const WATER_Y = 0.87, POOL = [53.4, 18.4, 66.6, 23.6], POOL_C = [60, 21];
+    const onPool = (x, z) => x >= POOL[0] && x <= POOL[2] && z >= POOL[1] && z <= POOL[3];
+    const nearPool = (x, z) => x >= 50 && x <= 70 && z >= 14 && z <= 34; // the pool deck: low enough to come in over
     function buildPlane() {
       const g = new T.Group();
       const part = (x, y, z, w, h, d, color, kind) => {
@@ -3462,13 +3499,17 @@
       part(0, 1.6, -1.38, 0.09, 0.12, 0.6, C.fefe);
       part(0, 1.55, -1.3, 0.09, 0.8, 0.12, C.fefe);
       part(0, 1.12, -1.42, 1.6, 0.08, 0.5, C.fefe); // tailplane
-      [-0.6, 0.6].forEach((x) => part(x, 0.18, 0.62, 0.15, 0.36, 0.36, C.tire)); // wheels
-      part(0, 0.1, -1.3, 0.1, 0.2, 0.2, C.tire);
+      [-0.75, 0.75].forEach((x) => { // floats, and the struts holding them
+        part(x, 0.1, 0.1, 0.32, 0.28, 2.7, "#F4F4F0");
+        part(x, 0.1, 1.42, 0.24, 0.2, 0.2, C.fefe);
+        part(x * 0.6, 0.42, 0.55, 0.06, 0.45, 0.06, "#9AA0A8");
+        part(x * 0.6, 0.42, -0.5, 0.06, 0.45, 0.06, "#9AA0A8");
+      });
       const prop = part(0, 0.95, 1.8, 1.5, 0.12, 0.04, "#2A2D33");
       return { g, prop };
     }
     const planeBits = buildPlane();
-    const plane = { isPlane: true, g: planeBits.g, prop: planeBits.prop, x: PLANE_HOME.x, z: PLANE_HOME.z, y: 1, h: PLANE_HOME.h, alt: 0, speed: 0, bank: 0, pitch: 0, landing: false, idx: -1 };
+    const plane = { isPlane: true, g: planeBits.g, prop: planeBits.prop, x: PLANE_HOME.x, z: PLANE_HOME.z, y: WATER_Y, h: PLANE_HOME.h, alt: 0, speed: 0, bank: 0, pitch: 0, landing: false, idx: -1 };
     plane.g.visible = false;
     plane.g.rotation.order = "YXZ";
     scene.add(plane.g);
@@ -3476,18 +3517,17 @@
     const flyingMe = () => !!(me && me.inCar === plane);
     // someone else is up in it right now
     const planeTaken = () => Object.keys(liveMap).some((id) => id !== myId && isLive(id) && liveMap[id].pl);
-    // where it can come down: open ground, not under a roof, not on a car
-    function landable(x, z) {
-      const gy = carGround(x, z);
-      if (gy === null || Math.abs(gy - 1) > 0.01 || carAt(Math.floor(x), Math.floor(z))) return false;
-      for (const [bid] of buildings) {
-        const r = byId[bid] ? byId[bid].rect : CUT_RECTS[bid];
-        if (r && x >= r[0] && x <= r[2] + 1 && z >= r[1] && z <= r[3] + 1) return false;
+    // a dry spot to step out onto (or walk to it from): the nearest bit of pool deck
+    function dryNear(x, z) {
+      let best = null, bd = Infinity;
+      for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
+        const cx = Math.floor(x) + dx, cz = Math.floor(z) + dz, d = dx * dx + dz * dz;
+        if (d < bd && inMap(cx, cz) && reach[cellIdx(cx, cz)] && heightAt(cx, cz) >= 1) { bd = d; best = [cx, cz]; }
       }
-      return true;
+      return best;
     }
     function posePlane(p, t) {
-      p.g.position.set(p.x + OX, 1 + p.alt, p.z + OZ);
+      p.g.position.set(p.x + OX, WATER_Y + p.alt, p.z + OZ);
       p.g.rotation.set(-p.pitch, p.h, p.bank);
       p.prop.rotation.z += 0.016 * (p.speed > 0.2 || p.alt > 0 ? 8 + p.speed * 3 : 0);
     }
@@ -3495,7 +3535,7 @@
     function placePilot(a, p, steer) {
       const av = a.av, cs = Math.cos(p.h), sn = Math.sin(p.h), back = 0.25;
       av.setPose(0, false);
-      av.root.position.set(p.x + sn * back + OX, 1 + p.alt + 0.45, p.z + cs * back + OZ);
+      av.root.position.set(p.x + sn * back + OX, WATER_Y + p.alt + 0.45, p.z + cs * back + OZ);
       av.root.rotation.set(0, p.h, p.bank * 0.6);
       av.rig.position.y = 0.42 - 0.825 * (av.scale || 1);
       av.parts.legR.rotation.set(-Math.PI / 2, 0, 0.05);
@@ -3510,8 +3550,7 @@
     }
     function goToPlane() {
       if (planeTaken()) { if (party) party.fx.icon("bang", plane.x, 3.2, plane.z, { size: 0.5 }); sfx("horn", plane.x, plane.z); return; }
-      const side = [plane.x - Math.cos(plane.h) * 1.4, plane.z + Math.sin(plane.h) * 1.4];
-      const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1]));
+      const at = dryNear(plane.x, plane.z);
       pendingPlane = true;
       if (at && walkTo(at[0], at[1])) follow = true;
     }
@@ -3538,8 +3577,7 @@
       me.inCar = null;
       plane.speed = 0;
       drive.gas = drive.steer = 0;
-      const side = [plane.x - Math.cos(plane.h) * 1.6, plane.z + Math.sin(plane.h) * 1.6];
-      const at = nearestReachable(Math.floor(side[0]), Math.floor(side[1])) || nearestReachable(Math.floor(plane.x), Math.floor(plane.z)) || SPAWN[0];
+      const at = dryNear(plane.x, plane.z) || SPAWN[0];
       me.x = at[0] + 0.5;
       me.z = at[1] + 0.5;
       me.y = worldY(at[0], at[1]);
@@ -3560,10 +3598,17 @@
       p.h += steer * (onGround ? 0.9 * Math.min(1, p.speed / 3) : 1.1) * dt;
       p.bank += ((onGround ? 0 : -steer * 0.45) - p.bank) * Math.min(1, dt * 3);
       // up with the throttle open past take-off speed, down with the brake (or landing), level otherwise
+      // Land: head for the pool and come down over it
+      if (p.landing && !onGround) {
+        const want = Math.atan2(POOL_C[0] - p.x, POOL_C[1] - p.z), d = Math.atan2(Math.sin(want - p.h), Math.cos(want - p.h));
+        p.h += Math.sign(d) * Math.min(Math.abs(d), 1.6 * dt);
+        p.speed += (8 - p.speed) * Math.min(1, dt);
+      }
       let climb = 0;
       if (gas > 0 && p.speed > 8) climb = Math.min(4, (p.speed - 8) * 0.9);
-      else if (gas < 0 && !onGround) climb = -3;
-      const floor = landable(p.x, p.z) ? 0 : 7; // over roofs, cars and the pool it won't come below 7 m
+      else if (gas < 0 && !onGround && (!p.landing || Math.hypot(POOL_C[0] - p.x, POOL_C[1] - p.z) < 14)) climb = -3;
+      // it touches down only on the pool; over the pool deck it can come in low, anywhere else it stays above the roofs
+      const floor = onPool(p.x, p.z) ? 0 : nearPool(p.x, p.z) ? 2 : 7;
       p.alt = Math.max(0, Math.min(24, p.alt + climb * dt));
       if (p.alt < floor) p.alt += Math.min(floor - p.alt, 5 * dt);
       p.pitch += (climb * 0.07 - p.pitch) * Math.min(1, dt * 3);
@@ -3574,10 +3619,11 @@
         p.h += Math.sign(d) * Math.min(Math.abs(d), 1.4 * dt);
       }
       const nx = Math.max(X0 + 1, Math.min(X1 - 1, p.x + Math.sin(p.h) * p.speed * dt)), nz = Math.max(Z0 + 1, Math.min(Z1 - 1, p.z + Math.cos(p.h) * p.speed * dt));
-      if (p.alt <= 0.001 && !landable(nx, nz) && p.speed > 0.1) { // taxiing into a car or off the ground: bump
+      if (p.alt <= 0.001 && !onPool(nx, nz) && p.speed > 0.1) { // on the water: the pool's edge stops it
         if (p.speed > 2) { sfx("bonk", p.x, p.z); if (party) party.fx.icon("bang", nx, 2.4, nz, { size: 0.35 }); }
         p.speed = 0;
       } else { p.x = nx; p.z = nz; }
+      if (p.alt <= 0.001 && p.speed > 3 && party && Math.random() < dt * 8) party.fx.block("#DDF4FF", p.x - Math.sin(p.h) * 1.4, WATER_Y + 0.1, p.z - Math.cos(p.h) * 1.4, { vy: 1.5, vx: (Math.random() - 0.5), vz: (Math.random() - 0.5), size: 0.12 }); // spray
       if (p.landing && p.alt <= 0.001 && p.speed <= 1.5) { p.landing = false; leavePlane(); return; }
       $("get-out").textContent = p.alt > 0 ? "Land" : "Get out";
     }
@@ -3593,7 +3639,7 @@
       p.alt += ((now.y || 0) - p.alt) * Math.min(1, dt * 1.5);
       p.speed = d > 0.3 ? 10 : 0;
       posePlane(p, 0);
-      a.x = p.x; a.z = p.z; a.y = 1 + p.alt; a.drop = 0; a.moving = false; a.idleT = 0;
+      a.x = p.x; a.z = p.z; a.y = WATER_Y + p.alt; a.drop = 0; a.moving = false; a.idleT = 0;
       a.inCar = p;
       placePilot(a, p, 0);
     }
