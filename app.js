@@ -288,7 +288,9 @@
       box(x + 0.3, 1.55, z + 3.88, 0.35, 0.2, 0.05, C.bulb, glow);
       box(x + 1.35, 1.55, z + 3.88, 0.35, 0.2, 0.05, C.bulb, glow);
     }
-    // Martin's tank (only a guest called Martin can drive it): tracks, hull, a turret with a Swedish flag, a long gun
+    // the German flag: black, red and gold bands, top to bottom
+    const DE = ["#151515", "#DD0000", "#FFCE00"];
+    // Martin's tank (only a guest called Martin can drive it): tracks, hull, a turret with a German flag, a long gun
     function tank(x, z) {
       const box = carParts(x, z, 2.4, 4.4, "#4B5B2E"), G = "#4B5B2E", G2 = "#5C6E38", DK = "#2E3820", TR = "#23252B";
       CAR_SPECS[CAR_SPECS.length - 1].tank = true;
@@ -301,7 +303,7 @@
       box(x + 1.1, 2.06, z + 2.9, 0.2, 0.2, 2.3, DK);
       box(x + 1.05, 2.01, z + 5.1, 0.3, 0.3, 0.2, DK);
       box(x + 0.85, 2.45, z + 1.55, 0.7, 0.08, 0.7, DK);
-      [x + 0.58, x + 1.8].forEach((sx) => { box(sx, 2.0, z + 1.75, 0.04, 0.32, 0.5, C.blue); box(sx - 0.005, 2.12, z + 1.75, 0.05, 0.08, 0.5, C.fefe); box(sx - 0.005, 2.0, z + 1.87, 0.05, 0.32, 0.08, C.fefe); });
+      [x + 0.58, x + 1.8].forEach((sx) => DE.forEach((c, i) => box(sx, 2.3 - i * 0.11, z + 1.7, 0.04, 0.11, 0.6, c)));
     }
     function jeepney(x, z) {
       const box = carParts(x, z, 2, 6, C.chrome);
@@ -3535,24 +3537,27 @@
         g.add(m);
         return m;
       };
-      // +z is the nose, y = 0 is where the wheels touch the ground
-      part(0, 0.95, 0, 0.9, 0.8, 3.0, "#F4F4F0"); // fuselage
-      part(0, 0.86, 0, 0.92, 0.18, 3.02, C.blue); // stripe
-      part(0, 0.95, 1.62, 0.72, 0.62, 0.26, C.fefe); // nose
-      part(0, 1.42, 0.55, 0.8, 0.42, 0.8, C.glassCar, "clear"); // cockpit glass
-      part(0, 1.74, 0.42, 4.2, 0.12, 0.9, C.fefe); // high wing
-      [-0.8, 0.8].forEach((x) => part(x, 1.32, 0.42, 0.06, 0.72, 0.06, "#9AA0A8")); // struts
-      part(0, 1.55, -1.38, 0.08, 0.8, 0.6, C.blue); // tail fin with a yellow cross: Sweden
-      part(0, 1.6, -1.38, 0.09, 0.12, 0.6, C.fefe);
-      part(0, 1.55, -1.3, 0.09, 0.8, 0.12, C.fefe);
-      part(0, 1.12, -1.42, 1.6, 0.08, 0.5, C.fefe); // tailplane
+      // +z is the nose, y = 0 is where the floats touch the water. The Red Baron's red Fokker triplane, on floats.
+      const RED = "#B5121B", DARK = "#7E0C12", WOOD = "#8A5A2B", STRUT = "#4A3324";
+      part(0, 0.95, 0.6, 0.82, 0.8, 1.7, RED); // fuselage
+      part(0, 0.95, -0.85, 0.6, 0.6, 1.3, RED); // tapering to the tail
+      part(0, 0.95, 1.55, 0.86, 0.84, 0.22, DARK); // engine cowling
+      part(0, 0.95, 1.67, 0.5, 0.5, 0.04, "#2A2D33"); // its open front
+      part(0, 1.37, 0.28, 0.6, 0.06, 0.5, "#2A2D33"); // the open cockpit
+      [-0.13, 0.13].forEach((x) => part(x, 1.43, 0.85, 0.07, 0.07, 0.6, "#1E1F22")); // twin guns
+      [[0.6, 3.4], [1.33, 3.9], [2.02, 4.5]].forEach(([y, span]) => part(0, y, 1.0, span, 0.08, 0.62, RED)); // three wings
+      [-1.55, 1.55].forEach((x) => part(x, 1.31, 1.0, 0.06, 1.42, 0.06, STRUT)); // the struts between them
+      [-0.28, 0.28].forEach((x) => part(x, 1.68, 1.0, 0.05, 0.62, 0.05, STRUT));
+      [-1.65, 1.65].forEach((x) => DE.forEach((c, i) => part(x, 2.07, 1.21 - i * 0.2, 0.62, 0.02, 0.2, c))); // German flags on the top wing
+      part(0, 1.05, -1.38, 1.5, 0.06, 0.48, RED); // tailplane
+      DE.forEach((c, i) => part(0, 1.69 - i * 0.2, -1.4, 0.08, 0.2, 0.56, c)); // the rudder: a German flag
       [-0.75, 0.75].forEach((x) => { // floats, and the struts holding them
-        part(x, 0.1, 0.1, 0.32, 0.28, 2.7, "#F4F4F0");
-        part(x, 0.1, 1.42, 0.24, 0.2, 0.2, C.fefe);
-        part(x * 0.6, 0.42, 0.55, 0.06, 0.45, 0.06, "#9AA0A8");
-        part(x * 0.6, 0.42, -0.5, 0.06, 0.45, 0.06, "#9AA0A8");
+        part(x, 0.1, 0.35, 0.34, 0.28, 2.6, DARK);
+        part(x, 0.12, 1.6, 0.26, 0.2, 0.2, RED);
+        part(x * 0.85, 0.37, 1.0, 0.05, 0.42, 0.05, STRUT);
+        part(x * 0.85, 0.37, 0.0, 0.05, 0.42, 0.05, STRUT);
       });
-      const prop = part(0, 0.95, 1.8, 1.5, 0.12, 0.04, "#2A2D33");
+      const prop = part(0, 0.95, 1.73, 1.6, 0.14, 0.05, WOOD);
       return { g, prop };
     }
     const planeBits = buildPlane();
