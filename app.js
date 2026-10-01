@@ -290,7 +290,7 @@
     }
     // the German flag: black, red and gold bands, top to bottom
     const DE = ["#151515", "#DD0000", "#FFCE00"];
-    // Martin's tank (only a guest called Martin can drive it): tracks, hull, a turret with a German flag, a long gun
+    // The tank (only Germans can drive it): tracks, hull, a turret with a German flag, a long gun
     function tank(x, z) {
       const box = carParts(x, z, 2.4, 4.4, "#4B5B2E"), G = "#4B5B2E", G2 = "#5C6E38", DK = "#2E3820", TR = "#23252B";
       CAR_SPECS[CAR_SPECS.length - 1].tank = true;
@@ -1754,10 +1754,21 @@
     const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
     const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private browsing */ } };
     let myId = lsGet("fefe40.me");
+    // who shared the link that brought this phone here (the first one wins), and how often I've shared it on
+    let myRef = lsGet("fefe40.ref") || "", myShares = Math.max(0, parseInt(lsGet("fefe40.shares") || "0", 10) || 0);
     if (!myId || !ID_RE.test(myId)) {
       myId = (Math.random().toString(36).slice(2, 10) + Date.now().toString(36)).slice(0, 16);
       lsSet("fefe40.me", myId);
     }
+    // arriving through someone's shared link: a new guest remembers who sent it; the address bar is tidied either way
+    try {
+      const u = new URL(location.href), from = u.searchParams.get("from");
+      if (from !== null) {
+        if (!myRef && !lsGet("fefe40.look") && ID_RE.test(from) && from !== myId) { myRef = from; lsSet("fefe40.ref", from); }
+        u.searchParams.delete("from");
+        history.replaceState(null, "", u.pathname + u.search + u.hash);
+      }
+    } catch (e) { /* an old browser: leave the address as it is */ }
 
     // Walkable ground: for each one-metre cell, the voxel people stand on, or NONE.
     // A cell needs 2 m of headroom; leaves and grass tufts are soft and don't block.
@@ -2257,6 +2268,8 @@
         trackN: loopTrack("night"),
         voice: [...myVoiceUp].join(","),
         cc: myCountry || "",
+        ref: myRef,
+        shares: myShares,
         at: Date.now()
       };
       Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
@@ -2609,10 +2622,13 @@
         b.className = "guest";
         const name = document.createElement("span");
         name.textContent = withFlag(r.me ? r.name + " (you)" : r.name, r.actor && r.actor.cc);
-        const badge = document.createElement("span");
-        badge.className = r.live ? "badge live" : "badge";
-        badge.textContent = r.live ? "Live" : "Replay";
-        b.append(name, badge);
+        b.append(name);
+        if (r.live) { // live right now; replays just have their name
+          const badge = document.createElement("span");
+          badge.className = "badge live";
+          badge.textContent = "Live";
+          b.append(badge);
+        }
         b.addEventListener("click", () => {
           follow = !!r.me;
           goal.fit = Math.min(goal.fit, 20);
@@ -2827,6 +2843,7 @@
           T, scene, OX, OZ, heightAt, trees: TREES, candy: CANDY_RING,
           isNight: () => night,
           isMusic: () => dj.on,
+          isBurning: (t) => { const f = fires.get(TREES.indexOf(t)); return !!(f && f.stage === "burn"); },
           // the middle of the nearest deep-water cell and its floor height, for pushing someone in
           nearestWater(x, z) {
             let best = null, bd = 36;
@@ -3371,7 +3388,7 @@
       return { g, top, glass, idx, tank: !!sp.tank, x: sp.x, z: sp.z, h: sp.tank ? -Math.PI / 2 : 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
     }
     carList = CAR_SPECS.map((sp, i) => { const c = buildCar(sp, i); c.g.visible = false; return c; });
-    // Martin sank the tank in the pool once already: there it stays
+    // The tank was sunk in the pool on this phone once already: there it stays
     carList.forEach((c) => {
       if (!c.tank) return;
       try {
@@ -3578,10 +3595,11 @@
       const hits = raycaster.intersectObjects(carList.filter((c) => c.g.visible).map((c) => c.g), true);
       return hits.length ? carList.find((c) => c.g === hits[0].object.parent) : null;
     }
-    const isMartin = (name) => /^martin/.test(String(name || "").trim().toLowerCase());
+    // the tank and the seaplane are for Germans only: guests whose phone is on German time (see flags.js)
+    const isGerman = () => myCountry === "DE";
     function goToCar(c) {
       if (c.sunk) return; // at the bottom of the pool
-      if (c.tank && !isMartin(myName)) { // it's Martin's: a toot, and nobody else gets in
+      if (c.tank && !isGerman()) { // Germans only: a toot, and nobody else gets in
         sfx("horn", c.x, c.z);
         if (party) party.fx.icon("bang", c.x, 3.2, c.z, { size: 0.5 });
         return;
@@ -3634,7 +3652,7 @@
       document.body.classList.remove("driving");
     }
     // ---------- trees on fire ----------
-    // A hard crash into a tree, or a shell from Martin's tank, sets it alight: its leaves flicker orange and red with
+    // A hard crash into a tree, or a shell from the tank, sets it alight: its leaves flicker orange and red with
     // flames and smoke pouring off for half a minute, and the fire can jump to the trees next to it. Then it stands there
     // black, bare and smoking, and grows back green three minutes later. The fire you start goes out with your live
     // heartbeat, so everyone at the party sees the same trees burn (and, worked out from the same start, the same spread).
@@ -3680,6 +3698,7 @@
     // repaint tree ti: "burn" (flickering flames, more of it charred as it goes), "char" (black, most leaves gone) or
     // "green" (back as it was)
     function paintTree(ti, mode, k, flick) {
+      const f = fires.get(ti), burnt = f && f.burnt ? f.burnt : 1;
       treeFaces(ti).forEach(({ col, pos, faces, leaf }) => {
         const A = col.array, O = keepOrig(origCols, col), PA = pos.array, PO = keepOrig(origPos, pos);
         let moved = false;
@@ -3691,14 +3710,14 @@
             if (mode === "burn") {
               if (!leaf[n] || h < k * 0.8) { r = 40 * shade; g = 32 * shade; b = 28 * shade; } // already burnt through
               else { const c = FLAME[(hash01(f + flick * 131) * 4) | 0], s = 0.55 + 0.6 * shade; r = c[0] * s; g = c[1] * s; b = c[2] * s; }
-            } else if (mode === "char") {
+            } else if (mode === "char" && !(leaf[n] && h >= burnt)) { // (leaves the fire didn't reach before it was put out stay green)
               const ember = leaf[n] && h > 0.93 && k < 0.4; // a few embers glowing for a while
               r = (ember ? 190 : 38) * shade; g = (ember ? 50 : 31) * shade; b = (ember ? 18 : 27) * shade;
             }
             A[v] = Math.min(255, r); A[v + 1] = Math.min(255, g); A[v + 2] = Math.min(255, b);
           }
           // burnt leaves fall away: squash most of them to nothing, and bring them back when it regrows
-          const gone = mode === "char" && leaf[n] && h < 0.72;
+          const gone = mode === "char" && leaf[n] && h < 0.72 * burnt;
           if (gone !== (PA[o] !== PO[o] || PA[o + 3] !== PO[o + 3] || PA[o + 7] !== PO[o + 7])) {
             moved = true;
             const cx = (PO[o] + PO[o + 3] + PO[o + 6] + PO[o + 9]) / 4, cy = (PO[o + 1] + PO[o + 4] + PO[o + 7] + PO[o + 10]) / 4, cz = (PO[o + 2] + PO[o + 5] + PO[o + 8] + PO[o + 11]) / 4;
@@ -3751,6 +3770,9 @@
             }
             if (Math.random() < dt * 3) fx.icon("smoke", t.tx + (Math.random() - 0.5) * 2, t.top + 0.6, t.tz + (Math.random() - 0.5) * 2, { size: 0.8 + Math.random() * 0.6, vy: 1.3, life: 2.6, max: 2.6 });
           }
+          // someone peeing on it (Cheeky guests do, at a burning tree) puts it out after a couple of seconds
+          if (party && actorList.some((a) => party.actOf(a) === "pee" && Math.hypot(a.x - t.x, a.z - t.z) < 1.9)) f.pee = (f.pee || 0) + dt;
+          if (f.pee > 2.5) { douse(ti, f, age); return; }
           if (!f.spread && age >= FIRE_SPREAD && f.gen < 3) { // the fire jumps to neighbours: the same ones on every phone
             f.spread = true;
             TREES.forEach((q, j) => {
@@ -3773,8 +3795,16 @@
       if (snd && snd.enabled) snd.setFire(lit.length > 0, lit.length ? lit[0][0].tx : 0, lit.length ? lit[0][0].tz : 0);
     }
     const FIRE_COLS = ["#FF4A16", "#FF9A2E", "#FFD23F"];
+    function douse(ti, f, age) {
+      const t = TREES[ti];
+      f.burnt = Math.max(0.15, age / FIRE_BURN); // how much of it had gone up
+      f.t0 = Date.now() - FIRE_BURN * 1000;
+      f.spread = true; // and it doesn't jump any further
+      sfx("whoosh", t.tx, t.tz, { pitch: 2.2 });
+      if (party) for (let i = 0; i < 10; i++) party.fx.icon("puff", t.tx + (Math.random() - 0.5) * 2.5, t.h * 0.6 + Math.random() * 2, t.tz + (Math.random() - 0.5) * 2.5, { size: 0.7 + Math.random() * 0.5, vy: 1.4, life: 1.8, max: 1.8 });
+    }
 
-    // ---------- Martin's cannon ----------
+    // ---------- the tank's cannon ----------
     // In the tank a red button (or F, or the space bar) fires the gun: the shell flies where the turret points, and
     // where it lands it blows up. A tree it hits, or one close by, catches fire.
     const fireBtn = document.getElementById("fire");
@@ -3944,6 +3974,7 @@
       return raycaster.intersectObject(plane.g, true).length > 0;
     }
     function goToPlane() {
+      if (!isGerman()) { if (party) party.fx.icon("bang", plane.x, 3.2, plane.z, { size: 0.5 }); sfx("horn", plane.x, plane.z); return; } // Germans only
       if (planeTaken()) { if (party) party.fx.icon("bang", plane.x, 3.2, plane.z, { size: 0.5 }); sfx("horn", plane.x, plane.z); return; }
       const at = dryNear(plane.x, plane.z);
       pendingPlane = true;
@@ -5379,7 +5410,9 @@
       updateGuestCount();
     }
     exitBtn.addEventListener("click", exitParty);
-    // Invite: copy the party's link (never the ?npc test link) so it can be pasted to friends
+    // Share: the party's link (never the ?npc test link) with ?from= the sharer's guest id, through the phone's share
+    // sheet or copied. Whoever opens it remembers who sent it (myRef, in their guest record as ref), and every tap on
+    // Share is counted (shares), so the organiser can draw who brought whom (#shares).
     const INVITE_URL = "https://kareemmagill.github.io/fefe40/";
     function toast(msg, ms) {
       hint.textContent = msg;
@@ -5403,10 +5436,19 @@
         if (ok) resolve(); else reject(new Error("copy"));
       });
     }
+    $("invite").hidden = false;
     $("invite").addEventListener("click", () => {
-      copyText(INVITE_URL)
-        .then(() => toast("Link copied! Paste it to whoever you want to invite to the party."))
-        .catch(() => toast("Copy this link and send it to whoever you want to invite: " + INVITE_URL, 12000));
+      const url = INVITE_URL + "?from=" + myId;
+      myShares++;
+      lsSet("fefe40.shares", String(myShares));
+      scheduleSave(500);
+      if (navigator.share) {
+        navigator.share({ title: "FiFi4000", text: "Come to FiFi's 40th!", url }).catch(() => {});
+        return;
+      }
+      copyText(url)
+        .then(() => toast("Link copied", 2500))
+        .catch(() => toast(url, 12000));
     });
     function findMe() {
       if (!me) return;
@@ -5450,6 +5492,7 @@
       },
       fires: () => [...fires.entries()].map(([i, f]) => [i, f.stage, f.gen, +((Date.now() - f.t0) / 1000).toFixed(1)]),
       burn: (i) => lightTree(TREES[i], true),
+      douse: (i) => { const f = fires.get(i); if (f) douse(i, f, (Date.now() - f.t0) / 1000); },
       fireAge: (i, sec) => { const f = fires.get(i); if (f) f.t0 = Date.now() - sec * 1000; },
       shoot: () => shoot(),
       treeFaces: (i) => treeFaces(i).reduce((n, p) => n + p.faces.length, 0),
@@ -5610,6 +5653,72 @@
       alert("Done: " + extra.length + " duplicate" + (extra.length > 1 ? "s" : "") + " removed.");
       location.replace(location.pathname);
     }
+    // #shares: for the organiser, a web of who brought whom. Every guest is a dot (bigger for everyone their link
+    // brought in, all the way down the chain), with a line from whoever shared the link they came through.
+    async function showShares() {
+      if (!store.shared) return;
+      const box = document.createElement("div");
+      box.className = "shares";
+      box.innerHTML = '<div class="shares-head"><b>Shares</b><span class="shares-sum">Loading…</span><button type="button" class="shares-x" aria-label="Close">×</button></div><div class="shares-web"></div><ol class="shares-top"></ol>';
+      document.body.appendChild(box);
+      box.querySelector(".shares-x").addEventListener("click", () => location.replace(location.pathname));
+      let ids = [];
+      try { ids = Object.keys(await store.index()).filter((id) => ID_RE.test(id)); } catch (e) { box.querySelector(".shares-sum").textContent = "Couldn't reach the party database."; return; }
+      const field = (id, k) => fetch(DB_URL + "/fefe40/guests/" + id + "/" + k + ".json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const people = new Map();
+      for (let i = 0; i < ids.length; i += 12) { // a few small fields each, not whole records (faces and walks are big)
+        await Promise.all(ids.slice(i, i + 12).map(async (id) => {
+          const [name, ref, cc, shares] = await Promise.all(["name", "ref", "cc", "shares"].map((k) => field(id, k)));
+          if (typeof name !== "string") return;
+          people.set(id, { id, name: name.slice(0, 20), ref: typeof ref === "string" && ID_RE.test(ref) ? ref : "", cc: typeof cc === "string" && /^[A-Z]{2}$/.test(cc) ? cc : "", shares: Math.max(0, +shares || 0), kids: [], x: 0, y: 0, vx: 0, vy: 0 });
+        }));
+        box.querySelector(".shares-sum").textContent = "Loading… " + people.size + " of " + ids.length;
+      }
+      const nodes = [...people.values()], edges = [];
+      nodes.forEach((n) => { const p = people.get(n.ref); if (p && p !== n) { p.kids.push(n); edges.push([p, n]); } else n.ref = ""; });
+      const reach = (n, seen) => { if (seen.has(n)) return 0; seen.add(n); return n.kids.reduce((s, k) => s + 1 + reach(k, seen), 0); };
+      nodes.forEach((n) => { n.brought = reach(n, new Set()); });
+      const viaLink = nodes.filter((n) => n.ref).length, totalShares = nodes.reduce((s, n) => s + n.shares, 0);
+      box.querySelector(".shares-sum").textContent = nodes.length + " guests · " + viaLink + " came through a shared link · " + totalShares + " shares";
+      // a force layout: everyone pushes everyone away, the links pull together, and a little gravity keeps it round
+      const N = nodes.length, K = 60;
+      nodes.forEach((n, i) => { const a = i * 2.39996, r = 20 * Math.sqrt(i + 1); n.x = Math.cos(a) * r; n.y = Math.sin(a) * r; });
+      const steps = Math.max(60, Math.min(400, Math.round(60000 / Math.max(1, N))));
+      for (let it = 0; it < steps; it++) {
+        const cool = 1 - it / steps;
+        for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+          const p = nodes[i], q = nodes[j], dx = p.x - q.x, dy = p.y - q.y, d2 = dx * dx + dy * dy + 0.01, f = (K * K) / d2;
+          p.vx += dx * f * 0.05; p.vy += dy * f * 0.05; q.vx -= dx * f * 0.05; q.vy -= dy * f * 0.05;
+        }
+        edges.forEach(([p, q]) => {
+          const dx = q.x - p.x, dy = q.y - p.y, d = Math.sqrt(dx * dx + dy * dy) + 0.01, f = (d - K) / d * 0.08;
+          p.vx += dx * f; p.vy += dy * f; q.vx -= dx * f; q.vy -= dy * f;
+        });
+        nodes.forEach((n) => {
+          n.vx -= n.x * 0.004; n.vy -= n.y * 0.004;
+          const v = Math.hypot(n.vx, n.vy), m = Math.min(v, 30 * cool + 1) / (v || 1);
+          n.x += n.vx * m; n.y += n.vy * m;
+          n.vx *= 0.5; n.vy *= 0.5;
+        });
+      }
+      const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y), pad = 70;
+      const x0 = Math.min(0, ...xs) - pad, y0 = Math.min(0, ...ys) - pad, w = Math.max(0, ...xs) - x0 + pad, h = Math.max(0, ...ys) - y0 + pad;
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const flag = (cc) => (cc && window.FefeFlags ? FefeFlags.flag(cc) + " " : "");
+      const rad = (n) => 7 + Math.sqrt(n.brought) * 5;
+      let svg = '<svg viewBox="' + [x0, y0, w, h].map((v) => v.toFixed(0)).join(" ") + '" width="' + Math.max(320, w).toFixed(0) + '" height="' + Math.max(320, h).toFixed(0) + '"><defs><marker id="arr" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#7FA6D8"/></marker></defs>';
+      edges.forEach(([p, q]) => {
+        const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1, r1 = rad(p), r2 = rad(q) + 2;
+        svg += '<line x1="' + (p.x + (dx / d) * r1).toFixed(1) + '" y1="' + (p.y + (dy / d) * r1).toFixed(1) + '" x2="' + (q.x - (dx / d) * r2).toFixed(1) + '" y2="' + (q.y - (dy / d) * r2).toFixed(1) + '" stroke="#7FA6D8" stroke-width="2" marker-end="url(#arr)"/>';
+      });
+      nodes.forEach((n) => {
+        svg += '<circle cx="' + n.x.toFixed(1) + '" cy="' + n.y.toFixed(1) + '" r="' + rad(n).toFixed(1) + '" fill="' + (n.ref ? "#2F6FD1" : "#FEFE40") + '" stroke="#0B2A55" stroke-width="2"><title>' + esc(n.name) + " · brought " + n.brought + " · shared " + n.shares + "×</title></circle>";
+        svg += '<text x="' + n.x.toFixed(1) + '" y="' + (n.y + rad(n) + 14).toFixed(1) + '" text-anchor="middle" font-size="12" fill="#FFFFFF">' + esc(flag(n.cc) + n.name) + (n.brought ? " (" + n.brought + ")" : "") + "</text>";
+      });
+      box.querySelector(".shares-web").innerHTML = svg + "</svg>";
+      box.querySelector(".shares-top").innerHTML = nodes.filter((n) => n.brought || n.shares).sort((a, b) => b.brought - a.brought || b.shares - a.shares).slice(0, 15)
+        .map((n) => "<li>" + esc(flag(n.cc) + n.name) + " — brought " + n.brought + (n.kids.length !== n.brought ? " (" + n.kids.length + " directly)" : "") + ", shared " + n.shares + "×</li>").join("");
+    }
     async function wipeEverything() {
       if (!store.shared || !confirm("Delete every guest, walk and voice clip at the party? This can't be undone.")) return;
       const ids = new Set([myId]);
@@ -5631,6 +5740,7 @@
       setNight(true); // the party opens in the evening (the switch can still pick day before going in)
       if (location.hash === "#wipe-everything") setTimeout(wipeEverything, 500);
       if (location.hash === "#remove-duplicates") setTimeout(removeDuplicates, 500);
+      if (location.hash === "#shares") setTimeout(showShares, 300);
       if (typeof data.az === "number") {
         finishBuild();
         goal.az = view.az = data.az;

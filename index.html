@@ -469,6 +469,15 @@ body.driving .dock { display: none; }
 .exit-btn { border: 0; color: var(--yellow); font-family: var(--font-body); cursor: pointer; pointer-events: auto; touch-action: manipulation; }
 .exit-btn:focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
 .invite-btn { background: var(--yellow); color: var(--blue-deep); font-weight: 700; }
+/* #shares: the organiser's web of who brought whom */
+.shares { position: fixed; inset: 0; z-index: 50; overflow: auto; background: #0B2A55; color: #FFFFFF; padding: 12px 16px 24px; font: 14px/1.4 system-ui, sans-serif; }
+.shares-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; background: #0B2A55; padding: 6px 0; }
+.shares-head b { font-size: 20px; }
+.shares-sum { flex: 1; opacity: 0.85; }
+.shares-x { font-size: 26px; line-height: 1; background: none; border: 0; color: #FFFFFF; cursor: pointer; padding: 4px 8px; }
+.shares-web { overflow: auto; margin: 8px 0; }
+.shares-web svg { display: block; max-width: none; }
+.shares-top { margin: 8px 0 0 20px; padding: 0; }
 .guest-list {
   display: grid;
   width: min(260px, calc(100vw - 120px));
@@ -520,7 +529,7 @@ body.driving .dock { display: none; }
     <p class="logo">FiFi4000</p>
     <div class="brand-row">
       <button type="button" class="meta guests-btn" id="guests" aria-expanded="false" aria-controls="guest-list" hidden></button>
-      <button type="button" class="meta exit-btn invite-btn" id="invite" hidden>Invite</button>
+      <button type="button" class="meta exit-btn invite-btn" id="invite" hidden>Share</button>
       <label class="meta exit-btn" id="test-faces" for="test-face-files" hidden>Test faces</label>
       <input type="file" id="test-face-files" accept="image/*" multiple hidden>
       <button type="button" class="meta exit-btn" id="exit" hidden>Exit</button>
@@ -693,13 +702,13 @@ body.driving .dock { display: none; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202610011047"></script>
-<script src="outfits-hd.js?v=202610011047"></script>
-<script src="sound.js?v=202610011047"></script>
-<script src="flags.js?v=202610011047"></script>
-<script src="voice-lines.js?v=202610011047"></script>
-<script src="voice.js?v=202610011047"></script>
-<script src="actions.js?v=202610011047"></script>
-<script src="app.js?v=202610011047"></script>
+<script src="avatar.js?v=202610011059"></script>
+<script src="outfits-hd.js?v=202610011059"></script>
+<script src="sound.js?v=202610011059"></script>
+<script src="flags.js?v=202610011059"></script>
+<script src="voice-lines.js?v=202610011059"></script>
+<script src="voice.js?v=202610011059"></script>
+<script src="actions.js?v=202610011059"></script>
+<script src="app.js?v=202610011059"></script>
 </body>
 </html>

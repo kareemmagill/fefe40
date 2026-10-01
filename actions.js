@@ -627,7 +627,10 @@
       const dx = tree.x - a.x, dz = tree.z - a.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
       if (first.has(tree)) return { act: "cheer", face: [tree.x, tree.z] };
       first.set(tree, a);
-      const act = cheeky(a) ? choose(a, ["climb", "pee", "climb"], t, 24, "tree") : "climb";
+      // a tree on fire: Cheeky guests pee it out; nobody climbs it
+      const burning = env.burning(tree);
+      if (burning && !cheeky(a)) return { act: "cheer", face: [tree.x, tree.z] };
+      const act = burning ? "pee" : cheeky(a) ? choose(a, ["climb", "pee", "climb"], t, 24, "tree") : "climb";
       const facing = Math.atan2(ux, uz);
       if (act === "climb") return { act, tree, spot: [tree.x - ux * 0.55, tree.z - uz * 0.55], heading: facing };
       if (male(a)) return { act, tree, spot: [tree.x - ux * 0.95, tree.z - uz * 0.95], heading: facing };
@@ -1476,6 +1479,7 @@
       scene(room, count) { scenes.push({ room, count }); },
       nearestCar(pt) { return ctx.nearestCar ? ctx.nearestCar(pt[0], pt[1]) : null; },
       steamy(car, count) { if (steamies.indexOf(car) < 0) { steamies.push(car); car.steamyCount = count; } },
+      burning(tree) { return !!(ctx.isBurning && ctx.isBurning(tree)); },
       atCandy(a) { return (ctx.candy || []).some(([x, z]) => Math.floor(a.x) === x && Math.floor(a.z) === z); },
       treeNear(a) {
         let best = null, bd = 1.55;
