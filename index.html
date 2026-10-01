@@ -195,6 +195,9 @@ body {
 }
 .pedal svg { width: 30px; height: 30px; }
 .pedal.go { background: var(--yellow); }
+.pedal[hidden] { display: none; }
+.pedal.fire { background: #E5322D; color: #FFFFFF; }
+.drive-mid { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .pedal.down { transform: translateY(3px); box-shadow: 0 1px 0 var(--blue-edge); }
 body.driving .dock { display: none; }
 .hint {
@@ -565,7 +568,10 @@ body.driving .dock { display: none; }
       <button type="button" class="pedal" id="steer-l" aria-label="Steer left"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 4 6 12l9 8z"/></svg></button>
       <button type="button" class="pedal" id="steer-r" aria-label="Steer right"><svg viewBox="0 0 24 24" fill="currentColor"><path d="m9 4 9 8-9 8z"/></svg></button>
     </div>
-    <button type="button" class="enter alt" id="get-out">Get out</button>
+    <div class="drive-mid">
+      <button type="button" class="pedal fire" id="fire" aria-label="Fire the cannon" hidden><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 5.4L20 6l-3.3 4.6L22 13l-5.6 1.2L18 20l-5-3.2L8 21l.6-5.8L3 14l4.9-3.1L5 5.6l5.4 1.6z"/></svg></button>
+      <button type="button" class="enter alt" id="get-out">Get out</button>
+    </div>
     <div class="pedals" role="group" aria-label="Pedals">
       <button type="button" class="pedal" id="brake" aria-label="Brake and reverse"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h16l-8 9z"/></svg></button>
       <button type="button" class="pedal go" id="gas" aria-label="Accelerate"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 15h16L12 6z"/></svg></button>
@@ -687,13 +693,13 @@ body.driving .dock { display: none; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202610011017"></script>
-<script src="outfits-hd.js?v=202610011017"></script>
-<script src="sound.js?v=202610011017"></script>
-<script src="flags.js?v=202610011017"></script>
-<script src="voice-lines.js?v=202610011017"></script>
-<script src="voice.js?v=202610011017"></script>
-<script src="actions.js?v=202610011017"></script>
-<script src="app.js?v=202610011017"></script>
+<script src="avatar.js?v=202610011047"></script>
+<script src="outfits-hd.js?v=202610011047"></script>
+<script src="sound.js?v=202610011047"></script>
+<script src="flags.js?v=202610011047"></script>
+<script src="voice-lines.js?v=202610011047"></script>
+<script src="voice.js?v=202610011047"></script>
+<script src="actions.js?v=202610011047"></script>
+<script src="app.js?v=202610011047"></script>
 </body>
 </html>

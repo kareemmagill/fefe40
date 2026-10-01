@@ -2560,6 +2560,7 @@
       if (me.inCar && me.inCar.isPlane) { beat.pl = 1; beat.y = Math.round(me.inCar.alt * 2) / 2; beat.h = hdg64(me.inCar.h); } // flying, how high, which way
       else if (me.inCar) { beat.c = me.inCar.idx + 1; beat.h = hdg64(me.inCar.h); } // which car they're driving, and which way
       clothesBeat(beat); // what I'm wearing, and where my clothes are while they're off
+      if (myFire && Date.now() - myFire.t < FIRE_BURN * 1000) { beat.f = myFire.i + 1; beat.ft = myFire.t; } // a tree I set on fire
       Promise.resolve(store.beat(myId, beat)).catch(() => {});
     }
     let polling = false;
@@ -2577,8 +2578,11 @@
           const c = l.c | 0;
           if (Number.isFinite(t) && inMap(x, z)) clean[id] = { t, x, z, n: l.n === 1 ? 1 : 0, c: c >= 1 && c <= carList.length ? c : 0, h: (((l.h | 0) % 64) + 64) % 64, pl: l.pl === 1 ? 1 : 0, y: Math.max(0, Math.min(30, +l.y || 0)) };
           if (clean[id]) cleanWear(clean[id], l); // what they're wearing, and where their clothes are
+          const f = l.f | 0, ft = +l.ft;
+          if (clean[id] && f >= 1 && f <= TREES.length && Number.isFinite(ft) && Math.abs(Date.now() - ft) < FIRE_BURN * 1000) { clean[id].f = f; clean[id].ft = ft; }
         });
         liveMap = clean;
+        Object.keys(clean).forEach((id) => { if (id !== myId && clean[id].f) ignite(clean[id].f - 1, clean[id].ft, 0); }); // someone else's fire
         if (Object.keys(clean).some((id) => id !== myId && liveHere(id) && !ghosts.has(id))) syncGuests();
       } catch (e) { /* keep the last known positions */ }
       polling = false;
@@ -3441,10 +3445,19 @@
       lsSet("fefe40.tankSunk", JSON.stringify({ x: +c.x.toFixed(2), z: +c.z.toFixed(2), h: +c.h.toFixed(3) }));
       if (drive.car === c) setTimeout(() => { if (drive.car === c) getOut(); }, 900);
     }
+    let crashCount = 0; // for tests
     function crash(c, hit, speed) {
       if (hit.what === "pool" && c.tank) { sinkTank(c, hit.px, hit.pz); return; }
       const fx = party && party.fx, hard = Math.abs(speed), y = c.y + 0.9;
       c.speed = -speed * 0.3;
+      if (hit.what === "car" && hit.other) { // shunt the other car, however hard
+        const o = hit.other, k = c.tank ? 1.8 : o.tank ? 0 : 0.6; // the tank shoves cars aside; nothing shoves the tank
+        o.vx += Math.sin(c.h) * speed * k;
+        o.vz += Math.cos(c.h) * speed * k;
+        if (!o.tank && hard >= 2.5) o.dmg = Math.min(8, o.dmg + (c.tank ? 2 : 1));
+      }
+      if (hard < 0.8) { c.speed = 0; return; } // only touching: it just stops (and holding the pedal into a wall isn't a crash every frame)
+      crashCount++;
       sfx(hit.what === "person" ? "horn" : hard < 2.5 ? "bonk" : "crash", hit.px, hit.pz, { vol: Math.min(1, 0.4 + hard / 10) });
       if (c === drive.car && me && hard > 2.5) setTimeout(() => voiceSay(me, ["drive", "react"], hit.px, hit.pz, 0.8), 500); // and what the driver has to say about it
       if (!fx) return;
@@ -3458,18 +3471,18 @@
       fx.icon("bang", hit.px, y + 1.4, hit.pz, { size: 0.7 });
       for (let i = 0; i < 3; i++) fx.icon("star", hit.px + (Math.random() - 0.5), y + 1.2, hit.pz + (Math.random() - 0.5), { size: 0.4, vx: (Math.random() - 0.5) * 2, vy: 2 });
       for (let i = 0; i < 4; i++) fx.icon("puff", hit.px + (Math.random() - 0.5), y + 0.5, hit.pz + (Math.random() - 0.5), { size: 0.7, vy: 0.8, life: 1.5, max: 1.5 });
+      if (hit.what === "tree" && hit.tree && hard >= 6) lightTree(hit.tree, c === drive.car); // hard enough, and it goes up
       if (hit.what === "tree" && hit.tree) { // shake the leaves (and a coconut) loose
         const t = hit.tree;
         for (let i = 0; i < 26; i++) fx.block(i % 4 ? "#3F9A3A" : "#6CC24A", t.tx + (Math.random() - 0.5) * 3, t.top - Math.random(), t.tz + (Math.random() - 0.5) * 3, { vy: 0, g: 3, vx: (Math.random() - 0.5), vz: (Math.random() - 0.5), size: 0.16, life: 2.2, max: 2.2 });
         if (t.palm) fx.arc("#6B4A2A", [t.tx, t.top - 0.5, t.tz], [hit.px, c.y + 1.8, hit.pz], 0.6, 0.3, 0.35);
       }
-      if (hit.what === "car" && hit.other) { // shunt the other car
-        const o = hit.other;
-        const k = c.tank ? 1.8 : o.tank ? 0 : 0.6; // the tank shoves cars aside; nothing shoves the tank
-        o.vx += Math.sin(c.h) * speed * k;
-        o.vz += Math.cos(c.h) * speed * k;
-        if (!o.tank) o.dmg = Math.min(8, o.dmg + (c.tank ? 2 : 1));
-      }
+    }
+    // Something already overlaps the car (it was shoved into it, or someone walked into it): moving away from that is
+    // allowed, so it can never get stuck for good
+    function backingOff(c, hit, nx, nz) {
+      const now = carHit(c, c.x, c.z, c.h);
+      return !!now && (nx - c.x) * (now.px - c.x) + (nz - c.z) * (now.pz - c.z) < 0 && Math.hypot(hit.px - now.px, hit.pz - now.pz) < 1.2;
     }
     function carDrop(c, dt) {
       if (!(c.drop > 0)) return;
@@ -3505,11 +3518,13 @@
         const k = Math.exp(-dt * 3);
         c.vx *= k;
         c.vz *= k;
-        const turn = driving ? drive.steer * dt * 2.1 * Math.max(-1, Math.min(1, c.speed / 3.5)) : 0;
-        if (Math.abs(c.speed) > 0.01 || Math.abs(c.vx) + Math.abs(c.vz) > 0.02) {
+        const turn = !driving || !drive.steer ? 0
+          : c.tank ? drive.steer * dt * 1.3 * (c.speed < -0.2 ? -1 : 1) // on tracks it turns at any speed, on the spot too
+          : drive.steer * dt * 2.1 * Math.max(-1, Math.min(1, c.speed / 3.5));
+        if (Math.abs(c.speed) > 0.01 || Math.abs(c.vx) + Math.abs(c.vz) > 0.02 || turn) {
           const nh = c.h + turn, nx = c.x + Math.sin(nh) * c.speed * dt + c.vx * dt, nz = c.z + Math.cos(nh) * c.speed * dt + c.vz * dt;
           const hit = carHit(c, nx, nz, nh);
-          if (hit) { crash(c, hit, c.speed); c.vx = c.vz = 0; }
+          if (hit && !backingOff(c, hit, nx, nz)) { crash(c, hit, c.speed); c.vx = c.vz = 0; }
           else { c.x = nx; c.z = nz; c.h = nh; }
         }
         const gy = carGround(c.x, c.z);
@@ -3589,6 +3604,7 @@
       drive.car = c;
       drive.gas = drive.steer = 0;
       c.top.forEach((m) => { m.visible = false; });
+      fireBtn.hidden = !c.tank;
       driveEl.hidden = false;
       document.body.classList.add("driving");
       follow = true;
@@ -3614,8 +3630,212 @@
       recNode(at[0], at[1]); // and the replay climbs out here
       scheduleSave(800);
       driveEl.hidden = true;
+      fireBtn.hidden = true;
       document.body.classList.remove("driving");
     }
+    // ---------- trees on fire ----------
+    // A hard crash into a tree, or a shell from Martin's tank, sets it alight: its leaves flicker orange and red with
+    // flames and smoke pouring off for half a minute, and the fire can jump to the trees next to it. Then it stands there
+    // black, bare and smoking, and grows back green three minutes later. The fire you start goes out with your live
+    // heartbeat, so everyone at the party sees the same trees burn (and, worked out from the same start, the same spread).
+    const FIRE_BURN = 26, FIRE_SPREAD = 8, FIRE_SMOKE = 55, FIRE_REGROW = 180;
+    const fires = new Map(); // tree index -> { t0: epoch ms it catches, gen: how many jumps from the first tree }
+    let myFire = null; // the fire I started: { i, t }
+    const hash01 = (n) => { let x = Math.imul((n | 0) ^ 0x9e3779b9, 0x85ebca6b); x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35); x ^= x >>> 16; return (x >>> 0) / 4294967296; };
+    const origCols = new Map(), origPos = new Map(); // a mesh's colours and corners before any fire touched it
+    const keepOrig = (map, attr) => map.get(attr) || (map.set(attr, attr.array.slice()), map.get(attr));
+    // the faces of the world mesh that belong to tree ti: leaves nearer its crown than any other tree's, and its trunk
+    function treeFaces(ti) {
+      const t = TREES[ti];
+      if (t.faces) return t.faces;
+      const R = 3.9, out = [];
+      meshes.forEach((m) => {
+        const g = m.geometry, pos = g.getAttribute("position"), col = g.getAttribute("color"), nor = g.getAttribute("normal");
+        if (m.isInstancedMesh || !pos || !col || !nor || !g.getAttribute("aDrop")) return;
+        const bs = g.boundingSphere;
+        if (bs && Math.hypot(bs.center.x - OX - t.tx, bs.center.z - OZ - t.tz) > bs.radius + R + 1) return;
+        const P = pos.array, N = nor.array, C3 = col.array, faces = [], leaf = [];
+        for (let f = 0; f < pos.count; f += 4) {
+          const o = f * 3;
+          const wx = (P[o] + P[o + 3] + P[o + 6] + P[o + 9]) / 4 - OX, wy = (P[o + 1] + P[o + 4] + P[o + 7] + P[o + 10]) / 4, wz = (P[o + 2] + P[o + 5] + P[o + 8] + P[o + 11]) / 4 - OZ;
+          if (Math.abs(wx - t.tx) > R || Math.abs(wz - t.tz) > R || wy < 0.9 || wy > t.top + 1.5) continue;
+          const vx = wx - (N[o] / 127) * 0.25, vy = wy - (N[o + 1] / 127) * 0.25, vz = wz - (N[o + 2] / 127) * 0.25;
+          const isLeaf = (metaV(Math.floor(vx * 2), Math.floor(vy * 2), Math.floor(vz * 2)) & 128) !== 0;
+          let mine;
+          if (isLeaf) {
+            const d = Math.hypot(vx - t.tx, vz - t.tz);
+            mine = vy > 1.4 && d < R && !TREES.some((q, j) => j !== ti && Math.hypot(vx - q.tx, vz - q.tz) < d - 0.01);
+          } else { // the trunk, leaning from its foot to the crown: brown things close to that line
+            const k = Math.max(0, Math.min(1, (vy - 1) / Math.max(1, t.h - 1)));
+            const brown = C3[o] > C3[o + 2] + 8 && C3[o] >= C3[o + 1];
+            mine = brown && vy < t.h + 1.6 && Math.hypot(vx - (t.x + (t.tx - t.x) * k), vz - (t.z + (t.tz - t.z) * k)) < 1.1;
+          }
+          if (mine) { faces.push(f); leaf.push(isLeaf ? 1 : 0); }
+        }
+        if (faces.length) out.push({ m, col, pos, faces: Int32Array.from(faces), leaf: Uint8Array.from(leaf) });
+      });
+      return (t.faces = out);
+    }
+    const FLAME = [[255, 74, 22], [255, 138, 30], [255, 196, 58], [205, 38, 14]];
+    // repaint tree ti: "burn" (flickering flames, more of it charred as it goes), "char" (black, most leaves gone) or
+    // "green" (back as it was)
+    function paintTree(ti, mode, k, flick) {
+      treeFaces(ti).forEach(({ col, pos, faces, leaf }) => {
+        const A = col.array, O = keepOrig(origCols, col), PA = pos.array, PO = keepOrig(origPos, pos);
+        let moved = false;
+        for (let n = 0; n < faces.length; n++) {
+          const f = faces[n], h = hash01(f * 7 + ti), o = f * 3;
+          for (let q = 0; q < 4; q++) {
+            const v = o + q * 3, shade = Math.max(O[v], O[v + 1], O[v + 2]) / 210;
+            let r = O[v], g = O[v + 1], b = O[v + 2];
+            if (mode === "burn") {
+              if (!leaf[n] || h < k * 0.8) { r = 40 * shade; g = 32 * shade; b = 28 * shade; } // already burnt through
+              else { const c = FLAME[(hash01(f + flick * 131) * 4) | 0], s = 0.55 + 0.6 * shade; r = c[0] * s; g = c[1] * s; b = c[2] * s; }
+            } else if (mode === "char") {
+              const ember = leaf[n] && h > 0.93 && k < 0.4; // a few embers glowing for a while
+              r = (ember ? 190 : 38) * shade; g = (ember ? 50 : 31) * shade; b = (ember ? 18 : 27) * shade;
+            }
+            A[v] = Math.min(255, r); A[v + 1] = Math.min(255, g); A[v + 2] = Math.min(255, b);
+          }
+          // burnt leaves fall away: squash most of them to nothing, and bring them back when it regrows
+          const gone = mode === "char" && leaf[n] && h < 0.72;
+          if (gone !== (PA[o] !== PO[o] || PA[o + 3] !== PO[o + 3] || PA[o + 7] !== PO[o + 7])) {
+            moved = true;
+            const cx = (PO[o] + PO[o + 3] + PO[o + 6] + PO[o + 9]) / 4, cy = (PO[o + 1] + PO[o + 4] + PO[o + 7] + PO[o + 10]) / 4, cz = (PO[o + 2] + PO[o + 5] + PO[o + 8] + PO[o + 11]) / 4;
+            for (let q = 0; q < 4; q++) {
+              const v = o + q * 3;
+              PA[v] = gone ? cx : PO[v]; PA[v + 1] = gone ? cy : PO[v + 1]; PA[v + 2] = gone ? cz : PO[v + 2];
+            }
+          }
+        }
+        col.needsUpdate = true;
+        if (moved) pos.needsUpdate = true;
+      });
+    }
+    // tree ti catches at t0 (epoch ms, maybe a little in the future when it's the fire jumping across)
+    function ignite(ti, t0, gen) {
+      if (!(ti >= 0 && ti < TREES.length) || !Number.isFinite(t0)) return false;
+      const f = fires.get(ti);
+      if (f && f.t0 <= t0 + 500) return false; // already burning, burnt, or catching sooner anyway
+      if (f && f.stage) paintTree(ti, "green");
+      fires.set(ti, { t0, gen: gen || 0, stage: null, spread: false, flickAt: 0, flick: 0 });
+      return true;
+    }
+    function lightTree(t, mine) {
+      const ti = TREES.indexOf(t), now = Date.now();
+      if (ti >= 0 && ignite(ti, now, 0) && mine) { myFire = { i: ti, t: now }; lastBeat = 0; } // out with the next heartbeat
+    }
+    const fireLights = [0, 1].map(() => { const l = new T.PointLight(0xff7a2a, 0, 13, 2); scene.add(l); return l; });
+    function updateFires(dt) {
+      const now = Date.now(), lx = me ? me.x : view.target.x - OX, lz = me ? me.z : view.target.z - OZ;
+      const lit = [];
+      fires.forEach((f, ti) => {
+        const t = TREES[ti], age = (now - f.t0) / 1000;
+        if (age < 0) return;
+        if (age >= FIRE_REGROW) { paintTree(ti, "green"); fires.delete(ti); return; }
+        const stage = age < FIRE_BURN ? "burn" : "char";
+        if (stage !== f.stage) {
+          f.stage = stage;
+          if (stage === "burn") sfx("whoosh", t.tx, t.tz);
+          else paintTree(ti, "char", 0);
+        }
+        const cy = t.palm ? t.top - 0.6 : t.h + 1.2;
+        if (stage === "burn") {
+          if (now > f.flickAt) { f.flickAt = now + 130; f.flick++; paintTree(ti, "burn", age / FIRE_BURN, f.flick); }
+          lit.push([t, cy, Math.hypot(t.tx - lx, t.tz - lz)]);
+          if (party) {
+            const fx = party.fx, rate = Math.min(28, 90 / Math.max(1, fires.size)) * (age < 2 ? age / 2 : age > FIRE_BURN - 4 ? (FIRE_BURN - age) / 4 : 1);
+            for (let n = 0; n < 3; n++) if (Math.random() < rate * dt / 3) {
+              const a = Math.random() * Math.PI * 2, r = Math.random() * (t.palm ? 2.4 : 2.2);
+              fx.block(FIRE_COLS[(Math.random() * 3) | 0], t.tx + Math.cos(a) * r, cy - 0.8 + Math.random() * 1.8, t.tz + Math.sin(a) * r, { vy: 1.2 + Math.random() * 1.6, g: -1.5, vx: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, size: 0.2 + Math.random() * 0.22, life: 0.55 + Math.random() * 0.5, max: 1 });
+            }
+            if (Math.random() < dt * 3) fx.icon("smoke", t.tx + (Math.random() - 0.5) * 2, t.top + 0.6, t.tz + (Math.random() - 0.5) * 2, { size: 0.8 + Math.random() * 0.6, vy: 1.3, life: 2.6, max: 2.6 });
+          }
+          if (!f.spread && age >= FIRE_SPREAD && f.gen < 3) { // the fire jumps to neighbours: the same ones on every phone
+            f.spread = true;
+            TREES.forEach((q, j) => {
+              if (j === ti || Math.hypot(q.tx - t.tx, q.tz - t.tz) > 6.5) return;
+              const r = hash01(ti * 131 + j * 7 + Math.floor(f.t0 / 1000));
+              if (r < 0.55) ignite(j, f.t0 + (FIRE_SPREAD + r * 8) * 1000, f.gen + 1);
+            });
+          }
+        } else if (age < FIRE_SMOKE) { // black and smoking
+          if (party && Math.random() < dt * 1.5) party.fx.icon("smoke", t.tx + (Math.random() - 0.5) * 1.5, cy, t.tz + (Math.random() - 0.5) * 1.5, { size: 0.6, vy: 0.9, life: 2.2, max: 2.2 });
+          if (age < FIRE_BURN + 12 && now > f.flickAt) { f.flickAt = now + 1500; paintTree(ti, "char", (age - FIRE_BURN) / 12); } // the embers die down
+        }
+      });
+      lit.sort((a, b) => a[2] - b[2]);
+      fireLights.forEach((l, k) => {
+        const e = lit[k];
+        l.intensity = e ? (night ? 1.7 : 0.7) * (0.8 + Math.random() * 0.35) : 0;
+        if (e) l.position.set(e[0].tx + OX, e[1], e[0].tz + OZ);
+      });
+      if (snd && snd.enabled) snd.setFire(lit.length > 0, lit.length ? lit[0][0].tx : 0, lit.length ? lit[0][0].tz : 0);
+    }
+    const FIRE_COLS = ["#FF4A16", "#FF9A2E", "#FFD23F"];
+
+    // ---------- Martin's cannon ----------
+    // In the tank a red button (or F, or the space bar) fires the gun: the shell flies where the turret points, and
+    // where it lands it blows up. A tree it hits, or one close by, catches fire.
+    const fireBtn = document.getElementById("fire");
+    const shells = [];
+    let reloadAt = 0;
+    function shoot() {
+      const c = drive.car;
+      if (!c || !c.tank || c.sunk || c.drop > 0) return;
+      const t = performance.now() / 1000;
+      if (t < reloadAt) return;
+      reloadAt = t + 1.4;
+      const sn = Math.sin(c.h), cs = Math.cos(c.h), x = c.x + sn * 3.2, z = c.z + cs * 3.2, y = c.y + 1.16;
+      const m = new T.Mesh(carBox, carMat("#2A2D33", "solid"));
+      m.scale.set(0.16, 0.16, 0.34);
+      m.rotation.y = c.h;
+      m.position.set(x + OX, y, z + OZ);
+      scene.add(m);
+      shells.push({ m, x, y, z, vx: sn * 26, vy: 1.6, vz: cs * 26, life: 1.3 });
+      c.speed -= 1.2; // the recoil
+      drive.shake = Math.max(drive.shake, 0.35);
+      sfx("cannon", x, z);
+      if (party) {
+        party.fx.icon("flash", x, y, z, { size: 0.9, vy: 0, life: 0.25, max: 0.25 });
+        for (let i = 0; i < 4; i++) party.fx.icon("puff", x + (Math.random() - 0.5) * 0.6, y, z + (Math.random() - 0.5) * 0.6, { size: 0.6, vy: 0.6, life: 1.2, max: 1.2 });
+      }
+    }
+    function explode(x, y, z, tree) {
+      sfx("blast", x, z);
+      if (party) {
+        const fx = party.fx;
+        fx.icon("flash", x, y + 0.3, z, { size: 1.6, vy: 0, life: 0.3, max: 0.3 });
+        fx.icon("boom", x, y + 1.4, z, { size: 0.8, vy: 0.8, life: 1, max: 1 });
+        for (let i = 0; i < 18; i++) fx.block(FIRE_COLS[i % 3], x, y, z, { vx: (Math.random() - 0.5) * 6, vz: (Math.random() - 0.5) * 6, vy: 2 + Math.random() * 4, g: 8, size: 0.14 + Math.random() * 0.14, life: 0.8, max: 0.8 });
+        for (let i = 0; i < 5; i++) fx.icon("smoke", x + (Math.random() - 0.5) * 1.5, y + 0.5, z + (Math.random() - 0.5) * 1.5, { size: 0.9, vy: 0.9, life: 2, max: 2 });
+        actorList.forEach((a) => { if (a.drop === 0 && Math.hypot(a.x - x, a.z - z) < 3.5) fx.icon("bang", a.x, a.y + 2.6, a.z, { size: 0.4 }); });
+      }
+      drive.shake = Math.max(drive.shake, 0.3);
+      let t = tree, bd = 3.2;
+      if (!t) TREES.forEach((q) => { const d = Math.hypot(q.tx - x, q.tz - z); if (d < bd) { bd = d; t = q; } });
+      if (t) lightTree(t, true);
+    }
+    function updateShells(dt) {
+      for (let i = shells.length - 1; i >= 0; i--) {
+        const s = shells[i];
+        s.vy -= 3.5 * dt;
+        s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
+        s.life -= dt;
+        s.m.position.set(s.x + OX, s.y, s.z + OZ);
+        const cx = Math.floor(s.x), cz = Math.floor(s.z);
+        const tree = TREES.find((q) => s.y > 1 && s.y < q.top + 0.8 && Math.hypot(q.tx - s.x, q.tz - s.z) < (q.palm ? 1.4 : 2.3));
+        const st = inMap(cx, cz) ? heightAt(cx, cz) : NONE;
+        const ground = !inMap(cx, cz) || (st === NONE ? s.y < 2.5 : s.y <= (st + 1) / 2) || (inHouse(s.x, s.z) && s.y < 4);
+        if (tree || ground || s.life <= 0) {
+          scene.remove(s.m);
+          shells.splice(i, 1);
+          if (inMap(cx, cz)) explode(s.x, Math.max(s.y, 1), s.z, tree);
+        }
+      }
+    }
+    fireBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); shoot(); });
+
     // on-screen pedals and wheel for phones; arrows or WASD, and E to get out, on a keyboard
     [["steer-l", "steer", 1], ["steer-r", "steer", -1], ["gas", "gas", 1], ["brake", "gas", -1]].forEach(([id, key, val]) => {
       const b = document.getElementById(id);
@@ -3629,6 +3849,7 @@
       if (!drive.car && !flyingMe()) return false;
       const k = e.key.toLowerCase();
       if (down && (k === "e" || k === "escape")) { getOut(); return true; }
+      if ((k === "f" || k === " ") && drive.car && drive.car.tank) { if (down) shoot(); e.preventDefault(); return true; }
       const map = { arrowup: ["gas", 1], w: ["gas", 1], arrowdown: ["gas", -1], s: ["gas", -1], arrowleft: ["steer", 1], a: ["steer", 1], arrowright: ["steer", -1], d: ["steer", -1] }[k];
       if (!map) return false;
       drive.keys[k] = down;
@@ -4336,6 +4557,8 @@
       updateClothes(dt);
       decks.update(dt, performance.now() / 1000);
       updatePlane(dt);
+      updateShells(dt);
+      updateFires(dt);
       swings.update();
       if (!party) return;
       actorList.length = 0;
@@ -5205,6 +5428,32 @@
       goCar: (i) => goToCar(carList[i]),
       goPlane: () => goToPlane(),
       putCar: (i, x, z, h) => { const c = carList[i]; c.x = x; c.z = z; c.h = h; c.speed = 0; },
+      // drive car i with fixed 60 Hz steps, independent of the frame rate: [x, z, h, speed, dmg, y] every 0.1 s
+      simDrive: (i, gas, steer, secs) => {
+        const c = carList[i], prev = drive.car, out = [], c0 = crashCount;
+        drive.car = c; drive.gas = gas; drive.steer = steer;
+        let t = performance.now() / 1000;
+        for (let k = 0; k < Math.round(secs * 60); k++) { t += 1 / 60; updateCars(1 / 60, t); if (k % 6 === 5) out.push([c.x, c.z, c.h, c.speed, c.dmg, c.y].map((v) => +v.toFixed(2))); }
+        drive.gas = drive.steer = 0; drive.car = prev;
+        return { tr: out, crashes: crashCount - c0 };
+      },
+      // the longest clear runs for car i from a grid of starts: [x, z, h, clear metres, what stops it]
+      lanes: (i, step) => {
+        const c = carList[i], out = [];
+        for (const h of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) for (let x = 0; x <= 74; x += step) for (let z = 0; z <= 58; z += step) {
+          if (carHit(c, x, z, h)) continue;
+          let d = 0, hit = null;
+          while (d < 24 && !(hit = carHit(c, x + Math.sin(h) * (d + 0.25), z + Math.cos(h) * (d + 0.25), h))) d += 0.25;
+          out.push([x, z, +h.toFixed(3), d, hit ? hit.what : "clear"]);
+        }
+        return out;
+      },
+      fires: () => [...fires.entries()].map(([i, f]) => [i, f.stage, f.gen, +((Date.now() - f.t0) / 1000).toFixed(1)]),
+      burn: (i) => lightTree(TREES[i], true),
+      fireAge: (i, sec) => { const f = fires.get(i); if (f) f.t0 = Date.now() - sec * 1000; },
+      shoot: () => shoot(),
+      treeFaces: (i) => treeFaces(i).reduce((n, p) => n + p.faces.length, 0),
+      carHitAt: (i, x, z, h) => { const r = carHit(carList[i], x, z, h); return r && { what: r.what, px: +r.px.toFixed(2), pz: +r.pz.toFixed(2), other: r.other ? r.other.idx : undefined }; },
       treesNear: (x, z, d) => TREES.filter((t) => Math.hypot(t.x - x, t.z - z) < d).map((t) => [t.x, t.z]),
       plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible }),
       planeScreen: () => { const v = new T.Vector3(plane.x + OX, 2, plane.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },

@@ -79,6 +79,9 @@
     // bedroom music: its own slow loop from wherever a bedroom scene is on (setLove)
     const love = { on: false, x: 0, z: 0, next: 0, step: 0 };
     let loveBus = null;
+    // a tree on fire: a low roar and crackling from the nearest one (setFire)
+    const fire = { on: false, x: 0, z: 0, next: 0 };
+    let fireBus = null, roar = null;
     // the oompah band marching round the party: its own polka from wherever the band is (setBand)
     const band = { on: false, x: 0, z: 0, next: 0, step: 0 };
     let bandBus = null;
@@ -324,6 +327,24 @@
         hiss(d, t, "bandpass", 2500, 1800, 2, 0.3, 0.03, 0.25, 0.45);
         return 0.8;
       },
+      // the tank's gun going off, the shell landing, and a tree going up in flames
+      cannon(d, t) {
+        tone(d, t, "sine", 110, 32, 1, 0.003, 0.55);
+        hiss(d, t, "lowpass", 3000, 180, 0.7, 0.9, 0.002, 0.5);
+        hiss(d, t + 0.02, "bandpass", 900, 300, 1, 0.4, 0.002, 0.25);
+        return 0.7;
+      },
+      blast(d, t) {
+        tone(d, t, "sine", 80, 28, 1, 0.004, 0.9);
+        hiss(d, t, "lowpass", 4000, 120, 0.6, 1, 0.003, 1.1);
+        for (let i = 0; i < 8; i++) hiss(d, t + 0.1 + rand() * 0.6, "bandpass", 1500 + rand() * 3000, 0, 3, 0.15, 0.001, 0.02);
+        return 1.3;
+      },
+      whoosh(d, t) {
+        hiss(d, t, "lowpass", 250, 2800, 0.8, 0.55, 0.3, 0.6);
+        tone(d, t, "sine", 70, 140, 0.3, 0.2, 0.6);
+        return 1;
+      },
       bonk(d, t) {
         tone(d, t, "triangle", 440, 120, 0.6, 0.002, 0.2);
         tone(d, t, "sine", 880, 300, 0.25, 0.001, 0.06);
@@ -549,6 +570,9 @@
       bandBus = ctx.createGain();
       bandBus.gain.value = 0;
       bandBus.connect(comp);
+      fireBus = ctx.createGain();
+      fireBus.gain.value = 0;
+      fireBus.connect(comp);
       fxBus.connect(comp); musicBus.connect(comp); loveBus.connect(comp); comp.connect(master); master.connect(ctx.destination);
     }
     const running = () => offline || !ctx.state || ctx.state === "running";
@@ -631,7 +655,7 @@
 
     // Effects are spoken: the synthesised versions didn't sound good enough, so each maps to a voice line (see SPOKEN).
     // (the car's noises stay real sounds: a horn, tyres, a crunch)
-    const CAR_FX = { horn: 1, crash: 1, skid: 1, bonk: 1 };
+    const CAR_FX = { horn: 1, crash: 1, skid: 1, bonk: 1, cannon: 1, blast: 1, whoosh: 1 };
     function play(name, x, z, o) {
       if (CAR_FX[name]) { playSynth(name, x, z, o); return; }
       if (name === "engine") return; // the running engine is its own sound (setEngine)
@@ -885,6 +909,21 @@
       band.step = Math.ceil(e / 0.25) & 127;
       band.next = ctx.currentTime + Math.ceil(e / 0.25) * 0.25 - e + 0.02;
     }
+    function crackle(t) {
+      hiss(fireBus, t, "bandpass", 1500 + rand() * 4500, 0, 2 + rand() * 4, 0.06 + rand() * 0.3, 0.001, 0.006 + rand() * 0.03);
+      if (rand() < 0.08) tone(fireBus, t, "square", 70 + rand() * 120, 40, 0.06, 0.001, 0.03); // a pop
+    }
+    function fireVol() {
+      const d = Math.sqrt((L.x - fire.x) * (L.x - fire.x) + (L.z - fire.z) * (L.z - fire.z));
+      if (d >= 30) return 0;
+      const u = d <= 3 ? 0 : (d - 3) / 27;
+      return 0.6 * (1 - u) * (1 - u) * Math.sqrt(zoomQuiet());
+    }
+    function setFire(on, x, z) {
+      fire.on = !!on;
+      if (typeof x === "number" && isFinite(x)) fire.x = x;
+      if (typeof z === "number" && isFinite(z)) fire.z = z;
+    }
     // when the next bar of the loop starts, for singing along on the beat
     function nextBar() {
       if (!ctx) return 0;
@@ -915,6 +954,29 @@
         if (love.on) {
           if (love.next < now - 0.2) love.next = now + 0.05;
           while (love.next < now + 0.3) love.next += loveStep(love.next);
+        }
+      }
+      if (fireBus) {
+        const fv = fire.on ? fireVol() : 0;
+        fireBus.gain.setTargetAtTime(fv, now, 0.4);
+        if (fv > 0.004) {
+          if (!roar) { // the roar: looping noise, low-passed, breathing a little
+            const src = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), g = ctx.createGain();
+            src.buffer = noiseBuf;
+            src.loop = true;
+            fl.type = "lowpass";
+            fl.frequency.value = 420;
+            g.gain.value = 0.55;
+            src.connect(fl); fl.connect(g); g.connect(fireBus);
+            src.start(now);
+            const w = lfo(g.gain, now, 0.7, 0.2, 3600);
+            roar = { src, w };
+          }
+          if (fire.next < now - 0.2) fire.next = now + 0.02;
+          while (fire.next < now + 0.25) { crackle(fire.next); fire.next += 0.02 + rand() * rand() * 0.25; }
+        } else if (roar && !fire.on) {
+          try { roar.src.stop(now + 0.6); } catch (e) { /* stopped */ }
+          roar = null;
         }
       }
       if (bandBus) {
@@ -953,6 +1015,7 @@
       setMusic: safe(setMusic),
       setLove: safe(setLove),
       setBand: safe(setBand),
+      setFire: safe(setFire),
       setEngine: safe(setEngine),
       setMusicArea: safe((g) => { musicArea = typeof g === "number" && isFinite(g) ? clamp(g, -1, 1) : -1; }),
       nextBar: safe(nextBar)
