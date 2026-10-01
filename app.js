@@ -1737,7 +1737,7 @@
       else if (k === "+" || k === "=") goal.fit = clampFit(goal.fit / 1.25);
       else if (k === "-" || k === "_") goal.fit = clampFit(goal.fit * 1.25);
       else if (k === "r") setInside(!seeInside);
-      else if (k === "n" && !night) setNight(true); // once it's night it stays night
+      else if (k === "n") setNight(!night);
       else if (k === "m") soundBtn.click();
       else if (k === "h") goHome();
       else if (k === "f") findMe();
@@ -2594,8 +2594,8 @@
     const LIVE_MS = 20000;
     let liveMap = {}, lastBeat = 0, lastBeatCell = "";
     const isLive = (id) => !!(liveMap[id] && Date.now() - liveMap[id].t < LIVE_MS);
-    // Live is per time of day: someone playing at night is live for night viewers, while day viewers see their day loop.
-    const liveHere = (id) => isLive(id) && liveMap[id].n === (night ? 1 : 0);
+    // Everyone's day and night follow their own clock, so a live guest is live for everyone, whatever time it is there.
+    const liveHere = (id) => isLive(id);
     function heartbeat(now) {
       if (!me || !store.shared || me.drop > 0 || document.visibilityState === "hidden") return;
       const x = Math.floor(me.x), z = Math.floor(me.z), cell = x + "," + z;
@@ -2637,11 +2637,13 @@
       updateGuestCount();
     }
     const guestsBtn = document.getElementById("guests"), guestList = document.getElementById("guest-list");
+    // everyone, most recently online first: me, then live guests by their last heartbeat, then the rest by when they
+    // were last at the party
     function guestRows() {
       const rows = [];
-      if (me) rows.push({ name: myName, live: true, actor: me, me: true });
-      ghosts.forEach((g, id) => rows.push({ name: g.actor.name, live: liveHere(id), actor: g.actor }));
-      return rows.sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0) || (b.live ? 1 : 0) - (a.live ? 1 : 0) || a.name.localeCompare(b.name));
+      if (me) rows.push({ name: myName, live: true, actor: me, me: true, seen: Infinity });
+      ghosts.forEach((g, id) => { const live = liveHere(id); rows.push({ name: g.actor.name, live, actor: g.actor, seen: live ? liveMap[id].t : +g.at || 0 }); });
+      return rows.sort((a, b) => b.seen - a.seen || a.name.localeCompare(b.name));
     }
     function updateGuestCount() {
       const rows = guestRows(), live = rows.filter((r) => r.live).length;
@@ -2654,16 +2656,8 @@
       rows.forEach((r) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "guest";
-        const name = document.createElement("span");
-        name.textContent = withFlag(r.me ? r.name + " (you)" : r.name, r.actor && r.actor.cc);
-        b.append(name);
-        if (r.live) { // live right now; replays just have their name
-          const badge = document.createElement("span");
-          badge.className = "badge live";
-          badge.textContent = "Live";
-          b.append(badge);
-        }
+        b.className = r.live ? "guest live" : "guest"; // live right now: a small blue dot
+        b.textContent = withFlag(r.me ? r.name + " (you)" : r.name, r.actor && r.actor.cc);
         b.addEventListener("click", () => {
           follow = !!r.me;
           goal.fit = Math.min(goal.fit, 20);
@@ -3408,16 +3402,56 @@
     const carMat = (c, kind) => carMats[c + kind] || (carMats[c + kind] = kind === "glow" ? new T.MeshBasicMaterial({ color: c })
       : new T.MeshLambertMaterial({ color: c, transparent: kind === "clear", opacity: kind === "clear" ? 0.5 : 1 }));
     const carBox = new T.BoxGeometry(1, 1, 1);
+    // Boxes that never move against each other, as one mesh with the colours in its vertices: one draw call (and one
+    // shadow) instead of one each. boxes: [centre x, y, z, width, height, depth, colour]
+    const vcMats = {};
+    const vcMat = (kind, map) => vcMats[kind + (map ? "m" : "")] || (vcMats[kind + (map ? "m" : "")] = kind === "glow" ? new T.MeshBasicMaterial({ vertexColors: true }) : new T.MeshLambertMaterial({ vertexColors: true, map: map || null }));
+    function mergedBoxes(boxes, mat) {
+      const bp = carBox.attributes.position.array, bn = carBox.attributes.normal.array, bu = carBox.attributes.uv.array, bi = carBox.index.array, nv = bp.length / 3;
+      const pos = new Float32Array(boxes.length * nv * 3), nor = new Float32Array(pos.length), col = new Float32Array(pos.length), uv = new Float32Array(boxes.length * nv * 2);
+      const idx = new (boxes.length * nv > 65535 ? Uint32Array : Uint16Array)(boxes.length * bi.length), c = new T.Color();
+      boxes.forEach(([x, y, z, w, h, d, color], k) => {
+        c.set(color);
+        for (let i = 0; i < nv; i++) {
+          const o = (k * nv + i) * 3;
+          pos[o] = bp[i * 3] * w + x; pos[o + 1] = bp[i * 3 + 1] * h + y; pos[o + 2] = bp[i * 3 + 2] * d + z;
+          nor[o] = bn[i * 3]; nor[o + 1] = bn[i * 3 + 1]; nor[o + 2] = bn[i * 3 + 2];
+          col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+          uv[(k * nv + i) * 2] = bu[i * 2]; uv[(k * nv + i) * 2 + 1] = bu[i * 2 + 1];
+        }
+        for (let i = 0; i < bi.length; i++) idx[k * bi.length + i] = bi[i] + k * nv;
+      });
+      const geo = new T.BufferGeometry();
+      geo.setAttribute("position", new T.BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new T.BufferAttribute(nor, 3));
+      geo.setAttribute("color", new T.BufferAttribute(col, 3));
+      geo.setAttribute("uv", new T.BufferAttribute(uv, 2));
+      geo.setIndex(new T.BufferAttribute(idx, 1));
+      geo.computeBoundingSphere();
+      const m = new T.Mesh(geo, mat);
+      m.castShadow = !mat.isMeshBasicMaterial;
+      return m;
+    }
     function buildCar(sp, idx) {
-      const g = new T.Group(), top = [], glass = [];
+      const g = new T.Group(), top = [], glass = [], lists = { base: [], top: [], glow: [] };
       sp.parts.forEach(([x, y, z, w, h, d, color, kind]) => {
-        const m = new T.Mesh(carBox, carMat(color, kind));
-        m.scale.set(w, h, d);
-        m.position.set(x + w / 2, y + h / 2, z + d / 2);
-        m.castShadow = kind === "solid";
+        const up = y >= 0.95 && !sp.tank; // cabin glass and roof: hidden while someone drives, so it's a convertible
+        if (kind === "clear") { // glass stays a mesh of its own: it steams up
+          const m = new T.Mesh(carBox, carMat(color, kind));
+          m.scale.set(w, h, d);
+          m.position.set(x + w / 2, y + h / 2, z + d / 2);
+          g.add(m);
+          glass.push(m);
+          if (up) top.push(m);
+          return;
+        }
+        lists[kind === "glow" ? "glow" : up ? "top" : "base"].push([x + w / 2, y + h / 2, z + d / 2, w, h, d, color]);
+      });
+      Object.keys(lists).forEach((k) => {
+        if (!lists[k].length) return;
+        const m = mergedBoxes(lists[k], vcMat(k === "glow" ? "glow" : "solid"));
         g.add(m);
-        if (y >= 0.95 && !sp.tank) top.push(m); // cabin glass and roof: hidden while someone drives, so it's a convertible
-        if (kind === "clear") glass.push(m);
+        if (k === "top") top.push(m);
       });
       scene.add(g);
       return { g, top, glass, idx, tank: !!sp.tank, x: sp.x, z: sp.z, h: sp.tank ? -Math.PI / 2 : 0, y: 1, speed: 0, vx: 0, vz: 0, w: sp.w, l: sp.l, color: sp.color, dmg: 0, drop: 0, smokeAt: 0 };
@@ -3631,8 +3665,8 @@
       const hits = raycaster.intersectObjects(carList.filter((c) => c.g.visible).map((c) => c.g), true);
       return hits.length ? carList.find((c) => c.g === hits[0].object.parent) : null;
     }
-    // the tank and the seaplane are for Germans only: guests whose phone is on German time (see flags.js)
-    const isGerman = () => myCountry === "DE";
+    // the tank and the seaplane are for Germans only: guests whose phone is on German time (see flags.js) or in German
+    const isGerman = () => myCountry === "DE" || /^de\b/i.test(navigator.language || "");
     function goToCar(c) {
       if (c.sunk) return; // at the bottom of the pool
       if (c.tank && !isGerman()) { // Germans only: a toot, and nobody else gets in
@@ -3939,15 +3973,8 @@
     const onPool = (x, z) => x >= POOL[0] && x <= POOL[2] && z >= POOL[1] && z <= POOL[3];
     const nearPool = (x, z) => x >= 50 && x <= 70 && z >= 14 && z <= 34; // the pool deck: low enough to come in over
     function buildPlane() {
-      const g = new T.Group();
-      const part = (x, y, z, w, h, d, color, kind) => {
-        const m = new T.Mesh(carBox, carMat(color, kind || "solid"));
-        m.scale.set(w, h, d);
-        m.position.set(x, y, z);
-        m.castShadow = kind !== "clear";
-        g.add(m);
-        return m;
-      };
+      const g = new T.Group(), boxes = [];
+      const part = (x, y, z, w, h, d, color) => { boxes.push([x, y, z, w, h, d, color]); };
       // +z is the nose, y = 0 is where the floats touch the water. The Red Baron's red Fokker triplane, on floats.
       const RED = "#B5121B", DARK = "#7E0C12", WOOD = "#8A5A2B", STRUT = "#4A3324";
       part(0, 0.95, 0.6, 0.82, 0.8, 1.7, RED); // fuselage
@@ -3968,7 +3995,12 @@
         part(x * 0.85, 0.37, 1.0, 0.05, 0.42, 0.05, STRUT);
         part(x * 0.85, 0.37, 0.0, 0.05, 0.42, 0.05, STRUT);
       });
-      const prop = part(0, 0.95, 1.73, 1.6, 0.14, 0.05, WOOD);
+      g.add(mergedBoxes(boxes, vcMat("solid")));
+      const prop = new T.Mesh(carBox, carMat(WOOD, "solid"));
+      prop.scale.set(1.6, 0.14, 0.05);
+      prop.position.set(0, 0.95, 1.73);
+      prop.castShadow = true;
+      g.add(prop);
       return { g, prop };
     }
     const planeBits = buildPlane();
@@ -4142,18 +4174,13 @@
       t.minFilter = T.NearestFilter;
       return t;
     })();
-    const furMats = {};
-    const furMat = (col) => furMats[col] || (furMats[col] = new T.MeshLambertMaterial({ color: col, map: furTex }));
     function buildBear() {
       const FUR = "#A8693B", LIGHT = "#EBC594", DARK = "#2B1D14", PINK = "#FF6FB5";
       const grp = (parent, x, y, z) => { const g = new T.Group(); g.position.set(x, y, z); parent.add(g); return g; };
+      const pending = new Map(); // part -> { fur: [], plain: [] }, merged at the end
       const blk = (parent, x, y, z, w, h, d, col, plain) => {
-        const m = new T.Mesh(carBox, plain ? carMat(col, "solid") : furMat(col));
-        m.scale.set(w, h, d);
-        m.position.set(x, y, z);
-        m.castShadow = true;
-        parent.add(m);
-        return m;
+        if (!pending.has(parent)) pending.set(parent, { fur: [], plain: [] });
+        pending.get(parent)[plain ? "plain" : "fur"].push([x, y, z, w, h, d, col]);
       };
       // a box with its edges rounded off: three overlapping boxes
       const round = (parent, x, y, z, w, h, d, col, r) => {
@@ -4198,6 +4225,10 @@
         blk(head, s * 1.95, 1.55, 2.52, 0.85, 0.42, 0.06, "#F28CA8", true); // blushing cheeks
         round(head, s * 2.35, 4.55, 0, 1.8, 1.8, 1.1, FUR, 0.3); // ears
         blk(head, s * 2.35, 4.5, 0.57, 1.0, 1.0, 0.06, LIGHT);
+      });
+      pending.forEach((l, parent) => {
+        if (l.fur.length) parent.add(mergedBoxes(l.fur, vcMat("solid", furTex)));
+        if (l.plain.length) parent.add(mergedBoxes(l.plain, vcMat("solid")));
       });
       return { g, hip, head, legs, arms };
     }
@@ -5563,20 +5594,18 @@
         showStep("voice");
       });
     }
-    // Every 4 minutes at the party it stops for ten more lines; after the first 4 minutes (the day loop) it's night.
+    // Every 4 minutes at the party it stops for ten more lines.
     let voicePlay = 0, voiceAsks = 0, voiceForced = false;
     function voiceClock(dt) {
       if (!me || !voiceUI || !joinEl.hidden || document.visibilityState === "hidden") return;
       voicePlay += dt;
       if (voicePlay < (voiceAsks + 1) * LOOP_S || me.inCar || me.drop > 0) return;
       voiceAsks++;
-      const first = voiceAsks === 1;
       joinEl.hidden = false;
       askVoice("again").then(() => {
         voiceForced = false;
         if (voiceUI) voiceUI.close();
         joinEl.hidden = true;
-        if (first && !night) { setNight(true); lsSet("fefe40.night", "1"); } // and from now on it stays night
       });
     }
     voiceBtn.addEventListener("click", async () => {
@@ -5872,6 +5901,13 @@
       burn: (i) => lightTree(TREES[i], true),
       bear: () => ({ x: +bear.x.toFixed(2), z: +bear.z.toFixed(2), h: +bear.h.toFixed(2), y: +bear.y.toFixed(2), dance: bear.dance, riding: ridingBear(), visible: bear.g.visible, crushed: crushedTrees.size, flat: carList.filter((c) => c.flat).length, squashed: actorList.filter((a) => a.squashUntil > Date.now()).length }),
       goBear: () => goToBear(),
+      meshCount: () => {
+        const count = (o) => { let n = 0, sh = 0; o.traverse((m) => { if (m.isMesh || m.isSprite) { n++; if (m.castShadow) sh++; } }); return [n, sh]; };
+        const sum = (list) => list.reduce((a, o) => { const [n, sh] = count(o); return [a[0] + n, a[1] + sh]; }, [0, 0]);
+        return { avatars: sum(actorList.map((a) => a.av.root)), band: sum(BAND.filter((m) => m.av).map((m) => m.av.root)), cars: sum(carList.map((c) => c.g)), bear: sum([bear.g]), plane: sum([plane.g]), world: sum(meshes), all: count(scene), actors: actorList.length };
+      },
+      quality: () => ({ level: gov.level, avg: +gov.avg.toFixed(1), pr: renderer.getPixelRatio(), peopleShadows: gov.people }),
+      gl: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, pr: renderer.getPixelRatio(), objects: (() => { let n = 0; scene.traverse(() => n++); return n; })() }),
       setNight: (on) => setNight(!!on),
       simBear: (gas, steer, secs) => { const g0 = drive.gas, s0 = drive.steer; drive.gas = gas; drive.steer = steer; for (let k = 0; k < Math.round(secs * 60); k++) { walkBear(1 / 60); strideBear(1 / 60, Math.abs(bear.speed) / 60); } drive.gas = g0; drive.steer = s0; },
       putBear: (x, z, h) => { bear.x = x; bear.z = z; bear.h = h; },
@@ -5882,7 +5918,8 @@
       treeFaces: (i) => treeFaces(i).reduce((n, p) => n + p.faces.length, 0),
       carHitAt: (i, x, z, h) => { const r = carHit(carList[i], x, z, h); return r && { what: r.what, px: +r.px.toFixed(2), pz: +r.pz.toFixed(2), other: r.other ? r.other.idx : undefined }; },
       treesNear: (x, z, d) => TREES.filter((t) => Math.hypot(t.x - x, t.z - z) < d).map((t) => [t.x, t.z]),
-      plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible }),
+      plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible, pending: pendingPlane, taken: planeTaken() }),
+      tapWhat: (x, y) => (bearFromTap(x, y) ? "bear" : carFromTap(x, y) ? "car" : planeFromTap(x, y) ? "plane" : "other"),
       planeScreen: () => { const v = new T.Vector3(plane.x + OX, 2, plane.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       voice: () => ({ mine: Object.keys(myVoice).length, up: myVoiceUp.size, choir: choir.on, bufs: [...clipBufs.values()].filter((b) => b && b !== "wait").length }),
       sayAs: (i, cats) => { const a = [...ghosts.values()][i]; return !!a && voiceSay(a.actor, cats, a.actor.x, a.actor.z, 1); },
@@ -5950,7 +5987,7 @@
     let danceClock = 0;
     let danceStep = 0;
     function frame(now) {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      const rawMs = now - last, dt = Math.min(0.05, rawMs / 1000);
       last = now;
       // the build clock starts after the first frame (shader compiling) and never jumps more than 1/15 s per frame,
       // so a slow phone sees the whole show rather than skipping to the end
@@ -6004,8 +6041,51 @@
         paintDance(++danceStep);
       }
       updateTags();
+      govern(rawMs, dt);
       renderer.render(scene, cam);
       requestAnimationFrame(frame);
+    }
+
+    // ---------- keeping it smooth ----------
+    // A governor watches how long frames really take. When the phone can't keep up, it steps the quality down (fewer
+    // pixels, shadows redrawn every other or every third frame) and back up when there's room again; if going up was
+    // too much, it stays down for a minute. People stop casting shadows when the view is zoomed out so far that you
+    // couldn't see them anyway (that's a draw call for every arm and leg).
+    const QUALITY = [{ pr: 2, shadowEvery: 1 }, { pr: 1.5, shadowEvery: 1 }, { pr: 1.25, shadowEvery: 2 }, { pr: 1, shadowEvery: 2 }, { pr: 0.8, shadowEvery: 3 }];
+    const MAX_PR = Math.min(window.devicePixelRatio || 1, 2);
+    const gov = { level: 0, avg: 16.7, slow: 0, fast: 0, frame: 0, holdUp: 0, lastUp: -1e9, people: true, recheck: 0 };
+    renderer.shadowMap.autoUpdate = false;
+    function peopleShadows(on) {
+      const set = (root) => root.traverse((m) => { if (m.isMesh) m.castShadow = on; });
+      actorList.forEach((a) => set(a.av.root));
+      BAND.forEach((m) => { if (m.av) set(m.av.root); });
+    }
+    function setQuality(level) {
+      gov.level = level;
+      gov.slow = gov.fast = 0;
+      renderer.setPixelRatio(Math.min(MAX_PR, QUALITY[level].pr));
+    }
+    function govern(rawMs, dt) {
+      const t = performance.now();
+      gov.avg += (Math.min(rawMs, 100) - gov.avg) * 0.06;
+      if (gov.avg > 25) { gov.slow += dt; gov.fast = 0; }
+      else if (gov.avg < 19) { gov.fast += dt; gov.slow = 0; }
+      else gov.slow = gov.fast = 0;
+      if (gov.slow > 2 && gov.level < QUALITY.length - 1) {
+        if (t - gov.lastUp < 10000) gov.holdUp = t + 60000; // it only just went up, and couldn't take it
+        setQuality(gov.level + 1);
+        gov.avg = 20;
+      } else if (gov.fast > 8 && gov.level > 0 && t > gov.holdUp) {
+        setQuality(gov.level - 1);
+        gov.lastUp = t;
+      }
+      renderer.shadowMap.needsUpdate = gov.frame++ % QUALITY[gov.level].shadowEvery === 0;
+      const people = view.fit < 34 && gov.level < QUALITY.length - 1;
+      if (people !== gov.people || (!people && t > gov.recheck)) { // (and newcomers get theirs switched off too)
+        gov.people = people;
+        gov.recheck = t + 1000;
+        peopleShadows(people);
+      }
     }
 
     // One-off clean slate for the organiser: opening the site with #wipe-everything (and saying yes) deletes every
@@ -6119,9 +6199,14 @@
       alert("Done: " + done + " guest" + (done === 1 ? "" : "s") + " deleted. The party starts fresh.");
       location.replace(location.pathname);
     }
+    // Day and night follow the guest's own clock: night from half past six in the evening until six in the morning,
+    // and it turns when their evening or morning comes (the switch before going in can still pick the other).
+    const localNight = () => { const d = new Date(), h = d.getHours() + d.getMinutes() / 60; return h < 6 || h >= 18.5; };
+    let clockNight = localNight();
+    setInterval(() => { const n = localNight(); if (n !== clockNight) { clockNight = n; setNight(n); } }, 60000);
     function start(data) {
       data = data || {};
-      setNight(true); // the party opens in the evening (the switch can still pick day before going in)
+      setNight(clockNight);
       if (location.hash === "#wipe-everything") setTimeout(wipeEverything, 500);
       if (location.hash === "#remove-duplicates") setTimeout(removeDuplicates, 500);
       if (location.hash === "#shares") setTimeout(showShares, 300);

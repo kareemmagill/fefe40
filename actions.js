@@ -147,7 +147,7 @@
       const k = color + (opacity || 1);
       return litMats[k] || (litMats[k] = new T.MeshLambertMaterial({ color, transparent: !!opacity && opacity < 1, opacity: opacity || 1 }));
     };
-    const MAX = 500;
+    const MAX = 220; // every particle is a draw call: past this, the oldest go first
     function add(obj, x, y, z, o) {
       if (parts.length >= MAX) { const old = parts.shift(); scene.remove(old.obj); }
       obj.position.set(x + OX, y, z + OZ);
