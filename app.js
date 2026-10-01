@@ -1915,6 +1915,9 @@
       }
     }
     const worldY = (x, z) => { const s = heightAt(x, z); return s === NONE ? 1 : (s + 1) / 2; };
+    // the country a guest is in, as a flag after their name (flags.js); mine from this phone's time zone
+    const myCountry = window.FefeFlags ? FefeFlags.country() : null;
+    const withFlag = (name, cc) => { const f = window.FefeFlags ? FefeFlags.flag(cc) : ""; return f ? name + " " + f : name; };
     function makeActor(name, look, isMe, key) {
       const av = FefeAvatar.build(T, look);
       av.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -2216,6 +2219,7 @@
         track: loopTrack("day"),
         trackN: loopTrack("night"),
         voice: [...myVoiceUp].join(","),
+        cc: myCountry || "",
         at: Date.now()
       };
       Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
@@ -2263,7 +2267,8 @@
       const sh = FefeAvatar.bodyShape({ body: look.body, h: +r.h || 0, wt: +r.wt || 0 }); // clamps to sensible sizes
       look.h = sh.h;
       look.wt = sh.wt;
-      return { name, look, nodes, nodesN, voice, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
+      const cc = typeof r.cc === "string" && /^[A-Z]{2}$/.test(r.cc) ? r.cc : "";
+      return { name, look, nodes, nodesN, voice, cc, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -2289,6 +2294,8 @@
       }
       g.at = at;
       g.voice = clean.voice;
+      g.actor.cc = clean.cc;
+      g.actor.tag.textContent = withFlag(clean.name, clean.cc);
       g.day = day;
       g.night = clean.nodesN.length ? clean.nodesN : null;
       setGhostTrack(g, false);
@@ -2542,7 +2549,7 @@
         b.type = "button";
         b.className = "guest";
         const name = document.createElement("span");
-        name.textContent = r.me ? r.name + " (you)" : r.name;
+        name.textContent = withFlag(r.me ? r.name + " (you)" : r.name, r.actor && r.actor.cc);
         const badge = document.createElement("span");
         badge.className = r.live ? "badge live" : "badge";
         badge.textContent = r.live ? "Live" : "Replay";
@@ -4663,6 +4670,8 @@
       const [sx, sz] = open.length ? open[(Math.random() * open.length) | 0] : SPAWN[0];
       myLook = Object.assign({}, draft);
       me = makeActor(myName, myLook, true, myId);
+      me.cc = myCountry;
+      me.tag.textContent = withFlag(myName, myCountry);
       me.x = sx + 0.5;
       me.z = sz + 0.5;
       me.y = worldY(sx, sz);
