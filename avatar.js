@@ -23,6 +23,7 @@
   const FACE_MAX = 4200; // longest face string the Firebase rule allows
 
   const SB = "#006AA7", SY = "#FECC02", FE = "#FEFE40", WHITE = "#F4F4F0", BLACK = "#1E1F24", NAVY = "#17325E";
+  const BRASS = "#D9A630", BRASS_LT = "#F0C95A";
   const RED = "#C8302C", GOLD = "#E8C547", BROWN = "#6B4423", GREEN = "#2E8B3A", GREY = "#8A8F96", PINK = "#FF6FB5";
 
   function noise(x, y, s) {
@@ -351,6 +352,47 @@
     cards: (add) => { add(-1.6, -11, 1.6, 3.2, 0.3, 2.2, "#FFFFFF"); add(-1, -10.8, 2, 0.8, 0.2, 1, RED); },
     shades: (add) => { add(-4.3, 4.1, 4.05, 8.6, 1.5, 0.6, "#111114"); add(-4.4, 4.9, -2, 0.4, 0.4, 6, "#111114"); add(4, 4.9, -2, 0.4, 0.4, 6, "#111114"); },
     icepack: (add) => { add(-2.6, 8, -2.2, 5.2, 1.3, 4.4, "#9FD3F0"); },
+    // the oompah band's kit: a flag on a pole and a mallet (in the hand), a trumpet (at the mouth, on the head), and a
+    // tuba, a big drum and an accordion (strapped on, on the body)
+    deflag: (add) => {
+      add(-0.3, -13.5, 1.2, 0.6, 32, 0.6, "#6B4423");
+      add(-0.6, 18.5, 0.9, 1.2, 1.2, 1.2, GOLD);
+      ["#151515", "#DD0000", "#FFCE00"].forEach((c, i) => add(-0.15, 15.5 - i * 3, -11.8, 0.3, 3, 13, c));
+    },
+    mallet: (add) => { add(-0.3, -15.5, 1, 0.6, 4.5, 0.6, "#8A5A2B"); add(-1, -17.5, 0.3, 2, 2, 2, "#F2EEE4"); },
+    trumpet: (add) => {
+      add(-0.25, 1.55, 3.6, 0.5, 0.5, 0.8, "#C9CED6");
+      add(-0.35, 1.45, 4.3, 0.7, 0.7, 6.2, BRASS);
+      add(-0.45, 2.1, 5.8, 0.9, 1.5, 1.8, BRASS_LT);
+      add(-0.35, 0.3, 6.2, 0.7, 1.1, 2.8, BRASS);
+      add(-1.3, 0.55, 10.4, 2.6, 2.6, 1.2, BRASS_LT);
+      add(-0.95, 0.9, 11.55, 1.9, 1.9, 0.1, "#6E5212");
+    },
+    tuba: (add) => {
+      add(-2.6, 1, 2.2, 5.2, 8, 3.2, BRASS);
+      add(-3.2, 3, 2.5, 6.4, 3, 2.6, BRASS_LT);
+      add(-2.9, 6.2, 5.3, 1.2, 2.2, 1, BRASS_LT);
+      add(-0.4, 9, 3.4, 0.8, 5.5, 0.8, BRASS);
+      add(1.2, 8.5, 0.6, 5.6, 4.5, 5.6, BRASS);
+      add(0.8, 13, 0.2, 6.4, 0.7, 6.4, BRASS_LT);
+      add(1.6, 13.4, 1, 4.8, 0.4, 4.8, "#5A4210");
+    },
+    bassdrum: (add) => {
+      add(-2.5, 0, 2.4, 5, 10, 10, "#F2EEE4");
+      [-1, 1].forEach((s) => {
+        const x = s < 0 ? -2.8 : 2.5;
+        add(x, -0.2, 2.2, 0.3, 10.4, 10.4, GOLD);
+        ["#151515", "#DD0000", "#FFCE00"].forEach((c, i) => add(s < 0 ? x - 0.15 : x + 0.15, 6.4 - i * 3, 3.2, 0.3, 3, 8.4, c));
+      });
+      add(-2.6, 4.4, 1.6, 5.2, 0.6, 1, "#2E2016");
+    },
+    accordion: (add) => {
+      add(-4.6, 3, 2.2, 2, 7, 3.6, "#9E1B22");
+      add(-4.7, 3.4, 2.6, 0.2, 6.2, 2.8, "#F4F4F0");
+      for (let i = 0; i < 6; i++) add(-2.6 + i * 0.87, 3.3, 2.4, 0.87, 6.4, 3.2, i % 2 ? "#1E1F24" : "#E8E4D8");
+      add(2.6, 3, 2.2, 2, 7, 3.6, "#9E1B22");
+      add(4.5, 3.6, 2.8, 0.2, 5.8, 2.4, "#C9CED6");
+    },
     messy: (add, look) => { add(-3.5, 8, -2, 2, 2, 2, look.hair); add(1, 8, 0.5, 2.5, 1.5, 2, look.hair); add(3.5, 6, -3, 1.5, 2, 2, look.hair); add(-4.8, 5.5, 1, 1.5, 1.5, 1.5, look.hair); }
   };
 
@@ -853,6 +895,59 @@
   // Painters in place of an outfit, on the HD grids: the torso is 16 x 24 from the shoulders (row 0) to just below the
   // hips (23), and a leg's rows 0-1 sit inside the hips, so its first row that shows is 2.
   const skinOnly = () => null;
+  // Traditional German costumes for the oompah band (not on the guests' list): lederhosen with braces over a checked
+  // shirt, knee socks and a Tyrolean hat with a feather; a dirndl with a laced bodice, a puff-sleeved blouse and an apron.
+  const LEATHER = "#6B4423", LEATHER_D = "#4E311A";
+  function lederhosen(check) {
+    const gingham = (x, y) => (x % 2 === 0 && y % 2 === 0 ? check : x % 2 === 0 || y % 2 === 0 ? mixHex(check, WHITE) : WHITE);
+    return {
+      name: "Lederhosen",
+      shirt: (x, y, side) => {
+        if (y >= 10 || side === "bottom") return LEATHER;
+        if (side === "front" && y === 4 && x >= 2 && x <= 5) return x === 3 || x === 4 ? "#ECE6D2" : LEATHER_D;
+        if ((side === "front" || side === "back") && (x === 2 || x === 5)) return LEATHER_D;
+        return gingham(x, y);
+      },
+      sleeve: (x, y, side) => (side === "top" || y <= 5 ? gingham(x, y) : null),
+      leg: (x, y, side) => (side === "bottom" || y === 11 ? "#2E2016" : y <= 4 ? LEATHER : y === 5 ? LEATHER_D : y === 6 ? null : y === 7 ? "#3E5B2E" : "#E8E2D0"),
+      hat: (add) => {
+        add(-5, 7, -5, 10, 0.7, 10, "#3E5B2E");
+        add(-3.6, 7.5, -3.6, 7.2, 3, 7.2, "#3E5B2E");
+        add(-3.7, 7.5, -3.7, 7.4, 0.8, 7.4, "#2B2B2B");
+        add(3.4, 8, -2.4, 0.8, 4.2, 1.4, "#EDE3C8");
+        add(3.4, 11.8, -2.4, 0.8, 1, 1.4, "#3A3A3A");
+      }
+    };
+  }
+  function dirndl(bodice, skirt, apron) {
+    const trim = mixHex(skirt, "#000000");
+    return {
+      name: "Dirndl",
+      shirt: (x, y, side) => {
+        if (side === "top" || y <= 2) return side === "front" && y === 0 && (x === 3 || x === 4) ? null : WHITE;
+        if (y >= 10) return apron;
+        if (side === "front" && (x === 3 || x === 4)) return y % 2 ? "#C9CED6" : bodice;
+        return bodice;
+      },
+      sleeve: (x, y, side) => (side === "top" || y <= 3 ? WHITE : null),
+      leg: (x, y, side) => (side === "bottom" || y === 11 ? BLACK : WHITE),
+      skirt: {
+        len: 9,
+        flare: 1,
+        fn: () => skirt,
+        fnHD: (x, y, side) => (y >= 16 ? trim : side === "front" && x >= 5 && x <= 14 && y <= 14 ? (y === 0 ? WHITE : apron) : skirt)
+      },
+      hat: (add) => {
+        add(3.4, 6.4, 1, 1.6, 1.6, 1.6, PINK);
+        add(3.6, 6.2, -0.8, 1.2, 1.2, 1.2, WHITE);
+      }
+    };
+  }
+  function mixHex(a, b) {
+    const x = hexInt(a, 0), y = hexInt(b, 0);
+    return toHex(mix(x, y, 0.5));
+  }
+
   const UNDRESSED = {
     // Swedish-blue trunks with a yellow waistband
     trunks: {
@@ -940,7 +1035,8 @@
 
   // ---------- build ----------
   function build(T, look) {
-    const outfit = look.strip === "bare" ? UNDRESSED.bare : look.strip === "swim" ? UNDRESSED[look.body === "f" ? "swimsuit" : "trunks"] : OUTFITS[((look.outfit % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
+    const outfit = look.strip === "bare" ? UNDRESSED.bare : look.strip === "swim" ? UNDRESSED[look.body === "f" ? "swimsuit" : "trunks"]
+      : look.outfit && typeof look.outfit === "object" ? look.outfit : OUTFITS[((look.outfit % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
     const slim = look.body === "f";
     const aw = slim ? 3 : 4;
     const sk = hexInt(look.skin, 0xd9a57e), hr = hexInt(look.hair, 0x4a3020);
@@ -1274,7 +1370,7 @@
   }
 
   window.FefeAvatar = {
-    OUTFITS, build, P, V, bodyShape, HEIGHT, WEIGHT, faceFromImage, decodeFace, isFaceString, FACE_N, FACE_MAX,
+    OUTFITS, build, P, V, bodyShape, lederhosen, dirndl, HEIGHT, WEIGHT, faceFromImage, decodeFace, isFaceString, FACE_N, FACE_MAX,
     clothesColors,
     reshape: (av, look) => { const sh = bodyShape(look); fitShape(av.rig, av.parts.head, sh); av.height = (32 + 8 * (HEAD - 1)) * P * sh.s; av.scale = sh.s; }
   };

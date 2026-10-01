@@ -3225,6 +3225,108 @@
       return cut(g.key, g.actor.name, g.actor.look) === cut(clean.key, clean.name, clean.look);
     }
 
+    // ---------- the oompah band ----------
+    // Every three minutes a German oompah band marches in at the gate, round the party and back out the way it came:
+    // the singer in a dirndl carrying the German flag, two trumpets, an accordion, a tuba and the big drum, in lederhosen
+    // and dirndls. It runs on the party clock, so every phone sees and hears them at the same spot; nothing is saved.
+    const BAND_EVERY = 180, BAND_SPEED = 1.3;
+    const BAND_ROUTE = [[30, 58], [30, 46], [33, 39], [45, 38], [47, 32], [52, 28], [61, 28], [58, 37], [57, 46], [45, 47], [33, 52], [30, 58]];
+    const BAND = [
+      { kit: "flag", s: 0, side: 0, look: { body: "f", outfit: FefeAvatar.dirndl("#1C1C1C", "#B3202A", "#F2C230"), skin: "#F0C8A8", hair: "#D9B060", h: 168 } },
+      { kit: "trumpet", s: 1.7, side: -0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#C8302C"), skin: "#E8C4A0", hair: "#6B4A2E" } },
+      { kit: "trumpet", s: 1.7, side: 0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#2F6FB5"), skin: "#D9A57E", hair: "#2B1B12" } },
+      { kit: "accordion", s: 3.4, side: -0.55, look: { body: "f", outfit: FefeAvatar.dirndl("#2F5233", "#1F3C66", "#9FC5E8"), skin: "#E8C4A0", hair: "#7A4A22" } },
+      { kit: "tuba", s: 3.4, side: 0.55, look: { body: "m", outfit: FefeAvatar.lederhosen("#3E8E41"), skin: "#E8C4A0", hair: "#B5651D", wt: 112 } },
+      { kit: "drum", s: 5.1, side: 0, look: { body: "m", outfit: FefeAvatar.lederhosen("#C8302C"), skin: "#B97A56", hair: "#1A1A1A", wt: 95 } }
+    ];
+    const KIT = { flag: { R: "deflag" }, trumpet: { head: "trumpet" }, accordion: { body: "accordion" }, tuba: { body: "tuba" }, drum: { body: "bassdrum", R: "mallet" } };
+    const band = { route: null, len: 0, on: false, shift: 0, noteAt: 0, x: 0, z: 0 };
+    // the route as a smoothed line through walkable cells, with distances along it
+    function bandRoute() {
+      let pts = [];
+      for (let i = 1; i < BAND_ROUTE.length; i++) {
+        const [ax, az] = BAND_ROUTE[i - 1], [bx, bz] = BAND_ROUTE[i];
+        const a = reach[cellIdx(ax, az)] ? [ax, az] : nearestReachable(ax, az), b = reach[cellIdx(bx, bz)] ? [bx, bz] : nearestReachable(bx, bz);
+        const path = (a && b && findPath(a[0], a[1], b[0], b[1])) || [[ax, az], [bx, bz]];
+        path.forEach((c, k) => { if (k || !pts.length) pts.push([c[0] + 0.5, c[1] + 0.5]); });
+      }
+      for (let it = 0; it < 3; it++) { // round off the corners
+        const out = [pts[0]];
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+          out.push([ax * 0.75 + bx * 0.25, az * 0.75 + bz * 0.25], [ax * 0.25 + bx * 0.75, az * 0.25 + bz * 0.75]);
+        }
+        out.push(pts[pts.length - 1]);
+        pts = out;
+      }
+      const at = [0];
+      for (let i = 1; i < pts.length; i++) at.push(at[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      band.route = pts;
+      band.at = at;
+      band.len = at[at.length - 1];
+    }
+    function routeAt(d) {
+      const pts = band.route, at = band.at;
+      if (d <= 0) return pts[0];
+      if (d >= band.len) return pts[pts.length - 1];
+      let lo = 0, hi = at.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (at[m] <= d) lo = m; else hi = m; }
+      const u = (d - at[lo]) / Math.max(1e-6, at[hi] - at[lo]);
+      return [pts[lo][0] + (pts[hi][0] - pts[lo][0]) * u, pts[lo][1] + (pts[hi][1] - pts[lo][1]) * u];
+    }
+    // seconds into the current three minutes, the same on every phone
+    const bandClock = () => ((((Date.now() - PARTY_EPOCH) / 1000 + band.shift) % BAND_EVERY) + BAND_EVERY) % BAND_EVERY;
+    function updateBand(dt) {
+      if (!band.route) bandRoute();
+      const t = bandClock(), lead = t * BAND_SPEED;
+      const on = !building && lead - 5.1 < band.len;
+      if (on && !BAND[0].av) BAND.forEach((m) => {
+        m.av = FefeAvatar.build(T, m.look);
+        Object.entries(KIT[m.kit]).forEach(([slot, kind]) => m.av.hold(slot, kind));
+        m.av.root.visible = false;
+        scene.add(m.av.root);
+      });
+      band.on = on;
+      if (!BAND[0].av) return;
+      const phase = t * Math.PI * 2; // two steps a second: in time with the music
+      let cx = 0, cz = 0, n = 0;
+      BAND.forEach((m) => {
+        const d = lead - m.s, show = on && d >= 0 && d <= band.len;
+        if (show !== m.av.root.visible) {
+          m.av.root.visible = show;
+          const [px, pz] = routeAt(Math.max(0, Math.min(band.len, d)));
+          poof(px, worldY(Math.floor(px), Math.floor(pz)), pz);
+        }
+        if (!show) return;
+        const [x0, z0] = routeAt(d), ahead = routeAt(d + 0.8), behind = routeAt(d - 0.8);
+        let hx = ahead[0] - behind[0], hz = ahead[1] - behind[1];
+        const hl = Math.hypot(hx, hz) || 1;
+        hx /= hl; hz /= hl;
+        const x = x0 - hz * m.side, z = z0 + hx * m.side, y = worldY(Math.floor(x), Math.floor(z));
+        m.y = m.y === undefined ? y : m.y + (y - m.y) * Math.min(1, dt * 12);
+        const av = m.av, P = av.parts;
+        av.root.position.set(x + OX, m.y, z + OZ);
+        av.root.rotation.y = Math.atan2(hx, hz);
+        av.setPose(phase, true);
+        if (m.kit === "flag") P.armR.rotation.set(-0.2 + 0.06 * Math.sin(phase), 0, -0.08);
+        else if (m.kit === "trumpet") { P.armR.rotation.set(-1.75, 0, 0.32); P.armL.rotation.set(-1.75, 0, -0.32); P.head.rotation.x = -0.1 - 0.06 * Math.abs(Math.sin(phase)); }
+        else if (m.kit === "accordion") { const sq = 0.16 + 0.07 * Math.sin(phase / 2); P.armR.rotation.set(-0.7, 0, sq); P.armL.rotation.set(-0.7, 0, -sq); }
+        else if (m.kit === "tuba") { P.armR.rotation.set(-0.6, 0, 0.3); P.armL.rotation.set(-0.6, 0, -0.3); }
+        else if (m.kit === "drum") { P.armL.rotation.set(-0.55, 0, -0.25); P.armR.rotation.set(-0.45 - 0.6 * (t % 1), 0, 0.35); }
+        m.x = x; m.z = z;
+        cx += x; cz += z; n++;
+      });
+      band.x = n ? cx / n : band.x;
+      band.z = n ? cz / n : band.z;
+      const singer = BAND[0];
+      if (party && singer.av.root.visible && t - band.noteAt > 0.7) {
+        band.noteAt = t;
+        party.fx.icon("note", singer.x, singer.y + 2.9, singer.z, { size: 0.35, vy: 1 });
+      }
+      if (n === 0) band.noteAt = 0;
+      if (snd && snd.enabled) snd.setBand(n > 0, band.x, band.z, t);
+    }
+
     // ---------- cars: tap one to get in, drive it about, crash it ----------
     const carMats = {};
     const carMat = (c, kind) => carMats[c + kind] || (carMats[c + kind] = kind === "glow" ? new T.MeshBasicMaterial({ color: c })
@@ -5092,6 +5194,8 @@
       roots: () => actorList.map((a) => [a.name, +(a.av.root.position.x - OX).toFixed(2), +(a.av.root.position.z - OZ).toFixed(2), +(a.sepX || 0).toFixed(2)]),
       look(x, z, fit, y, az) { follow = false; goal.target.set(x + OX, y || 1, z + OZ); goal.fit = fit || 14; if (az !== undefined) goal.az = az; } };
     window.fefeDebug.tv = tvState;
+    window.fefeDebug.band = () => ({ on: band.on, t: +bandClock().toFixed(2), len: +band.len.toFixed(1), at: [+band.x.toFixed(2), +band.z.toFixed(2)], shown: BAND.filter((m) => m.av && m.av.root.visible).length });
+    window.fefeDebug.bandAt = (sec) => { band.shift = 0; band.shift = sec - bandClock(); };
 
     // test hooks for clothes: walk me somewhere, who's wearing what (and how many looks they keep), the piles, where a
     // pile is on screen, and the test crowd's clock (seconds into their loop, 45 s a round)
@@ -5172,6 +5276,7 @@
       updateNightLights(dt, now / 1000);
       updateKaraoke(now / 1000);
       updateTV(now / 1000);
+      updateBand(dt);
       if (snd && snd.enabled) {
         snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
         snd.setEngine(!!(me && me.inCar), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);

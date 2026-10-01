@@ -79,6 +79,9 @@
     // bedroom music: its own slow loop from wherever a bedroom scene is on (setLove)
     const love = { on: false, x: 0, z: 0, next: 0, step: 0 };
     let loveBus = null;
+    // the oompah band marching round the party: its own polka from wherever the band is (setBand)
+    const band = { on: false, x: 0, z: 0, next: 0, step: 0 };
+    let bandBus = null;
     let club = false, musicArea = -1; // musicArea: 0-1 from the game, or -1 to go by distance from the spot
 
     // ---------- building blocks ----------
@@ -543,6 +546,9 @@
       musicBus.gain.value = 0;
       loveBus = ctx.createGain();
       loveBus.gain.value = 0;
+      bandBus = ctx.createGain();
+      bandBus.gain.value = 0;
+      bandBus.connect(comp);
       fxBus.connect(comp); musicBus.connect(comp); loveBus.connect(comp); comp.connect(master); master.connect(ctx.destination);
     }
     const running = () => offline || !ctx.state || ctx.state === "running";
@@ -780,6 +786,89 @@
       love.on = !!on;
       if (love.on && ctx) { love.step = 0; love.next = ctx.currentTime + 0.1; }
     }
+    // An original oompah polka in F, 2/4 at 120 bpm (eighth-note steps, four to a bar): the tuba on the beats, brass
+    // "pah" chords and a cymbal off them, the big drum, two trumpets a third apart and, every other time round, the
+    // singer on "la". 16 bars, then again with the singer.
+    const BAND_CH = { F: [41, 36, [57, 60, 65]], C: [36, 43, [55, 58, 64]], B: [46, 41, [58, 62, 65]] };
+    const BAND_BARS = "FFCCCCFFFFBBFCFF";
+    const BAND_MEL = [
+      [[0, 72, 1], [1, 69, 1], [2, 72, 1], [3, 77, 1]], [[0, 77, 2], [2, 72, 2]],
+      [[0, 70, 1], [1, 72, 1], [2, 70, 1], [3, 67, 1]], [[0, 64, 2], [2, 67, 2]],
+      [[0, 70, 1], [1, 69, 1], [2, 67, 1], [3, 69, 1]], [[0, 70, 1], [1, 72, 1], [2, 74, 1], [3, 76, 1]],
+      [[0, 77, 1], [1, 76, 1], [2, 77, 1], [3, 72, 1]], [[0, 69, 2], [2, 65, 2]],
+      [[0, 69, 1], [1, 72, 1], [2, 69, 1], [3, 72, 1]], [[0, 77, 3], [3, 76, 1]],
+      [[0, 74, 1], [1, 77, 1], [2, 74, 1], [3, 70, 1]], [[0, 74, 2], [2, 72, 2]],
+      [[0, 72, 1], [1, 69, 1], [2, 72, 1], [3, 77, 1]], [[0, 76, 1], [1, 74, 1], [2, 72, 1], [3, 70, 1]],
+      [[0, 69, 2], [2, 72, 1], [3, 76, 1]], [[0, 77, 2]]
+    ];
+    const IN_F = [5, 7, 9, 10, 0, 2, 4];
+    const thirdBelow = (m) => { let n = m, k = 0; while (k < 2) { n--; if (IN_F.indexOf(((n % 12) + 12) % 12) >= 0) k++; } return n; };
+    function brass(t, m, len, v, cutoff) {
+      const fl = ctx.createBiquadFilter(), g = ctx.createGain(), end = t + len + 0.08;
+      fl.type = "lowpass";
+      fl.frequency.setValueAtTime(cutoff * 0.5, t);
+      fl.frequency.linearRampToValueAtTime(cutoff, t + 0.04); // the "blat" as the note speaks
+      fl.Q.value = 1.5;
+      env(g.gain, t, v, 0.025, 0.08, Math.max(0.01, len - 0.06));
+      fl.connect(g); g.connect(bandBus);
+      [-6, 6].forEach((c) => {
+        const o = osc("sawtooth", mtof(m) * 0.985, t, end, fl);
+        o.frequency.exponentialRampToValueAtTime(mtof(m), t + 0.05); // a little scoop up into the note
+        o.detune.value = c;
+        if (len > 0.3) lfo(o.detune, t + 0.15, 5.5, 14, len);
+      });
+    }
+    function bandStep(t, silent) {
+      const sd = 60 / 120 / 2, s = band.step, bar = (s >> 2) & 15, b = s & 3, round = (s >> 6) & 1;
+      if (silent) { band.step = (s + 1) & 127; return sd; } // out of earshot: keep time, build nothing
+      const ch = BAND_CH[BAND_BARS[bar]];
+      // tuba: oom on the beats
+      if (b === 0 || b === 2) {
+        const m = b === 0 ? ch[0] : ch[1];
+        const tb = synth(bandBus, t, "sawtooth", mtof(m), "lowpass", 520, 1.2, 0.2, 0.02, 0.1, sd * 0.9);
+        tb.fl.frequency.exponentialRampToValueAtTime(260, tb.end);
+        tone(bandBus, t, "sine", mtof(m), 0, 0.16, 0.02, 0.1, sd * 0.9);
+      }
+      // pah: brass chord and cymbal off the beats
+      if (b === 1 || b === 3) {
+        ch[2].forEach((m) => brass(t, m, sd * 0.45, 0.03, 1400));
+        hiss(bandBus, t, "highpass", 6500, 0, 0.7, 0.045, 0.002, 0.12);
+      }
+      // the big drum, with a roll into the top of the tune
+      if (b === 0) { const k = tone(bandBus, t, "sine", 120, 0, 0.5, 0.003, 0.28); k.frequency.exponentialRampToValueAtTime(45, t + 0.12); hiss(bandBus, t, "lowpass", 300, 0, 0.7, 0.15, 0.002, 0.08); }
+      if (bar === 15 && b >= 2) for (let i = 0; i < 4; i++) hiss(bandBus, t + (i * sd) / 4, "bandpass", 2600, 0, 1.2, 0.05 + i * 0.012, 0.002, 0.05);
+      // trumpets, and the singer the second time round
+      BAND_MEL[bar].forEach(([at, m, n]) => {
+        if (at !== b) return;
+        const len = n * sd * 0.92;
+        brass(t, m, len, 0.06, 2600);
+        brass(t, thirdBelow(m), len, 0.045, 2200);
+        if (round) {
+          const o = vowel(bandBus, t + 0.01, mtof(m), 0, n > 1 ? 800 : 620, n > 1 ? 1200 : 1150, 0.55, 0.04, 0.08, Math.max(0.02, len - 0.1));
+          if (n > 1) lfo(o.detune, t + 0.12, 5.2, 22, len);
+        }
+      });
+      band.step = (s + 1) & 127;
+      return sd;
+    }
+    function bandVol() {
+      if (!band.on) return 0;
+      const d = Math.sqrt((L.x - band.x) * (L.x - band.x) + (L.z - band.z) * (L.z - band.z));
+      if (d >= 36) return 0;
+      const u = d <= 4 ? 0 : (d - 4) / 32;
+      return 0.45 * (1 - u) * (1 - u) * Math.sqrt(zoomQuiet());
+    }
+    // since = seconds the band has been playing, so every phone is on the same bar (and the drummer's arm on the beat)
+    function setBand(on, x, z, since) {
+      if (typeof x === "number" && isFinite(x)) band.x = x;
+      if (typeof z === "number" && isFinite(z)) band.z = z;
+      if (!!on === band.on) return;
+      band.on = !!on;
+      if (!band.on || !ctx) return;
+      const e = typeof since === "number" && isFinite(since) && since > 0 ? since : 0;
+      band.step = Math.ceil(e / 0.25) & 127;
+      band.next = ctx.currentTime + Math.ceil(e / 0.25) * 0.25 - e + 0.02;
+    }
     // when the next bar of the loop starts, for singing along on the beat
     function nextBar() {
       if (!ctx) return 0;
@@ -812,6 +901,14 @@
           while (love.next < now + 0.3) love.next += loveStep(love.next);
         }
       }
+      if (bandBus) {
+        const bv = bandVol();
+        bandBus.gain.setTargetAtTime(bv, now, 0.3);
+        if (band.on) {
+          if (band.next < now - 0.2) band.next = now + 0.05;
+          while (band.next < now + 0.3) band.next += bandStep(band.next, bv < 0.004);
+        }
+      }
       if (!musicOn) return;
       if (nextT < now - 0.2) nextT = now + 0.05; // skipped frames: jump ahead instead of a burst
       const ahead = now + clamp(dt * 2 + 0.05, 0.1, 0.35);
@@ -839,6 +936,7 @@
       playClip: safe(playClip),
       setMusic: safe(setMusic),
       setLove: safe(setLove),
+      setBand: safe(setBand),
       setEngine: safe(setEngine),
       setMusicArea: safe((g) => { musicArea = typeof g === "number" && isFinite(g) ? clamp(g, -1, 1) : -1; }),
       nextBar: safe(nextBar)
