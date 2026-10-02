@@ -3665,7 +3665,7 @@
       const hits = raycaster.intersectObjects(carList.filter((c) => c.g.visible).map((c) => c.g), true);
       return hits.length ? carList.find((c) => c.g === hits[0].object.parent) : null;
     }
-    // the tank and the seaplane are for Germans only: guests whose phone is on German time (see flags.js) or in German
+    // the tank is for Germans only: guests whose phone is on German time (see flags.js) or in German (the seaplane is for everyone)
     const isGerman = () => myCountry === "DE" || /^de\b/i.test(navigator.language || "");
     function goToCar(c) {
       if (c.sunk) return; // at the bottom of the pool
@@ -4044,7 +4044,6 @@
       return raycaster.intersectObject(plane.g, true).length > 0;
     }
     function goToPlane() {
-      if (!isGerman()) { if (party) party.fx.icon("bang", plane.x, 3.2, plane.z, { size: 0.5 }); sfx("horn", plane.x, plane.z); return; } // Germans only
       if (planeTaken()) { if (party) party.fx.icon("bang", plane.x, 3.2, plane.z, { size: 0.5 }); sfx("horn", plane.x, plane.z); return; }
       const at = dryNear(plane.x, plane.z);
       pendingPlane = true;
