@@ -2045,6 +2045,9 @@
         me.moving = false;
         me.idleT = 0;
         placePilot(me, plane, drive.steer);
+        tickRecording(dt, true); // the flight goes into the loop too
+        const last = rec && rec.nodes[rec.nodes.length - 1];
+        if (last && (last[3] !== PLANE_NODE || Math.abs(Math.floor(plane.x) - last[1]) + Math.abs(Math.floor(plane.z) - last[2]) >= 4 || Math.abs(Math.round(plane.alt * 2) - last[5]) >= 3)) recHere();
         if (follow) { goal.target.set(plane.x + OX, WATER_Y + plane.alt * 0.6, plane.z + OZ); clampTarget(goal.target); }
         heartbeat(performance.now());
         return;
@@ -2167,20 +2170,22 @@
       }
     }
     // A node is [time, x, z], or [time, x, z, car, heading] while driving: car is its number from 1 and heading
-    // is in 64ths of a turn.
-    function recNode(x, z, car, h) {
+    // is in 64ths of a turn; or [time, x, z, PLANE_NODE, heading, height in half metres] while flying the seaplane.
+    const PLANE_NODE = 99;
+    function recNode(x, z, car, h, alt2) {
       if (!rec || rec.nodes.length >= 1500 || rec.clock >= LOOP_S) return;
       const last = rec.nodes[rec.nodes.length - 1];
       const t = Math.max(last[0], Math.round(rec.clock * 10));
-      if (last[0] === t && last[1] === x && last[2] === z && (last[3] || 0) === (car || 0) && (last[4] || 0) === (h || 0)) return;
-      rec.nodes.push(car ? [t, x, z, car, h] : [t, x, z]);
+      if (last[0] === t && last[1] === x && last[2] === z && (last[3] || 0) === (car || 0) && (last[4] || 0) === (h || 0) && (last[5] || 0) === (alt2 || 0)) return;
+      rec.nodes.push(car === PLANE_NODE ? [t, x, z, car, h, alt2 || 0] : car ? [t, x, z, car, h] : [t, x, z]);
     }
     const hdg64 = (h) => ((Math.round((h / (2 * Math.PI)) * 64) % 64) + 64) % 64;
     // where I am right now: in my car if I'm driving
     function recHere() {
       const c = me.inCar;
-      if (c && (c.isPlane || c.isBear)) return; // flights and bear rides aren't in the loop
-      if (c) recNode(Math.floor(c.x), Math.floor(c.z), c.idx + 1, hdg64(c.h));
+      if (c && c.isBear) return; // bear rides aren't in the loop
+      if (c && c.isPlane) recNode(Math.floor(c.x), Math.floor(c.z), PLANE_NODE, hdg64(c.h), Math.max(0, Math.min(60, Math.round(c.alt * 2)))); // flights are
+      else if (c) recNode(Math.floor(c.x), Math.floor(c.z), c.idx + 1, hdg64(c.h));
       else recNode(Math.floor(me.x), Math.floor(me.z));
     }
 
@@ -2318,11 +2323,12 @@
         const nodes = [];
         if (typeof track !== "string" || track.length > 30000) return nodes;
         track.split(";").slice(0, 1500).forEach((part) => {
-          const [t, x, z, c, h] = part.split(",").map(Number);
-          const car = Number.isInteger(c) && c >= 1 && c <= carList.length ? c : 0;
+          const [t, x, z, c, h, a] = part.split(",").map(Number);
+          const car = Number.isInteger(c) && ((c >= 1 && c <= carList.length) || c === PLANE_NODE) ? c : 0;
           if (![t, x, z].every(Number.isFinite) || !inMap(x, z) || (!car && heightAt(x, z) === NONE)) return;
           if (nodes.length && t < nodes[nodes.length - 1][0]) return;
-          nodes.push(car ? [t, x | 0, z | 0, car, Number.isFinite(h) ? (((h | 0) % 64) + 64) % 64 : 0] : [t, x | 0, z | 0]);
+          const hh = Number.isFinite(h) ? (((h | 0) % 64) + 64) % 64 : 0;
+          nodes.push(car === PLANE_NODE ? [t, x | 0, z | 0, car, hh, Math.max(0, Math.min(60, a | 0))] : car ? [t, x | 0, z | 0, car, hh] : [t, x | 0, z | 0]);
         });
         return nodes;
       };
@@ -2483,7 +2489,7 @@
       }
       const n = g.nodes;
       g.t += dt;
-      if (g.t >= g.dur) { g.t = 0; g.i = 0; leaveCar(g); a.drop = 12; a.dropV = 0; }
+      if (g.t >= g.dur) { g.t = 0; g.i = 0; leaveCar(g); landGhostPlane(g); a.drop = 12; a.dropV = 0; }
       const t10 = g.t * 10;
       if (g.i >= n.length || n[g.i][0] > t10) g.i = 0;
       while (g.i < n.length - 1 && n[g.i + 1][0] <= t10) {
@@ -2494,6 +2500,33 @@
         if (!p0[3] && !p1[3] && (Math.abs(p1[1] - p0[1]) > 1 || Math.abs(p1[2] - p0[2]) > 1)) { a.drop = 12; a.dropV = 0; }
       }
       const p = n[g.i], q = n[Math.min(g.i + 1, n.length - 1)];
+      if (p[3] === PLANE_NODE) { // flying: a copy of the seaplane along the recorded route, banking into the turns
+        leaveCar(g);
+        const both = q !== p && q[3] === PLANE_NODE, f = both ? Math.min(1, Math.max(0, (t10 - p[0]) / Math.max(1, q[0] - p[0]))) : 0;
+        if (!g.plane) {
+          g.plane = Object.assign(buildPlane(), { x: p[1] + 0.5, z: p[2] + 0.5, h: (p[4] / 64) * 2 * Math.PI, alt: p[5] / 2, speed: 0, bank: 0, pitch: 0 });
+          g.plane.g.rotation.order = "YXZ";
+          scene.add(g.plane.g);
+        }
+        const pl = g.plane, dx = both ? q[1] - p[1] : 0, dz = both ? q[2] - p[2] : 0;
+        const want = Math.hypot(dx, dz) > 1.5 ? Math.atan2(dx, dz) : (p[4] / 64) * 2 * Math.PI, turn = Math.atan2(Math.sin(want - pl.h), Math.cos(want - pl.h));
+        pl.x = p[1] + 0.5 + dx * f;
+        pl.z = p[2] + 0.5 + dz * f;
+        pl.alt = (p[5] + (both ? (q[5] - p[5]) * f : 0)) / 2;
+        pl.h += turn * Math.min(1, dt * 3);
+        pl.bank += ((pl.alt > 0.3 ? -Math.max(-1, Math.min(1, turn * 2)) * 0.45 : 0) - pl.bank) * Math.min(1, dt * 3);
+        pl.speed = both && (dx || dz) ? 10 : pl.alt > 0.3 ? 8 : 0;
+        posePlane(pl);
+        a.x = pl.x; a.z = pl.z; a.y = WATER_Y + pl.alt; a.drop = 0; a.moving = false; a.idleT = 0;
+        a.inCar = pl;
+        placePilot(a, pl, 0);
+        return;
+      }
+      if (g.plane) { // landed: out onto the deck
+        const pl = g.plane;
+        landGhostPlane(g);
+        poof(pl.x, WATER_Y, pl.z);
+      }
       if (p[3]) { // driving: the car follows the recorded route, turning the way they turned
         const f = q !== p && q[3] === p[3] ? Math.min(1, Math.max(0, (t10 - p[0]) / Math.max(1, q[0] - p[0]))) : 0;
         const h0 = (p[4] / 64) * 2 * Math.PI, h1 = f ? (q[4] / 64) * 2 * Math.PI : h0;
@@ -4055,6 +4088,7 @@
       myPath = [];
       recNode(Math.floor(me.x), Math.floor(me.z));
       me.inCar = plane;
+      recHere(); // climbing in
       me.blendX = me.blendZ = 0;
       plane.landing = false;
       drive.gas = drive.steer = 0;
@@ -4069,6 +4103,7 @@
     function leavePlane() {
       if (!flyingMe()) return;
       if (plane.alt > 0 || plane.speed > 1.5) { plane.landing = true; return; }
+      recHere(); // down on the water
       me.inCar = null;
       plane.speed = 0;
       drive.gas = drive.steer = 0;
@@ -5923,6 +5958,8 @@
       carHitAt: (i, x, z, h) => { const r = carHit(carList[i], x, z, h); return r && { what: r.what, px: +r.px.toFixed(2), pz: +r.pz.toFixed(2), other: r.other ? r.other.idx : undefined }; },
       treesNear: (x, z, d) => TREES.filter((t) => Math.hypot(t.x - x, t.z - z) < d).map((t) => [t.x, t.z]),
       plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible, pending: pendingPlane, taken: planeTaken() }),
+      ghostPlanes: () => [...ghosts.values()].filter((g) => g.plane).map((g) => [g.actor.name, +g.plane.x.toFixed(1), +g.plane.z.toFixed(1), +g.plane.alt.toFixed(1), !!g.live]),
+      ghostAt: (name, sec) => { ghosts.forEach((g) => { if (g.actor.name === name) { g.t = sec; g.i = 0; } }); },
       tapWhat: (x, y) => (bearFromTap(x, y) ? "bear" : carFromTap(x, y) ? "car" : planeFromTap(x, y) ? "plane" : "other"),
       planeScreen: () => { const v = new T.Vector3(plane.x + OX, 2, plane.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       voice: () => ({ mine: Object.keys(myVoice).length, up: myVoiceUp.size, choir: choir.on, bufs: [...clipBufs.values()].filter((b) => b && b !== "wait").length }),
