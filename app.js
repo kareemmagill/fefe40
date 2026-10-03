@@ -5960,6 +5960,8 @@
       plane: () => ({ flying: flyingMe(), x: +plane.x.toFixed(2), z: +plane.z.toFixed(2), alt: +plane.alt.toFixed(2), speed: +plane.speed.toFixed(2), visible: plane.g.visible, pending: pendingPlane, taken: planeTaken() }),
       ghostPlanes: () => [...ghosts.values()].filter((g) => g.plane).map((g) => [g.actor.name, +g.plane.x.toFixed(1), +g.plane.z.toFixed(1), +g.plane.alt.toFixed(1), !!g.live]),
       ghostAt: (name, sec) => { ghosts.forEach((g) => { if (g.actor.name === name) { g.t = sec; g.i = 0; } }); },
+      strike: (tree) => { const s = strikeOf(Math.floor(Math.random() * 1e6)); if (tree === true) Object.assign(s, (({ tx, tz, top }) => ({ x: tx, z: tz, ground: top }))(TREES[3]), { tree: TREES[3], at: (Date.now() - PARTY_EPOCH) / 1000 }); strike(s, 77); return [+s.x.toFixed(1), +s.z.toFixed(1), !!s.tree]; },
+      stormHold: (sec) => { storm.t = -sec; return storm.bolt ? storm.bolt.children.map((m) => { const v = m.getWorldPosition(new T.Vector3()).project(cam); return [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]; }).slice(0, 4) : null; },
       tapWhat: (x, y) => (bearFromTap(x, y) ? "bear" : carFromTap(x, y) ? "car" : planeFromTap(x, y) ? "plane" : "other"),
       planeScreen: () => { const v = new T.Vector3(plane.x + OX, 2, plane.z + OZ).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]; },
       voice: () => ({ mine: Object.keys(myVoice).length, up: myVoiceUp.size, choir: choir.on, bufs: [...clipBufs.values()].filter((b) => b && b !== "wait").length }),
@@ -6051,6 +6053,7 @@
       updateKaraoke(now / 1000);
       updateTV(now / 1000);
       updateBand(dt);
+      updateStorm(dt);
       if (snd && snd.enabled) {
         snd.setListener(me ? me.x : view.target.x - OX, me ? me.z : view.target.z - OZ, view.fit, !!me && me.drop === 0); // you hear from where your avatar is
         snd.setEngine(!!(me && me.inCar && !me.inCar.isBear), me && me.inCar ? me.inCar.speed : 0, me ? me.x : 0, me ? me.z : 0);
@@ -6085,6 +6088,78 @@
       govern(rawMs, dt);
       renderer.render(scene, cam);
       requestAnimationFrame(frame);
+    }
+
+    // ---------- thunder and lightning at night ----------
+    // After dark a storm rolls round the party: a strike every 10 to 50 seconds, worked out from the party clock, so
+    // everyone at night sees the same bolt in the same spot. The scene flashes blue-white (twice, the way lightning
+    // does), a jagged bolt comes down out of the sky, and the thunder follows after a delay that grows with the
+    // distance: a crack right overhead, a long rumble far off. Now and then it hits a tree, which catches fire.
+    const STORM_SLOT = 30;
+    const storm = { last: -1, t: 99, bolt: null };
+    const flashEl = document.createElement("div");
+    flashEl.className = "flash";
+    document.body.appendChild(flashEl);
+    const boltMat = new T.MeshBasicMaterial({ color: 0xf4f8ff });
+    const glowMat = new T.MeshBasicMaterial({ color: 0x9fc3ff, transparent: true, opacity: 0.35, depthWrite: false });
+    function strikeOf(slot) {
+      const at = slot * STORM_SLOT + hash01(slot * 7919 + 17) * (STORM_SLOT - 6);
+      if (hash01(slot * 13 + 3) < 0.15 && TREES.length) { // a tree
+        const t = TREES[Math.floor(hash01(slot * 29 + 11) * TREES.length)];
+        return { at, x: t.tx, z: t.tz, ground: t.top, tree: t };
+      }
+      const x = X0 + 6 + hash01(slot * 31 + 5) * (X1 - X0 - 12), z = Z0 + 6 + hash01(slot * 57 + 9) * (Z1 - Z0 - 12), st = heightAt(Math.floor(x), Math.floor(z));
+      return { at, x, z, ground: st === NONE ? 1 : (st + 1) / 2, tree: null };
+    }
+    function buildBolt(s, seed) {
+      const g = new T.Group(), pts = [];
+      let x = s.x + (hash01(seed + 1) - 0.5) * 8, z = s.z + (hash01(seed + 2) - 0.5) * 8;
+      const top = 46, n = 10;
+      for (let i = 0; i <= n; i++) {
+        const u = i / n, y = top + (s.ground - top) * u;
+        if (i === n) { x = s.x; z = s.z; } else if (i) { x += (s.x - x) * 0.25 + (hash01(seed + i * 7) - 0.5) * 3; z += (s.z - z) * 0.25 + (hash01(seed + i * 11) - 0.5) * 3; }
+        pts.push(new T.Vector3(x + OX, y, z + OZ));
+      }
+      const seg = (a, b, w, mat) => {
+        const m = new T.Mesh(carBox, mat);
+        m.position.copy(a).add(b).multiplyScalar(0.5);
+        m.lookAt(b);
+        m.scale.set(w, w, a.distanceTo(b));
+        g.add(m);
+      };
+      for (let i = 0; i < n; i++) { seg(pts[i], pts[i + 1], 0.32, boltMat); seg(pts[i], pts[i + 1], 1.3, glowMat); }
+      const k = 3 + Math.floor(hash01(seed + 5) * 3), b = pts[k].clone().add(new T.Vector3((hash01(seed + 6) - 0.5) * 9, -7, (hash01(seed + 8) - 0.5) * 9)); // a fork
+      seg(pts[k], b, 0.2, boltMat);
+      seg(pts[k], b, 0.8, glowMat);
+      return g;
+    }
+    function strike(s, seed) {
+      storm.t = 0;
+      if (storm.bolt) scene.remove(storm.bolt);
+      storm.bolt = buildBolt(s, seed);
+      scene.add(storm.bolt);
+      const lx = me ? me.x : view.target.x - OX, lz = me ? me.z : view.target.z - OZ, d = Math.hypot(s.x - lx, s.z - lz);
+      if (snd && snd.enabled) snd.thunder(Math.max(0, 1 - d / 45), Math.min(4, d / 30));
+      if (party) {
+        party.fx.icon("flash", s.x, s.ground + 0.5, s.z, { size: 2.2, vy: 0, life: 0.35, max: 0.35 });
+        for (let i = 0; i < 6; i++) party.fx.icon("smoke", s.x + (Math.random() - 0.5) * 2, s.ground + 0.4, s.z + (Math.random() - 0.5) * 2, { size: 0.8, vy: 1, life: 1.8, max: 1.8 });
+      }
+      if (s.tree) ignite(TREES.indexOf(s.tree), PARTY_EPOCH + s.at * 1000, 0); // the same start on every phone, so the same spread
+    }
+    function updateStorm(dt) {
+      const t = (Date.now() - PARTY_EPOCH) / 1000, slot = Math.floor(t / STORM_SLOT);
+      if (night && !building && slot !== storm.last) {
+        const s = strikeOf(slot);
+        if (t >= s.at) { storm.last = slot; if (t - s.at < 2) strike(s, slot); }
+      }
+      if (storm.t > 1) return;
+      storm.t += dt;
+      const u = storm.t, lvl = u < 0.07 ? 1 : u < 0.15 ? 0.15 : u < 0.24 ? 0.85 : Math.max(0, 0.85 * (1 - (u - 0.24) / 0.5));
+      hemi.intensity = (night ? 0.34 : 0.72) + lvl * 1.3;
+      amb.intensity = (night ? 0.14 : 0.18) + lvl * 0.5;
+      flashEl.style.opacity = (lvl * 0.25).toFixed(3);
+      if (storm.bolt) storm.bolt.visible = u < 0.07 || (u > 0.15 && u < 0.32);
+      if (storm.bolt && u > 0.35) { scene.remove(storm.bolt); storm.bolt = null; }
     }
 
     // The DJ's three tracks take turns, two minutes each, on the party clock: the same one on every phone.

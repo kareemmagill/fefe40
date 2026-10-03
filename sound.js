@@ -1059,6 +1059,28 @@
       const u = d <= 4 ? 0 : (d - 4) / 32;
       return 0.45 * (1 - u) * (1 - u) * Math.sqrt(zoomQuiet());
     }
+    // Thunder, heard everywhere (not just near the strike): a crack when it's close, then a long rolling rumble.
+    // near: 1 right overhead, 0 far away; it comes after `delay` seconds (light first, then sound).
+    function thunder(near, delay) {
+      if (!ctx || !eng.enabled || !running()) return;
+      near = clamp(+near || 0, 0, 1);
+      const t = ctx.currentTime + clamp(+delay || 0, 0, 6), out = ctx.createGain();
+      out.gain.value = 0.45 + 0.55 * near;
+      out.connect(fxBus);
+      if (near > 0.45) { // the crack
+        hiss(out, t, "highpass", 1800, 600, 0.5, 0.9 * near, 0.002, 0.25);
+        hiss(out, t + 0.03, "bandpass", 900, 300, 0.7, 0.7 * near, 0.003, 0.35);
+      }
+      // the rumble: low noise swelling and rolling away, with a few booms inside it
+      const len = 2.6 + (1 - near) * 2;
+      const fl = hiss(out, t + 0.05, "lowpass", 380, 90, 0.9, 1, 0.25 + (1 - near) * 0.4, len);
+      lfo(fl.frequency, t, 1.7, 90, len);
+      for (let i = 0; i < 4; i++) {
+        const tt = t + 0.1 + rand() * len * 0.6, k = tone(out, tt, "sine", 55 + rand() * 25, 0, 0.5 * (1 - i * 0.15), 0.05, 0.9);
+        k.frequency.exponentialRampToValueAtTime(30, tt + 0.8);
+      }
+      if (!offline) setTimeout(() => { try { out.disconnect(); } catch (e) { /* gone */ } }, (delay + len + 2) * 1000);
+    }
     // since = seconds the band has been playing, so every phone is on the same bar (and the drummer's arm on the beat)
     function setBand(on, x, z, since) {
       if (typeof x === "number" && isFinite(x)) band.x = x;
@@ -1178,6 +1200,7 @@
       setLove: safe(setLove),
       setBand: safe(setBand),
       setFire: safe(setFire),
+      thunder: safe(thunder),
       setEngine: safe(setEngine),
       setMusicArea: safe((g) => { musicArea = typeof g === "number" && isFinite(g) ? clamp(g, -1, 1) : -1; }),
       nextBar: safe(nextBar)
