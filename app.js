@@ -3669,7 +3669,7 @@
     const isGerman = () => myCountry === "DE" || /^de\b/i.test(navigator.language || "");
     function goToCar(c) {
       if (c.sunk) return; // at the bottom of the pool
-      if (c.tank && !isGerman()) { // Germans only: a toot, and nobody else gets in
+      if (false) { // (the tank is for everyone now)
         sfx("horn", c.x, c.z);
         if (party) party.fx.icon("bang", c.x, 3.2, c.z, { size: 0.5 });
         return;
