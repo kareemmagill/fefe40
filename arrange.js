@@ -278,7 +278,7 @@
     // the game's palms and leafy trees round the top. Built the first time it's switched on, in half-metre blocks like
     // the game's world. Where it would hide the people, it's cut away: the trees between the camera and the middle, and
     // in the low front view the near half of the steps too.
-    const AM = { floorR: 5, stepW: 1.5, stepH: 0.5, steps: 7, rimR: 21, sectors: 24, ball: 12.5, hub: 14.5 };
+    const AM = { floorR: 5, stepW: 1.5, stepH: 0.625, steps: 11, rimR: 27, sectors: 24, ball: 14.5, hub: 16.5 };
     AM.top = AM.steps * AM.stepH; // the grass round the top
     AM.outR = AM.floorR + AM.steps * AM.stepW; // where the steps end
     const GC = { grass: ["#63C04A", "#58B743", "#6FC957", "#4FAA3E"], leaf: ["#2E8B3A", "#3A9E45", "#267A32", "#44A84C"], leafLight: "#5DBE51", leafDark: "#1F6A2B",
@@ -343,8 +343,9 @@
       });
     }
     // The game's trees (app.js), standing on the top of the bowl instead of the game's ground (y = 1)
+    const TREE_LIFT = Math.floor((AM.top - 1) * 2), TREE_UP = AM.top - 1 - TREE_LIFT / 2; // (the game's ground is y = 1; here it's the top of the bowl)
     function growTree(x, z, kind, rnd) {
-      const map = new Map(), lift = (AM.top - 1) * 2;
+      const map = new Map(), lift = TREE_LIFT;
       const pick = (a) => a[(rnd() * a.length) | 0];
       const setV = (u, v, w, color) => map.set(vkey(u, v + lift, w), [u, v + lift, w, color]);
       const metaV = (u, v, w) => map.has(vkey(u, v + lift, w));
@@ -387,7 +388,7 @@
           }
         }
         [[-0.5, 0], [0.5, 0], [0, 0.5]].forEach(([ox, oz]) => dab(cx + ox, cy - 0.5, cz + oz, GC.coconut));
-        info = { x: cx, y: cy + 0.6 + lift / 2, z: cz }; // the top of the trunk, where a string of lights can be tied
+        info = { x: cx, y: cy + 0.6 + lift / 2 + TREE_UP, z: cz }; // the top of the trunk, where a string of lights can be tied
       } else { // a shade tree: a stout trunk with roots and two branches, under a round canopy of three blobs
         const flowering = kind === "bloom", h = 3 + ((rnd() * 3) | 0) * 0.5;
         vbox(x, 1, z, 1, h - 1, 1, GC.trunk);
@@ -425,7 +426,7 @@
         [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]].forEach(([di, dj, d]) => {
           const nb = cellAt(i + di, j + dj), lo = nb && nb.sec === c.sec ? nb.h : base;
           if (lo >= c.h) return;
-          const capLo = Math.max(lo, c.h - 0.5);
+          const capLo = Math.max(lo, c.h - (c.side ? AM.stepH : 0.5));
           face(f, d, [x0, capLo, z0], [x1, c.h, z1], c.side || c.cap);
           if (capLo > lo) face(f, d, [x0, lo, z0], [x1, capLo, z1], c.body);
         });
@@ -433,7 +434,7 @@
       // grass tufts and flowers on the top
       let seed = 4100;
       const rnd = () => hash01(seed++);
-      for (let k = 0; k < 140; k++) {
+      for (let k = 0; k < 190; k++) {
         const a = rnd() * Math.PI * 2, r = AM.outR + 0.4 + rnd() * (AM.rimR - AM.outR - 1.4), x = Math.sin(a) * r, z = Math.cos(a) * r, flower = rnd() < 0.35;
         const c = cellAt(Math.floor(x * 2), Math.floor(z * 2));
         if (!c || c.h !== AM.top) continue;
@@ -461,7 +462,7 @@
       // the trees: palms at eight points round the top to tie the lights to, then more, leafy and palm, all round
       const spots = [];
       for (let k = 0; k < 8; k++) { const a = ((k + 0.5) * Math.PI) / 4, r = AM.outR + 1.7; spots.push({ x: Math.sin(a) * r, z: Math.cos(a) * r, kind: "palm", lights: true }); }
-      for (let tries = 0; tries < 4000 && spots.length < 40; tries++) {
+      for (let tries = 0; tries < 6000 && spots.length < 52; tries++) {
         const a = rnd() * Math.PI * 2, r = AM.outR + 1.2 + rnd() * (AM.rimR - AM.outR - 2.6), x = Math.sin(a) * r, z = Math.cos(a) * r, t = rnd(), kind = t < 0.35 ? "palm" : t > 0.75 ? "bloom" : "leafy";
         if (spots.some((o) => Math.hypot(o.x - x, o.z - z) < (kind === "palm" || o.kind === "palm" ? 3.4 : 4.4))) continue;
         spots.push({ x, z, kind });
@@ -473,7 +474,7 @@
         blockFaces(t.map, treeSec.get(s));
         if (o.lights) tie.push({ at: t.info, s });
       });
-      treeSec.forEach((f, s) => { const m = faceMesh(f, s); amGroup.add(m); amTrees.push(m); });
+      treeSec.forEach((f, s) => { const m = faceMesh(f, s); m.position.y = TREE_UP; amGroup.add(m); amTrees.push(m); });
       // strings of party lights from the palms to the middle, where the mirror ball hangs
       const BULBS = ["#FFE58A", "#FF6FB5", "#7FD8FF", "#FFD23F", "#B9FF7A"];
       tie.forEach(({ at, s }, k) => {
