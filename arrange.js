@@ -599,7 +599,7 @@
       car0: { label: "Red car", make: () => carModel(0) }, car1: { label: "White car", make: () => carModel(1) }, car2: { label: "Blue car", make: () => carModel(2) },
       car3: { label: "Yellow car", make: () => carModel(4) }, car4: { label: "Black car", make: () => carModel(5) }, jeepney: { label: "Jeepney", make: () => carModel(3) },
       tank: { label: "Tank", make: () => carModel(6) }, plane: { label: "Seaplane", make: () => { const p = buildPlane(); p.g.userData.prop = p.prop; return p.g; } }, bear: { label: "Teddy bear", make: () => bearModel() },
-      dj: { label: "DJ desk", make: () => buildDJ() }
+      dj: { label: "DJ desk", make: () => buildDJ() }, hearts: { label: "Stream of hearts", make: () => buildHearts() }
     };
     BAND.forEach((m, i) => { THINGS["band" + i] = { label: ["Flag singer", "Trumpet", "Trumpet", "Accordion", "Tuba", "Big drum", "Beer maid"][i], band: i }; });
     // the cars, as the game parks them: the specs come out of the same builders
@@ -688,6 +688,33 @@
       };
       return g;
     }
+    // A stream of hearts: little pixel hearts in reds and pinks floating up from the ground, swaying, growing and then
+    // shrinking away at the top, always turned to the camera. Round once every 8 beats (so the GIF goes round with it).
+    const HEART = [".XX.XX.", "XWXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X..."];
+    function buildHearts() {
+      const g = new T.Group(), N = 16, H = 6.2, px = 0.085;
+      const kinds = ["#FF2E5E", "#FF6FB5", "#E8174A", "#FF9AC8"].map((c) => {
+        const boxes = [];
+        HEART.forEach((row, r) => row.split("").forEach((ch, i) => { if (ch !== ".") boxes.push([(i - 3) * px, (2.5 - r) * px, 0, px, px, px * 1.2, ch === "W" ? "#FFE3EF" : c]); }));
+        const m = mergedBoxes(boxes, vcMat("glow"));
+        m.castShadow = false;
+        return m.geometry;
+      });
+      const hearts = Array.from({ length: N }, (_, k) => { const m = new T.Mesh(kinds[k % kinds.length], vcMat("glow")); g.add(m); return { m, k, size: 0.8 + hash01(k * 17 + 3) * 0.6, side: hash01(k * 29 + 11) * Math.PI * 2 }; });
+      const period = LOOP_BEATS / BEAT;
+      g.userData.hearts = {
+        update(t) {
+          hearts.forEach((o) => {
+            const f = (((t / period + o.k / N) % 1) + 1) % 1, y = 0.3 + f * H;
+            o.m.position.set(Math.sin(y * 1.1 + o.side) * (0.25 + f * 0.6), y, Math.cos(y * 0.9 + o.side) * (0.15 + f * 0.4));
+            o.m.scale.setScalar(o.size * Math.min(1, f * 5) * Math.min(1, (1 - f) * 4)); // in at the bottom, out at the top
+          });
+        },
+        face(yaw) { hearts.forEach((o) => { o.m.rotation.y = yaw + Math.sin(o.k * 2.1) * 0.25; }); }
+      };
+      g.userData.hearts.update(0);
+      return g;
+    }
     function bearModel() {
       const b = buildBear();
       b.g.userData.bear = b;
@@ -724,7 +751,7 @@
       head.rotation.y = Math.max(-1.1, Math.min(1.1, yaw));
       head.rotation.x = -Math.max(-0.3, Math.min(0.6, view.el)) * (Math.abs(yaw) > 1.7 ? 0.3 : 0.8) + (it.nod || 0);
     }
-    const lookAll = () => items.forEach(faceCamera);
+    const lookAll = () => items.forEach((it) => { if (it.av) faceCamera(it); else if (it.model.userData.hearts) it.model.userData.hearts.face(view.az - it.rot); });
     // everyone's head, from its own size up to twice as big (the slider)
     let headK = 1;
     function sizeHead(av) {
@@ -738,7 +765,7 @@
     let playing = false, playT = 0, moved = false; // (moved: they've been moving, so pausing leaves them mid-move)
     // still again, in their poses, the floor and the ball as they were built
     function stillAgain() {
-      items.forEach((it) => { it.nod = 0; if (it.model.position.y) it.model.position.y = 0; place(it); });
+      items.forEach((it) => { it.nod = 0; if (it.model.position.y) it.model.position.y = 0; if (it.model.userData.hearts) it.model.userData.hearts.update(0); place(it); });
       if (amTiles && amTiles.userData.orig) { amTiles.geometry.attributes.color.array.set(amTiles.userData.orig); amTiles.geometry.attributes.color.needsUpdate = true; tileBeat = -1; }
       if (amLight) { amLight.angle = 0; updateLight(); }
     }
@@ -786,6 +813,7 @@
         else if (it.bear) moveBear(it, t);
         else if (it.prop) it.prop.rotation.z = t * 30;
         else if (it.model.userData.dj) it.model.userData.dj.update(t);
+        else if (it.model.userData.hearts) it.model.userData.hearts.update(t);
       });
       if (!amGroup || !stageOn) return;
       amLight.angle = (t / (LOOP_BEATS / BEAT)) * ((2 * Math.PI) / 7); // the ball turns, and its light with it: one repeat of the pattern every 8 beats
@@ -853,9 +881,9 @@
       if (!quiet) save();
     }
     // a new thing goes beside everything already on the stage (the vehicles side-on, so their shape shows)
-    const WIDTH = { dj: 6, bear: 6.5, plane: 5, tank: 4.6, jeepney: 6, car0: 4, car1: 4, car2: 4, car3: 4, car4: 4 };
+    const WIDTH = { hearts: 1.6, dj: 6, bear: 6.5, plane: 5, tank: 4.6, jeepney: 6, car0: 4, car1: 4, car2: 4, car3: 4, car4: 4 };
     function spotBeside(kind) {
-      const turn = kind === "bear" || !WIDTH[kind] ? 0 : Math.PI / 2;
+      const turn = kind === "bear" || kind === "hearts" || !WIDTH[kind] ? 0 : Math.PI / 2;
       if (stageOn) {
         if (kind === "bear") { const a = view.az + Math.PI, r = AM.floorR + 5.5 * AM.stepW; return { x: Math.sin(a) * r, z: Math.cos(a) * r, rot: view.az }; } // a giant: up behind everyone
         if (kind === "dj") return djSpot();
