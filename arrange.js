@@ -1094,23 +1094,36 @@
       look.wt = sh.wt;
       return look;
     }
+    const clean = (t) => String(t || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20);
     async function loadGuests() {
+      const pastOnes = [];
       statusEl.textContent = "Loading the guests…";
       const idx = await fetch(DB_URL + "/fefe40/index.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
       const ids = Object.keys(idx || {}).filter((id) => /^[a-z0-9]{6,24}$/.test(id));
       for (let i = 0; i < ids.length; i += 8) {
         await Promise.all(ids.slice(i, i + 8).map(async (id) => {
           const r = await fetch(DB_URL + "/fefe40/guests/" + id + ".json", { cache: "no-store" }).then((x) => x.json()).catch(() => null);
-          if (r && typeof r.name === "string") guests.set(id, { name: r.name.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || "Guest", look: lookOf(r) });
+          if (!r || typeof r.name !== "string") return;
+          const name = clean(r.name) || "Guest";
+          guests.set(id, { name, look: lookOf(r) });
+          // the looks they had before (kept when their face changed): extra people for the picture
+          (Array.isArray(r.past) ? r.past : []).slice(0, 4).forEach((o, k) => {
+            if (!o || typeof o !== "object" || !faceOk(o.face)) return;
+            const was = clean(o.name) || name;
+            pastOnes.push([id + "~" + k, { name: was.toLowerCase() === name.toLowerCase() ? name + (k ? " (before " + (k + 1) + ")" : " (before)") : was, look: lookOf(o), past: true }]);
+          });
         }));
         statusEl.textContent = "Loading the guests… " + guests.size + " of " + ids.length;
       }
+      const faces = new Set([...guests.values()].map((g) => g.look.face).filter(Boolean));
+      pastOnes.forEach(([id, g]) => { if (!faces.has(g.look.face)) { faces.add(g.look.face); guests.set(id, g); } }); // (not someone who's here anyway)
     }
     (async function start() {
       resize();
       await loadGuests();
       if (!restore()) { setStage(true); defaultLayout(); frameAll(); save(); }
-      statusEl.textContent = guests.size + " guests. Tap someone to pose them; drag to move.";
+      const before = [...guests.values()].filter((g) => g.past).length;
+      statusEl.textContent = guests.size - before + (guests.size - before === 1 ? " guest" : " guests") + (before ? ", " + before + (before === 1 ? " earlier look" : " earlier looks") : "") + ". Tap someone to pose them; drag to move.";
       let last = 0;
       (function loop(now) {
         requestAnimationFrame(loop);

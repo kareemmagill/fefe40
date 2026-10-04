@@ -2233,12 +2233,16 @@
           voiceDrop(id) {
             return fetch(DB_URL + "/fefe40/voices/" + id + ".json", { method: "DELETE" });
           },
+          // (the record is patched, not replaced, so the past looks kept on it, written on their own, stay)
           put(id, record, keepalive) {
-            const req = (body) => ({ method: "PUT", body: JSON.stringify(body), keepalive: !!keepalive });
+            const req = (method, body) => ({ method, body: JSON.stringify(body), keepalive: !!keepalive });
             return Promise.all([
-              fetch(DB_URL + "/fefe40/guests/" + id + ".json", req(record)),
-              fetch(DB_URL + "/fefe40/index/" + id + ".json", req(record.at))
+              fetch(DB_URL + "/fefe40/guests/" + id + ".json", req("PATCH", record)),
+              fetch(DB_URL + "/fefe40/index/" + id + ".json", req("PUT", record.at))
             ]);
+          },
+          pastPut(id, past) {
+            return fetch(DB_URL + "/fefe40/guests/" + id + "/past.json", { method: "PUT", body: JSON.stringify(past) });
           }
         }
       : {
@@ -2253,7 +2257,8 @@
           async voicePut() { return { ok: true }; },
           async voiceGet() { throw new Error("not shared"); },
           async voiceDrop() {},
-          async put(id, record) { lsSet("fefe40.mine", JSON.stringify(record)); }
+          async put(id, record) { lsSet("fefe40.mine", JSON.stringify(record)); },
+          async pastPut() {}
         };
     let saveTimer = 0;
     function scheduleSave(ms) {
@@ -2271,17 +2276,38 @@
       if (!myPath.length && t > end[0]) nodes.push([t].concat(end.slice(1)));
       return nodes.map((n) => n.join(",")).join(";");
     }
+    // Past looks: when someone's face changes (a new photo, or joining again on another phone under the same name), the
+    // look they had is kept on their guest record (the newest few), for the arranger to bring in as extra people.
+    const PAST_MAX = 4;
+    let myPast = [], pastUp = "";
+    try { const p = JSON.parse(lsGet("fefe40.past") || "[]"); if (Array.isArray(p)) myPast = p.filter((o) => o && typeof o.face === "string").slice(0, PAST_MAX); } catch (e) { myPast = []; }
+    function pastOf(name, look) {
+      if (!look || typeof look.face !== "string" || !look.face) return null;
+      const sh = FefeAvatar.bodyShape(look);
+      return { name: String(name || "").slice(0, 20), body: look.body, outfit: look.outfit, skin: look.skin, hair: look.hair, face: look.face, h: sh.h, wt: sh.wt, at: Date.now() };
+    }
+    function keepPast(o) {
+      if (!o || !o.face) return;
+      myPast = [o].concat(myPast.filter((q) => q.face !== o.face)).slice(0, PAST_MAX);
+      lsSet("fefe40.past", JSON.stringify(myPast));
+    }
     function saveMe(leaving) {
       if (!me) return;
+      const face = typeof myLook.face === "string" ? myLook.face : myLook.face ? toB64(myLook.face) : "";
       // this phone remembers who you are, so next time you go straight in as yourself (see openJoin)
-      if (!myLook.face || typeof myLook.face === "string") lsSet("fefe40.look", JSON.stringify({ name: myName, look: myLook }));
+      if (!myLook.face || typeof myLook.face === "string") {
+        let prev = null;
+        try { prev = JSON.parse(lsGet("fefe40.look") || "null"); } catch (e) { prev = null; }
+        if (prev && prev.look && typeof prev.look.face === "string" && prev.look.face && prev.look.face !== face) keepPast(pastOf(prev.name, prev.look)); // a new face: the old one is kept
+        lsSet("fefe40.look", JSON.stringify({ name: myName, look: myLook }));
+      }
       const record = {
         name: myName,
         body: myLook.body,
         outfit: myLook.outfit,
         skin: myLook.skin,
         hair: myLook.hair,
-        face: typeof myLook.face === "string" ? myLook.face : myLook.face ? toB64(myLook.face) : "",
+        face,
         cheeky: myLook.cheeky ? 1 : 0,
         h: FefeAvatar.bodyShape(myLook).h,
         wt: FefeAvatar.bodyShape(myLook).wt,
@@ -2293,7 +2319,10 @@
         shares: myShares,
         at: Date.now()
       };
-      Promise.resolve(store.put(myId, record, leaving)).catch(() => { /* try again after the next walk */ });
+      const past = myPast.filter((o) => o.face !== face), pastStr = JSON.stringify(past), id = myId;
+      Promise.resolve(store.put(id, record, leaving))
+        .then(() => { if (past.length && pastStr !== pastUp && !leaving) return Promise.resolve(store.pastPut(id, past)).then((r) => { if (!r || r.ok !== false) pastUp = pastStr; }); })
+        .catch(() => { /* try again after the next walk */ });
     }
     function leaving() {
       saveMe(true);
@@ -2340,7 +2369,10 @@
       look.h = sh.h;
       look.wt = sh.wt;
       const cc = typeof r.cc === "string" && /^[A-Z]{2}$/.test(r.cc) ? r.cc : "";
-      return { name, look, nodes, nodesN, voice, cc, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
+      const past = (Array.isArray(r.past) ? r.past : []).slice(0, PAST_MAX).filter((o) => o && typeof o === "object" && FefeAvatar.isFaceString && FefeAvatar.isFaceString(o.face))
+        .map((o) => ({ name: String(o.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 20) || name, body: o.body === "f" ? "f" : "m", outfit: Math.max(0, Math.min(FefeAvatar.OUTFITS.length - 1, o.outfit | 0)),
+          skin: hex(o.skin, "#D9A57E"), hair: hex(o.hair, "#4A3020"), face: o.face, h: +o.h || 0, wt: +o.wt || 0, at: +o.at || 0 }));
+      return { name, look, past, nodes, nodesN, voice, cc, key: [name, look.body, look.outfit, look.skin, look.hair, look.h, look.wt, look.cheeky ? 1 : 0, typeof r.face === "string" ? r.face : "", faceL ? r.faceL : "", faceR ? r.faceR : "", faceT ? r.faceT : ""].join("|") };
     }
     const ghosts = new Map();
     const MAX_GHOSTS = 60;
@@ -2366,6 +2398,7 @@
         ghosts.set(id, g);
       }
       g.at = at;
+      g.past = clean.past;
       g.voice = clean.voice;
       g.actor.cc = clean.cc;
       g.actor.tag.textContent = withFlag(clean.name, clean.cc);
@@ -5786,6 +5819,9 @@
       for (const [id, g] of ghosts) {
         if (g.npc || id === myId || isLive(id) || !sameName(g.actor.name, name)) continue;
         dropGhost(id, g);
+        (g.past || []).slice().reverse().forEach(keepPast); // the looks they've had: theirs, and the one they had till now
+        keepPast(pastOf(g.actor.name, g.actor.look));
+        pastUp = "";
         const old = myId;
         myId = id;
         lsSet("fefe40.me", id);
