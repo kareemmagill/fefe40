@@ -598,7 +598,8 @@
     const THINGS = {
       car0: { label: "Red car", make: () => carModel(0) }, car1: { label: "White car", make: () => carModel(1) }, car2: { label: "Blue car", make: () => carModel(2) },
       car3: { label: "Yellow car", make: () => carModel(4) }, car4: { label: "Black car", make: () => carModel(5) }, jeepney: { label: "Jeepney", make: () => carModel(3) },
-      tank: { label: "Tank", make: () => carModel(6) }, plane: { label: "Seaplane", make: () => { const p = buildPlane(); p.g.userData.prop = p.prop; return p.g; } }, bear: { label: "Teddy bear", make: () => bearModel() }
+      tank: { label: "Tank", make: () => carModel(6) }, plane: { label: "Seaplane", make: () => { const p = buildPlane(); p.g.userData.prop = p.prop; return p.g; } }, bear: { label: "Teddy bear", make: () => bearModel() },
+      dj: { label: "DJ desk", make: () => buildDJ() }
     };
     BAND.forEach((m, i) => { THINGS["band" + i] = { label: ["Flag singer", "Trumpet", "Trumpet", "Accordion", "Tuba", "Big drum", "Beer maid"][i], band: i }; });
     // the cars, as the game parks them: the specs come out of the same builders
@@ -617,6 +618,74 @@
       });
       Object.keys(lists).forEach((k) => { if (lists[k].length) g.add(mergedBoxes(lists[k], vcMat(k))); });
       g.userData.seat = sp.tank ? { x: 0, y: 0.62, z: -0.05, stand: true } : { x: -0.42, y: 0, z: sp.l > 5 ? 1.6 : 0.2 };
+      return g;
+    }
+    // The game's DJ desk (app.js), on its own: a booth between two speakers, two turntables with FIFI 4000 records, a
+    // mixer, and the front panel with the party's name in lights over an equaliser. Its front is +z. The records spin
+    // and the equaliser jumps while playing. Whoever's put "in" it stands behind it, the DJ.
+    function buildDJ() {
+      const g = new T.Group(), boxes = [], glows = [];
+      const box = (x, y, z, w, h, d, c, glow) => (glow ? glows : boxes).push([x + w / 2, y + h / 2, z + d / 2, w, h, d, c]);
+      const X = 47, Y = 1, Z = 25.45; // where the game has it
+      box(45 - X, 1 - Y, 25 - Z, 4, 1.1, 0.9, "#1E1F22"); // the booth
+      box(45.05 - X, 1.3 - Y, 25.9 - Z, 3.9, 0.12, 0.02, "#006AA7", true); // its blue light
+      [44.1, 49.1].forEach((x) => { box(x - X, 1 - Y, 25 - Z, 0.8, 1.9, 0.8, "#1E1F22"); box(x + 0.2 - X, 1.4 - Y, 25.8 - Z, 0.4, 0.4, 0.02, "#B8BCC4"); box(x + 0.25 - X, 2.2 - Y, 25.8 - Z, 0.3, 0.3, 0.02, "#B8BCC4"); }); // speakers
+      box(45 - X, 2.1 - Y, 25.05 - Z, 4, 0.06, 0.8, "#4A4D55"); // the metal top
+      box(46.62 - X, 2.16 - Y, 25.12 - Z, 0.76, 0.06, 0.66, "#1E1F22"); // the mixer
+      [0.72, 0.96].forEach((dx) => box(46.62 + dx - 0.6 - X, 2.22 - Y, 25.46 - Z, 0.05, 0.04, 0.26, "#55585F"));
+      [["#2E9BFF", 0.14], ["#FFD21F", 0.34], ["#FF4FB0", 0.54]].forEach(([c, dz]) => [0.2, 0.46].forEach((dx) => box(46.62 + dx - X, 2.22 - Y, 25.12 + dz * 0.6 - Z, 0.08, 0.05, 0.08, c, true)));
+      const records = [], faders = [];
+      const vinyl = document.createElement("canvas");
+      vinyl.width = vinyl.height = 64;
+      const v = vinyl.getContext("2d");
+      v.fillStyle = "#101014"; v.beginPath(); v.arc(32, 32, 32, 0, Math.PI * 2); v.fill();
+      for (let r = 12; r < 31; r += 2) { v.strokeStyle = r % 4 ? "#24242c" : "#1a1a20"; v.beginPath(); v.arc(32, 32, r, 0, Math.PI * 2); v.stroke(); }
+      v.fillStyle = "#FEFE40"; v.beginPath(); v.arc(32, 32, 10, 0, Math.PI * 2); v.fill();
+      v.fillStyle = "#006AA7"; v.font = "bold 7px sans-serif"; v.textAlign = "center"; v.fillText("FIFI", 32, 30); v.fillText("4000", 32, 38);
+      const vinylTex = new T.CanvasTexture(vinyl);
+      [45.9, 48.1].forEach((x) => {
+        const base = new T.Mesh(new T.CylinderGeometry(0.4, 0.4, 0.05, 28), new T.MeshLambertMaterial({ color: 0xb8bcc4 }));
+        base.position.set(x - X, 2.19 - Y, 0);
+        const rec = new T.Mesh(new T.CylinderGeometry(0.36, 0.36, 0.04, 28), [new T.MeshLambertMaterial({ color: 0x101014 }), new T.MeshLambertMaterial({ map: vinylTex }), new T.MeshLambertMaterial({ color: 0x101014 })]);
+        rec.position.set(x - X, 2.235 - Y, 0);
+        g.add(base, rec);
+        records.push(rec);
+        box(x + 0.28 - X, 2.24 - Y, 25.15 - Z, 0.04, 0.05, 0.42, "#D8DCE4"); // tone arm
+        box(x + 0.24 - X, 2.23 - Y, 25.11 - Z, 0.1, 0.08, 0.1, "#2A2A30");
+        box(x - 0.34 - X, 2.16 - Y, 25.73 - Z, 0.1, 0.02, 0.08, "#3BE36B", true);
+      });
+      [0.72, 0.96].forEach((dx) => { const f = new T.Mesh(carBox, new T.MeshLambertMaterial({ color: 0xf4f4f0 })); f.scale.set(0.1, 0.05, 0.07); f.position.set(46.62 + dx - 0.63 + 0.05 - X, 2.265 - Y, 0.135); g.add(f); faders.push(f); });
+      g.add(mergedBoxes(boxes, vcMat("solid")), mergedBoxes(glows, vcMat("glow")));
+      // the front panel: the name in lights, and the equaliser
+      const front = document.createElement("canvas");
+      front.width = 256; front.height = 64;
+      const fc = front.getContext("2d"), frontTex = new T.CanvasTexture(front);
+      function paint(t, moving) {
+        fc.fillStyle = "#0d0e12"; fc.fillRect(0, 0, 256, 64);
+        for (let x = 4; x < 256; x += 8) for (let y = 4; y < 64; y += 8) { fc.fillStyle = "#1b1d24"; fc.fillRect(x, y, 4, 4); } // grille
+        fc.font = "bold 22px 'Pixelify Sans', monospace"; fc.textAlign = "center";
+        fc.fillStyle = "#FEFE40"; fc.fillText("FiFi4000", 128, 26);
+        for (let i = 0; i < 24; i++) {
+          const h = 2 + Math.floor(Math.abs(Math.sin((moving ? t : 0.6) * (3 + (i % 5)) + i * 1.7)) * 12);
+          for (let y = 0; y < h; y += 2) { fc.fillStyle = y > 9 ? "#FF2E2E" : y > 5 ? "#FFD21F" : "#3BD16F"; fc.fillRect(8 + i * 10, 60 - y * 2, 8, 2); }
+        }
+        frontTex.needsUpdate = true;
+      }
+      paint(0, false);
+      if (document.fonts && document.fonts.load) document.fonts.load("bold 22px 'Pixelify Sans'").then(() => { paint(0, false); dirty = true; }).catch(() => {});
+      const panel = new T.Mesh(new T.PlaneGeometry(3.9, 0.95), new T.MeshBasicMaterial({ map: frontTex }));
+      panel.position.set(0, 0.55, 0.47);
+      g.add(panel);
+      g.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+      let next = 0;
+      g.userData.seat = { x: 0, y: 0, z: -0.95, stand: true };
+      g.userData.dj = {
+        update(t) {
+          records.forEach((r) => { r.rotation.y = -t * 3.5; });
+          faders.forEach((f, i) => { f.position.z = 0.135 + Math.sin(t * (1.3 + i)) * 0.08; });
+          if (t > next || t < next - 1) { next = t + 0.1; paint(t, true); }
+        }
+      };
       return g;
     }
     function bearModel() {
@@ -716,6 +785,7 @@
         if (it.av) movePerson(it, t);
         else if (it.bear) moveBear(it, t);
         else if (it.prop) it.prop.rotation.z = t * 30;
+        else if (it.model.userData.dj) it.model.userData.dj.update(t);
       });
       if (!amGroup || !stageOn) return;
       amLight.angle = (t / (LOOP_BEATS / BEAT)) * ((2 * Math.PI) / 7); // the ball turns, and its light with it: one repeat of the pattern every 8 beats
@@ -783,11 +853,12 @@
       if (!quiet) save();
     }
     // a new thing goes beside everything already on the stage (the vehicles side-on, so their shape shows)
-    const WIDTH = { bear: 6.5, plane: 5, tank: 4.6, jeepney: 6, car0: 4, car1: 4, car2: 4, car3: 4, car4: 4 };
+    const WIDTH = { dj: 6, bear: 6.5, plane: 5, tank: 4.6, jeepney: 6, car0: 4, car1: 4, car2: 4, car3: 4, car4: 4 };
     function spotBeside(kind) {
       const turn = kind === "bear" || !WIDTH[kind] ? 0 : Math.PI / 2;
       if (stageOn) {
         if (kind === "bear") { const a = view.az + Math.PI, r = AM.floorR + 5.5 * AM.stepW; return { x: Math.sin(a) * r, z: Math.cos(a) * r, rot: view.az }; } // a giant: up behind everyone
+        if (kind === "dj") return djSpot();
         const side = items.filter((i) => !i.av && !i.bear).length % 2 ? 1 : -1, a = view.az + side * (Math.PI / 2 + 0.2); // at the sides of the dance floor, not in front of anyone
         return { x: Math.sin(a) * 3.4, z: Math.cos(a) * 3.4, rot: view.az + turn };
       }
@@ -796,6 +867,8 @@
       const w = WIDTH[kind] || 1.2, x = (right === -Infinity ? 0 : right + 0.8) + w / 2;
       return { x, z: 0, rot: turn };
     }
+    // the DJ desk: front and centre of the dance floor, its front (and the name) to the camera
+    const djSpot = () => ({ x: Math.sin(view.az) * 2.2, z: Math.cos(view.az) * 2.2, rot: view.az });
     // where someone new goes: on the dance floor, facing the camera, or in rows out front
     function looseSpot(i) {
       if (stageOn) { const r = 0.95 * Math.sqrt(i + 0.5), a = i * 2.39996; return { x: Math.sin(a) * r, z: Math.cos(a) * r, rot: view.az, pose: "wave" }; }
@@ -857,7 +930,7 @@
       if (!selected) return;
       if (selected.seat) { const host = items.find((o) => o.id === selected.seat); selected.seat = null; if (host) { selected.x = host.x + 2; selected.z = host.z + 1; } place(selected); select(selected); save(); return; }
       seating = selected;
-      statusEl.textContent = "Now tap a car, the tank, the plane or the teddy bear";
+      statusEl.textContent = "Now tap a car, the tank, the plane, the teddy bear or the DJ desk";
     });
     const nudge = { "sel-left": ["rot", Math.PI / 12], "sel-right": ["rot", -Math.PI / 12], "sel-bigger": ["scale", 1.1], "sel-smaller": ["scale", 1 / 1.1], "sel-up": ["y", 0.5], "sel-down": ["y", -0.5] };
     Object.keys(nudge).forEach((id) => $(id).addEventListener("click", () => {
@@ -989,13 +1062,13 @@
     $("scene-open").addEventListener("click", () => $("scene-file").click());
     // ---------- share links: the scene packed into the link itself; it opens as it is, playing ----------
     const r2d = (v) => Math.round((+v || 0) * 100) / 100;
-    const packState = (st, name) => ({ v: 1, n: name || "", st: st.stage ? 1 : 0, hd: st.heads || 100, lo: st.leftOut,
+    const packState = (st, name) => ({ v: 1, n: name || "", d: 1, st: st.stage ? 1 : 0, hd: st.heads || 100, lo: st.leftOut,
       vw: [st.view.az, st.view.el, st.view.size, ...st.view.t, (canvas.clientWidth || 1) / (canvas.clientHeight || 1)].map(r2d),
       it: st.items.map((o) => [o.id, o.kind === "guest" ? 0 : o.kind, o.ref || 0, r2d(o.x), r2d(o.z), r2d(o.rot), o.pose, r2d(o.y), r2d(o.scale), o.seat || 0]) });
     function unpackState(p) {
       if (!p || !Array.isArray(p.it)) return null;
       const vw = Array.isArray(p.vw) ? p.vw.map(Number) : [];
-      return { stage: !!p.st, heads: +p.hd || 100, leftOut: Array.isArray(p.lo) ? p.lo.filter((x) => typeof x === "string") : [],
+      return { stage: !!p.st, dj: !!p.d, heads: +p.hd || 100, leftOut: Array.isArray(p.lo) ? p.lo.filter((x) => typeof x === "string") : [],
         view: vw.length >= 6 && vw.every(Number.isFinite) ? { az: vw[0], el: vw[1], size: vw[2], t: vw.slice(3, 6), a: vw[6] } : null,
         items: p.it.filter(Array.isArray).map((a) => ({ id: a[0], kind: a[1] === 0 ? "guest" : String(a[1]), ref: a[1] === 0 ? String(a[2]) : null, x: +a[3], z: +a[4], rot: +a[5], pose: String(a[6] || "stand"), y: +a[7] || 0, scale: +a[8] || 1, seat: a[9] || null })) };
     }
@@ -1180,6 +1253,7 @@
           at += count;
         });
         fifi.forEach((o, i) => addItem("guest", o.id, { x: (i - (fifi.length - 1) / 2) * 1.1, z: 0, rot: view.az, pose: "disco" })); // the birthday boy, dancing in the middle
+        addItem("dj", null, djSpot());
         return;
       }
       const N = list.length, rows = Math.max(1, Math.round(Math.sqrt(N / 1.6))), sizes = Array.from({ length: rows }, (_, r) => Math.floor(N / rows) + (r < N % rows ? 1 : 0));
@@ -1220,7 +1294,7 @@
 
     // ---------- keeping the arrangement (in this browser), and the picture ----------
     const KEY = "fefe40.arrange3"; // (3: the amphitheater; the arrangement from before it is kept as a scene)
-    const state = () => ({ stage: stageOn, heads: Math.round(headK * 100), leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
+    const state = () => ({ stage: stageOn, dj: 1, heads: Math.round(headK * 100), leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
       items: items.map((it) => ({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat })) });
     function save() {
       try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { /* private browsing: it just isn't kept */ }
@@ -1248,6 +1322,7 @@
         it.savedSeat = o.seat;
       });
       items.forEach((it) => { if (it.savedSeat && ids.has(it.savedSeat) && ids.get(it.savedSeat) !== it) it.seat = ids.get(it.savedSeat).id; delete it.savedSeat; place(it); });
+      if (stageOn && !s.dj && !items.some((i) => i.kind === "dj")) addItem("dj", null, djSpot()); // the DJ desk, the first time
       // anyone who signed up since: out front
       const on = new Set(items.filter((i) => i.kind === "guest").map((i) => i.ref)), fresh = [...guests.keys()].filter((id) => !on.has(id) && !leftOut.has(id));
       fresh.forEach((id, i) => addItem("guest", id, looseSpot(i)));
