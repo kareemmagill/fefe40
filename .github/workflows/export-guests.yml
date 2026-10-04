@@ -1,0 +1,43 @@
+name: export-guests
+# Temporary: fetches the party's guest list, encrypts it for one recipient, and pushes only the encrypted copy.
+on:
+  push:
+    branches: [export-guests]
+permissions:
+  contents: write
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and encrypt the guests
+        env:
+          PUBKEY: |
+            -----BEGIN PUBLIC KEY-----
+            MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAxn3prPIveDz0dQSW1ZD1
+            gcFjZBHUoKoAkJYR6TKt2E/7eeWF9TmlbxESahLnrj/edNal9uQgs6w9xQw9C+MP
+            ojho9aOp8+MYu/qvDsu3lmzN+SxsQEvrYvObj18fZ0ioKksl99lTDtbggwE76jm4
+            xl3PDqOGjF+YasUHHvVbz9YfminPS7CT3YZADsC0iR6xqdNnvq24iWMNKVKWazqT
+            XpI+yvqIatM4q8WcCZN4TjE/46iyO/jyUwc89TU+iO3BKPyi7hiNdspIjVaJwe1u
+            WVmkrsesJePwvbCf9wdjYQs0gNiPuhtA1y1YTF6tNxSvk0lZ37HhOXCH1CFAM3cm
+            TuiZw7fxXxw3R172irBY0ZBHuobbMPly8s/5mFcSw9V23YWBD/V/xv7/W0QSFH2Y
+            yPeRjolZLr2VM5GrvJsOI2toywIRjEsbF6tN6WeCrVH2KAXoZ9bPqamIWQMI4BAS
+            QD/aKSBjzR4PRSOZEP3nv9tTR25Q/8H3ksLfvSnNGBOnZkAW4gnosNN8k108KiBw
+            104sg+QPTWgY7KeXVfXkyXTxbJD1+ccG834OOssvr5w2XV1DVKkC4bdzhzDriZhi
+            pHTUzc+5S/j740IsUOLdlmDRhBiA91JToupppKRLsj+e47cNpcAoxkEq0AdHYJiK
+            Yymc5tbPSEcoj30PwFt1ljcCAwEAAQ==
+            -----END PUBLIC KEY-----
+        run: |
+          curl -sSf "https://fefe40-a3dae-default-rtdb.firebaseio.com/fefe40/guests.json" -o guests.json
+          echo "guests file: $(wc -c < guests.json) bytes"
+          openssl rand -hex 32 > key.txt
+          openssl enc -aes-256-cbc -pbkdf2 -salt -in guests.json -out guests.enc -pass file:key.txt
+          printf '%s\n' "$PUBKEY" > pub.pem
+          openssl pkeyutl -encrypt -pubin -inkey pub.pem -in key.txt -out key.enc
+          rm guests.json key.txt
+      - name: Push the encrypted copy
+        run: |
+          mkdir out && mv guests.enc key.enc out/ && cd out
+          git init -q && git checkout -q -b export-guests-out
+          git config user.name "export" && git config user.email "export@users.noreply.github.com"
+          git add . && git commit -qm "Encrypted guests export (temporary)"
+          git push -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" export-guests-out
