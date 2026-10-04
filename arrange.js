@@ -410,7 +410,7 @@
       }
       return { map, info };
     }
-    let amGroup = null, stageOn = false;
+    let amGroup = null, stageOn = false, amTiles = null, amBall = null, amLight = null;
     const amGround = [], amTrees = [], amSec = [];
     function buildAmphi() {
       amGroup = new T.Group();
@@ -449,7 +449,9 @@
       }
       const slab = mergedBoxes(slabs, vcMat("solid"));
       slab.receiveShadow = true;
-      amGroup.add(slab, mergedBoxes(tiles, vcMat("glow")));
+      amTiles = mergedBoxes(tiles, vcMat("glow"));
+      amTiles.userData.tiles = tiles.length;
+      amGroup.add(slab, amTiles);
       const shade = new T.Mesh(new T.CircleGeometry(AM.floorR, 64), new T.ShadowMaterial({ opacity: 0.35 }));
       shade.rotation.x = -Math.PI / 2;
       shade.position.y = 0.004;
@@ -494,14 +496,79 @@
       const ball = new T.Mesh(geo, new T.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 90, specular: 0xffffff }));
       ball.position.set(0, AM.ball, 0);
       ball.castShadow = true;
+      amBall = ball;
       amGroup.add(ball, mergedBoxes([[0, (AM.ball + 0.95 + AM.hub) / 2, 0, 0.05, AM.hub - AM.ball - 0.95, 0.05, "#3A3D44"], [0, AM.ball + 1.0, 0, 0.3, 0.16, 0.3, "#8A9097"], [0, AM.hub, 0, 0.22, 0.22, 0.22, "#3A3D44"]], vcMat("solid")));
+      amLight = buildLight();
       scene.add(amGroup);
+    }
+    // The mirror ball's light: spots thrown on the steps and the floor, a few beams, and a glow round the ball. They
+    // turn with the ball; still when paused, so they're in the picture too.
+    const SPOTS = 70, BEAMS = 9, SPOT_COLS = ["#FFFFFF", "#FFF09A", "#AEE4FF", "#FFBCE3", "#BDFFD0"];
+    function buildLight() {
+      const dirs = [];
+      for (let k = 0; k < SPOTS; k++) dirs.push({ t: 0.18 + 0.86 * Math.sqrt(hash01(k * 3 + 901)), a: hash01(k * 7 + 433) * Math.PI * 2 }); // angle from straight down, and round
+      const spot = new T.InstancedMesh(new T.CircleGeometry(0.24, 14).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false }), SPOTS);
+      for (let k = 0; k < SPOTS; k++) spot.setColorAt(k, rgb(SPOT_COLS[k % SPOT_COLS.length]));
+      spot.renderOrder = 2;
+      const beams = [];
+      for (let k = 0; k < BEAMS; k++) {
+        const m = new T.Mesh(new T.CylinderGeometry(0.03, 0.32, 1, 12, 1, true), new T.MeshBasicMaterial({ color: ["#FFFFFF", "#FFE7F4", "#E3F4FF"][k % 3], transparent: true, opacity: 0.13, depthWrite: false, side: T.DoubleSide }));
+        m.renderOrder = 3;
+        beams.push(m);
+      }
+      const c = document.createElement("canvas");
+      c.width = c.height = 64;
+      const g = c.getContext("2d"), grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, "rgba(255,255,255,0.75)");
+      grad.addColorStop(0.35, "rgba(235,245,255,0.3)");
+      grad.addColorStop(1, "rgba(235,245,255,0)");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+      const glow = new T.Sprite(new T.SpriteMaterial({ map: new T.CanvasTexture(c), transparent: true, depthWrite: false }));
+      glow.position.set(0, AM.ball, 0);
+      glow.scale.setScalar(4.2);
+      glow.renderOrder = 4;
+      amGroup.add(spot, glow, ...beams);
+      return { dirs, spot, beams, glow, angle: 0 };
+    }
+    const lightTmp = new T.Object3D(), Y_UP = new T.Vector3(0, 1, 0);
+    function updateLight() {
+      if (!amLight) return;
+      const L = amLight, from = new T.Vector3(0, AM.ball, 0), d = new T.Vector3();
+      amBall.rotation.y = L.angle;
+      let beam = 0;
+      L.dirs.forEach((o, k) => {
+        const a = o.a + L.angle;
+        d.set(Math.sin(o.t) * Math.cos(a), -Math.cos(o.t), Math.sin(o.t) * Math.sin(a));
+        let hit = null;
+        for (let s = 1; s < 40; s += 0.15) { // along the ray till it meets the ground
+          const x = from.x + d.x * s, y = from.y + d.y * s, z = from.z + d.z * s, c = cellAt(Math.floor(x * 2), Math.floor(z * 2));
+          if (!c) break;
+          if (y <= c.stand) { hit = (c.sec < 0 || amSec[c.sec].visible) ? new T.Vector3(x, c.stand + 0.03, z) : null; break; }
+        }
+        if (!hit) { lightTmp.scale.setScalar(0); lightTmp.updateMatrix(); L.spot.setMatrixAt(k, lightTmp.matrix); return; }
+        lightTmp.position.copy(hit);
+        lightTmp.rotation.set(0, -a, 0);
+        lightTmp.scale.set(Math.min(2.6, 1 / Math.max(0.2, Math.cos(o.t))), 1, 1); // longer where it comes in low
+        lightTmp.updateMatrix();
+        L.spot.setMatrixAt(k, lightTmp.matrix);
+        if (beam < BEAMS && k % 7 === 0) { // a few of them, as beams
+          const m = L.beams[beam++], len = hit.distanceTo(from);
+          m.position.copy(from).add(hit).multiplyScalar(0.5);
+          m.quaternion.setFromUnitVectors(Y_UP, from.clone().sub(hit).normalize());
+          m.scale.set(1, len, 1);
+          m.visible = true;
+        }
+      });
+      for (; beam < BEAMS; beam++) L.beams[beam].visible = false;
+      L.spot.instanceMatrix.needsUpdate = true;
     }
     // what's cut away: trees between the camera and the middle, and the near half of the steps in the low front view
     function cutaway() {
       if (!amGroup) return;
       amGround.forEach((m) => { const s = m.userData.sec; m.visible = s < 0 || !(view.el < 0.33 && Math.cos(sectorDir(s) - view.az) > 0); });
       amTrees.forEach((m) => { m.visible = !(view.el < 1.2 && Math.cos(sectorDir(m.userData.sec) - view.az) > 0.42); });
+      updateLight();
     }
     function setStage(on) {
       if (on && !amGroup) buildAmphi();
@@ -530,7 +597,7 @@
     const THINGS = {
       car0: { label: "Red car", make: () => carModel(0) }, car1: { label: "White car", make: () => carModel(1) }, car2: { label: "Blue car", make: () => carModel(2) },
       car3: { label: "Yellow car", make: () => carModel(4) }, car4: { label: "Black car", make: () => carModel(5) }, jeepney: { label: "Jeepney", make: () => carModel(3) },
-      tank: { label: "Tank", make: () => carModel(6) }, plane: { label: "Seaplane", make: () => buildPlane().g }, bear: { label: "Teddy bear", make: () => bearModel() }
+      tank: { label: "Tank", make: () => carModel(6) }, plane: { label: "Seaplane", make: () => { const p = buildPlane(); p.g.userData.prop = p.prop; return p.g; } }, bear: { label: "Teddy bear", make: () => bearModel() }
     };
     BAND.forEach((m, i) => { THINGS["band" + i] = { label: ["Flag singer", "Trumpet", "Trumpet", "Accordion", "Tuba", "Big drum", "Beer maid"][i], band: i }; });
     // the cars, as the game parks them: the specs come out of the same builders
@@ -585,9 +652,84 @@
       const turn = view.az - Math.atan2(fwd.x, fwd.z), yaw = Math.atan2(Math.sin(turn), Math.cos(turn)); // the camera, from where they face
       head.rotation.order = "YXZ";
       head.rotation.y = Math.max(-1.1, Math.min(1.1, yaw));
-      head.rotation.x = -Math.max(-0.3, Math.min(0.6, view.el)) * (Math.abs(yaw) > 1.7 ? 0.3 : 0.8);
+      head.rotation.x = -Math.max(-0.3, Math.min(0.6, view.el)) * (Math.abs(yaw) > 1.7 ? 0.3 : 0.8) + (it.nod || 0);
     }
     const lookAll = () => items.forEach(faceCamera);
+    // everyone's head, from its own size up to twice as big (the slider)
+    let headK = 1;
+    function sizeHead(av) {
+      const h = av.parts.head;
+      if (!h.userData.base) h.userData.base = h.scale.clone();
+      h.scale.copy(h.userData.base).multiplyScalar(headK);
+    }
+    // ---------- play: everyone moving in place to their pose, to a beat ----------
+    const BEAT = 2; // beats a second: 120 a minute
+    let playing = false, playT = 0;
+    function movePerson(it, t) {
+      const av = it.av, P = av.parts, u = t * BEAT + hash01(it.id * 13 + 5) * 0.35; // (not all on the very same beat)
+      const sway = Math.sin(Math.PI * u), hop = Math.abs(sway), beat = Math.sin(2 * Math.PI * u), flip = Math.sin((Math.PI * u) / 2) < 0;
+      posePerson(av, it.pose, it.how);
+      const sitting = it.how === "sit" || (it.pose === "sit" && it.how !== "stand");
+      it.nod = 0.12 * hop;
+      if (it.pose === "dance") { // stepping on the spot, arms pumping, turning a little
+        av.setPose(Math.PI * u, true);
+        P.armR.rotation.set(-1.9 + 0.45 * beat, 0, -0.7);
+        P.armL.rotation.set(-0.5 - 0.45 * beat, 0, 0.8);
+        av.rig.rotation.y = 0.3 * sway;
+        return;
+      }
+      if (!sitting) av.rig.position.y += 0.05 * hop;
+      if (it.pose === "wave") { P.armR.rotation.z = -0.35 + 0.5 * sway; av.rig.rotation.z += 0.04 * sway; }
+      else if (it.pose === "waveL") { P.armL.rotation.z = 0.35 - 0.5 * sway; av.rig.rotation.z -= 0.04 * sway; }
+      else if (it.pose === "cheer") { P.armR.rotation.x = P.armL.rotation.x = -2.9 + 0.35 * beat; if (!sitting) av.rig.position.y += 0.1 * hop; }
+      else if (it.pose === "disco") { // the point, up to one side then the other, every two beats
+        if (flip) {
+          P.armL.rotation.set(-2.75, 0, 0.55); P.armR.rotation.set(-0.35, 0, -1.1);
+          av.rig.rotation.z = 0.12; P.legR.rotation.z = 0; P.legL.rotation.z = 0.18; P.head.rotation.z = -0.15;
+        }
+      } else if (sitting) { P.armR.rotation.set(-1.3, 0, 0.3 - 0.3 * hop); P.armL.rotation.set(-1.3, 0, -0.3 + 0.3 * hop); } // clapping
+      else { P.armR.rotation.x = 0.18 * sway; P.armL.rotation.x = -0.18 * sway; av.rig.rotation.z = 0.04 * sway; } // swaying
+    }
+    function moveBear(it, t) {
+      const b = it.bear, u = t * BEAT + hash01(it.id * 13 + 5) * 0.35, sway = Math.sin(Math.PI * u), hop = Math.abs(sway), beat = Math.sin(2 * Math.PI * u), flip = Math.sin((Math.PI * u) / 2) < 0;
+      const [aL, aR] = [b.arms[1], b.arms[0]];
+      poseBear(b, it.pose);
+      b.head.rotation.z += 0.08 * sway;
+      it.model.position.y = it.pose === "cheer" ? 0.45 * hop : 0;
+      if (it.pose === "wave") aR.rotation.z = -0.6 + 0.45 * sway;
+      else if (it.pose === "cheer") aL.rotation.x = aR.rotation.x = -2.6 + 0.3 * beat;
+      else if (it.pose === "disco") { if (flip) { aL.rotation.set(-2.75, 0, 0.55); aR.rotation.set(-0.35, 0, -1.1); b.hip.rotation.z = 0.12; b.head.rotation.z = -0.15; } }
+      else if (it.pose === "floss") { aL.rotation.set(0.4 * beat, 0, 0.7 + 0.5 * sway); aR.rotation.set(-0.4 * beat, 0, -0.7 + 0.5 * sway); b.hip.rotation.z = -0.18 * sway; }
+      else b.hip.rotation.z = 0.05 * sway;
+    }
+    let tileBeat = -1;
+    function animate(t) {
+      items.forEach((it) => {
+        if (it.av) movePerson(it, t);
+        else if (it.bear) moveBear(it, t);
+        else if (it.prop) it.prop.rotation.z = t * 30;
+      });
+      if (!amGroup || !stageOn) return;
+      amLight.angle = t * 0.45; // the ball turns, and its light with it
+      updateLight();
+      const n = Math.floor(t * BEAT);
+      if (n !== tileBeat && amTiles) { // the floor lights up in new colours on every beat
+        tileBeat = n;
+        const col = amTiles.geometry.attributes.color, per = col.count / amTiles.userData.tiles;
+        for (let k = 0; k < amTiles.userData.tiles; k++) {
+          const c = rgb(TILES[(hash01(k * 31 + n * 977) * TILES.length) | 0]);
+          for (let v = 0; v < per; v++) col.setXYZ(k * per + v, c.r, c.g, c.b);
+        }
+        col.needsUpdate = true;
+      }
+    }
+    function setPlaying(on) {
+      playing = !!on;
+      const b = $("play-btn");
+      b.textContent = playing ? "❚❚ Pause" : "▶ Play";
+      b.classList.toggle("on", playing);
+      if (!playing) items.forEach((it) => { if (it.model.position.y) it.model.position.y = 0; });
+    }
     function poseBear(b, pose) {
       const [lL, lR] = [b.legs[1], b.legs[0]], [aL, aR] = [b.arms[1], b.arms[0]];
       [lL, lR, b.head, b.hip].forEach((o) => o.rotation.set(0, 0, 0));
@@ -613,9 +755,10 @@
         model = av.root;
       } else { model = THINGS[kind].make(); bear = model.userData.bear || null; }
       holder.add(model);
+      if (av) sizeHead(av);
       model.traverse((o) => { if (o.isMesh) o.castShadow = !(o.material && o.material.transparent); });
       const foot = av ? null : new T.Box3().setFromObject(holder); // what it stands on (people: just their feet)
-      const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, foot, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {});
+      const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, foot, prop: model.userData.prop || null, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {});
       holder.userData.item = it;
       scene.add(holder);
       items.push(it);
@@ -635,7 +778,11 @@
     const WIDTH = { bear: 6.5, plane: 5, tank: 4.6, jeepney: 6, car0: 4, car1: 4, car2: 4, car3: 4, car4: 4 };
     function spotBeside(kind) {
       const turn = kind === "bear" || !WIDTH[kind] ? 0 : Math.PI / 2;
-      if (stageOn) { const a = view.az + (Math.random() - 0.5) * 1.2; return { x: Math.sin(a) * 3, z: Math.cos(a) * 3, rot: view.az + turn }; } // on the dance floor, near the front
+      if (stageOn) {
+        if (kind === "bear") { const a = view.az + Math.PI, r = AM.floorR + 5.5 * AM.stepW; return { x: Math.sin(a) * r, z: Math.cos(a) * r, rot: view.az }; } // a giant: up behind everyone
+        const side = items.filter((i) => !i.av && !i.bear).length % 2 ? 1 : -1, a = view.az + side * (Math.PI / 2 + 0.2); // at the sides of the dance floor, not in front of anyone
+        return { x: Math.sin(a) * 3.4, z: Math.cos(a) * 3.4, rot: view.az + turn };
+      }
       let right = -Infinity;
       items.forEach((it) => { if (!it.seat) { const b = new T.Box3().setFromObject(it.holder); if (!b.isEmpty()) right = Math.max(right, b.max.x); } });
       const w = WIDTH[kind] || 1.2, x = (right === -Infinity ? 0 : right + 0.8) + w / 2;
@@ -660,6 +807,7 @@
         it.holder.position.set(s.x, s.y, s.z);
         it.holder.rotation.set(0, 0, 0);
         it.holder.scale.setScalar(1);
+        it.how = how;
         if (it.av) posePerson(it.av, it.pose, how);
         return;
       }
@@ -668,6 +816,7 @@
       it.holder.position.set(it.x, groundAt(it) + it.y, it.z);
       it.holder.rotation.set(0, it.rot, 0);
       it.holder.scale.setScalar(it.scale);
+      it.how = null;
       if (it.av) posePerson(it.av, it.pose);
       if (it.bear) poseBear(it.bear, it.pose);
     }
@@ -762,6 +911,16 @@
     });
     $("reset-btn").addEventListener("click", () => { if (confirm("Start again from the group photo? (Anyone you left out stays out.)")) { [...items].forEach((i) => removeItem(i, true, true)); defaultLayout(); frameAll(); save(); } });
     $("stage-btn").addEventListener("click", () => { setStage(!stageOn); frameAll(); save(); });
+    $("play-btn").addEventListener("click", () => setPlaying(!playing));
+    function setHeads(pc) {
+      headK = Math.max(1, Math.min(2, (+pc || 100) / 100));
+      $("heads").value = Math.round(headK * 100);
+      $("heads-val").textContent = Math.round(headK * 100) + "%";
+      items.forEach((it) => { if (it.av) sizeHead(it.av); });
+      dirty = shadowsDirty = true;
+    }
+    $("heads").addEventListener("input", (e) => setHeads(e.target.value));
+    $("heads").addEventListener("change", save);
     // ---------- scenes: arrangements saved by name in this browser, or as a file to open anywhere ----------
     const SCENES = "fefe40.scenes";
     function scenesGet() {
@@ -990,7 +1149,7 @@
 
     // ---------- keeping the arrangement (in this browser), and the picture ----------
     const KEY = "fefe40.arrange3"; // (3: the amphitheater; the arrangement from before it is kept as a scene)
-    const state = () => ({ stage: stageOn, leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
+    const state = () => ({ stage: stageOn, heads: Math.round(headK * 100), leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
       items: items.map((it) => ({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat })) });
     function save() {
       try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { /* private browsing: it just isn't kept */ }
@@ -1002,6 +1161,7 @@
       leftOut.clear();
       if (Array.isArray(s.leftOut)) s.leftOut.forEach((id) => { if (guests.has(id)) leftOut.add(id); });
       setStage(!!s.stage);
+      setHeads(s.heads || 100);
       const v = s.view || {};
       view.az = Number.isFinite(+v.az) ? +v.az : VIEWS["3d"].az;
       view.el = Number.isFinite(+v.el) ? +v.el : VIEWS["3d"].el;
@@ -1124,9 +1284,12 @@
       if (!restore()) { setStage(true); defaultLayout(); frameAll(); save(); }
       const before = [...guests.values()].filter((g) => g.past).length;
       statusEl.textContent = guests.size - before + (guests.size - before === 1 ? " guest" : " guests") + (before ? ", " + before + (before === 1 ? " earlier look" : " earlier looks") : "") + ". Tap someone to pose them; drag to move.";
-      let last = 0;
+      let last = 0, prev = 0;
       (function loop(now) {
         requestAnimationFrame(loop);
+        const dt = Math.min(0.1, (now - prev) / 1000 || 0);
+        prev = now;
+        if (playing) { playT += dt; animate(playT); dirty = true; }
         if (shadowsDirty) { shadowsDirty = false; fitShadows(); dirty = true; }
         if (!dirty && now - last < 500) return; // (and twice a second anyway, for faces that load late)
         dirty = false;
@@ -1139,7 +1302,7 @@
         }
         renderer.render(scene, cam);
       })(0);
-      window.fefeArrangeDebug = { items: () => items.map((i) => [i.kind, i.ref && guests.get(i.ref) ? guests.get(i.ref).name : "", +i.x.toFixed(2), +i.z.toFixed(2), i.pose, i.seat]), add: (kind) => select(addItem(kind, null, spotBeside(kind))), select: (n) => select(items[n]), seatIn: (a, b) => { items[a].seat = items[b].id; place(items[a]); }, savePNG, frameAll, stage: (on) => { setStage(on); frameAll(); }, state, applyState, scenes: scenesGet, view: (az, el, size) => { Object.assign(view, { az, el, size: size || view.size }); applyCam(); },
+      window.fefeArrangeDebug = { items: () => items.map((i) => [i.kind, i.ref && guests.get(i.ref) ? guests.get(i.ref).name : "", +i.x.toFixed(2), +i.z.toFixed(2), i.pose, i.seat]), add: (kind) => select(addItem(kind, null, spotBeside(kind))), select: (n) => select(items[n]), seatIn: (a, b) => { items[a].seat = items[b].id; place(items[a]); }, savePNG, frameAll, play: (on, t) => { setPlaying(on); if (t !== undefined) { playT = t; animate(t); dirty = true; } }, heads: setHeads, stage: (on) => { setStage(on); frameAll(); }, state, applyState, scenes: scenesGet, view: (az, el, size) => { Object.assign(view, { az, el, size: size || view.size }); applyCam(); },
         feet: (n) => +items[n].holder.position.y.toFixed(3), onScreen: (n) => { const p = items[n].holder.getWorldPosition(new T.Vector3()).add(new T.Vector3(0, 1, 0)).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((p.x + 1) / 2) * r.width, r.top + ((1 - p.y) / 2) * r.height]; } };
     })();
   })();

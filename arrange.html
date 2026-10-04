@@ -10,6 +10,9 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0B2A55; color: var(--white); font: 600 14px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
   input { -webkit-user-select: text; user-select: text; }
+  .heads { display: flex; align-items: center; gap: 6px; background: var(--white); color: var(--deep); border: 2px solid var(--edge); border-radius: 10px; padding: 3px 10px; box-shadow: 0 2px 0 var(--edge); }
+  .heads input { width: 100px; margin: 0; accent-color: var(--blue); }
+  #heads-val { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
   /* a checkerboard behind the stage, so it's clear the background is see-through */
   #view { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; background: repeating-conic-gradient(#173A69 0 25%, #12305A 0 50%) 0 0 / 28px 28px; }
   button { font: inherit; cursor: pointer; border: 2px solid var(--edge); border-radius: 10px; background: var(--white); color: var(--deep); padding: 7px 12px; box-shadow: 0 2px 0 var(--edge); }
@@ -46,6 +49,8 @@
   <button type="button" id="add-btn">People &amp; things</button>
   <button type="button" id="scenes-btn">Scenes</button>
   <button type="button" id="stage-btn">Amphitheater</button>
+  <button type="button" id="play-btn">▶ Play</button>
+  <label class="heads">Heads <input type="range" id="heads" min="100" max="200" step="5" value="100"><span id="heads-val">100%</span></label>
   <button type="button" id="frame-btn">Fit</button>
   <button type="button" id="view-btn">Front view</button>
   <button type="button" id="reset-btn">Start again</button>
@@ -83,8 +88,8 @@
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202610042200"></script>
-<script src="outfits-hd.js?v=202610042200"></script>
-<script src="arrange.js?v=202610042200"></script>
+<script src="avatar.js?v=202610042218"></script>
+<script src="outfits-hd.js?v=202610042218"></script>
+<script src="arrange.js?v=202610042218"></script>
 </body>
 </html>
