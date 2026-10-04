@@ -208,13 +208,39 @@
     const renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = T.PCFSoftShadowMap;
+    // Lit like the game: a strong sun from the side and above, so every block shows its faces, and real shadows on the
+    // ground. The ground itself is invisible: only the shadows show (and print, as see-through grey).
     const scene = new T.Scene();
-    scene.add(new T.HemisphereLight(0xffffff, 0x8a7a6a, 0.95));
-    scene.add(new T.AmbientLight(0xffffff, 0.25));
-    const key = new T.DirectionalLight(0xffffff, 0.55);
-    key.position.set(6, 14, 16);
-    scene.add(key);
+    scene.add(new T.HemisphereLight(0xffffff, 0x8a7a6a, 0.55));
+    scene.add(new T.AmbientLight(0xffffff, 0.16));
+    const key = new T.DirectionalLight(0xfff4e6, 0.95), SUN = new T.Vector3(-0.45, 0.8, 0.4).normalize();
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.bias = -0.0006;
+    key.shadow.normalBias = 0.02;
+    scene.add(key, key.target);
+    const fill = new T.DirectionalLight(0xdfe8ff, 0.22);
+    fill.position.set(16, 8, 10);
+    scene.add(fill);
+    const floor = new T.Mesh(new T.PlaneGeometry(400, 400), new T.ShadowMaterial({ opacity: 0.32 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+    // the sun's shadow box, round everything on the stage
+    function fitShadows() {
+      const bb = new T.Box3();
+      items.forEach((it) => bb.expandByObject(it.holder));
+      if (bb.isEmpty()) return;
+      const c = bb.getCenter(new T.Vector3()), r = bb.getSize(new T.Vector3()).length() / 2 + 2, cam = key.shadow.camera;
+      key.target.position.copy(c);
+      key.position.copy(c).addScaledVector(SUN, r + 20);
+      Object.assign(cam, { left: -r, right: r, top: r, bottom: -r, near: 1, far: 2 * r + 40 });
+      cam.updateProjectionMatrix();
+    }
     const grid = new T.GridHelper(120, 120, 0x4a6d9c, 0x2a3f5c);
+    grid.position.y = 0.005;
     scene.add(grid);
     const ring = new T.Mesh(new T.RingGeometry(0.75, 0.95, 40), new T.MeshBasicMaterial({ color: 0xfefe40, side: T.DoubleSide, transparent: true, opacity: 0.9, depthTest: false }));
     ring.rotation.x = -Math.PI / 2;
@@ -222,7 +248,8 @@
     ring.visible = false;
     scene.add(ring);
     const cam = new T.OrthographicCamera(-1, 1, 1, -1, 0.1, 500);
-    const view = { az: 0, el: 0.22, size: 9, target: new T.Vector3(0, 2, 0) };
+    const VIEWS = { "3d": { az: 0.55, el: 0.55 }, front: { az: 0, el: 0.12 } };
+    const view = { az: VIEWS["3d"].az, el: VIEWS["3d"].el, size: 9, target: new T.Vector3(0, 2, 0) };
     function applyCam() {
       const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1, a = w / h, d = 120;
       Object.assign(cam, { left: -view.size * a, right: view.size * a, top: view.size, bottom: -view.size });
@@ -298,7 +325,7 @@
 
     // ---------- items on the stage ----------
     const items = [];
-    let selected = null, seating = null, guests = new Map(), nextId = 1;
+    let selected = null, seating = null, guests = new Map(), nextId = 1, shadowsDirty = true;
     const leftOut = new Set(); // guests not to include: they stay off the stage until they're ticked again
     function addItem(kind, ref, at) {
       const holder = new T.Group();
@@ -311,6 +338,7 @@
         model = av.root;
       } else { model = THINGS[kind].make(); bear = model.userData.bear || null; }
       holder.add(model);
+      model.traverse((o) => { if (o.isMesh) o.castShadow = !(o.material && o.material.transparent); });
       const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {});
       holder.userData.item = it;
       scene.add(holder);
@@ -337,6 +365,7 @@
     }
     // where an item is drawn: free on the stage, or in a seat (a car's, the tank's hatch, the plane's cockpit, the bear's head)
     function place(it) {
+      shadowsDirty = true;
       const host = it.seat ? items.find((o) => o.id === it.seat) : null;
       if (it.seat && !host) it.seat = null;
       if (host) {
@@ -436,6 +465,14 @@
       save();
     });
     $("frame-btn").addEventListener("click", frameAll);
+    $("view-btn").addEventListener("click", () => {
+      const to = Math.abs(view.el - VIEWS.front.el) < 0.05 && Math.abs(view.az) < 0.05 ? "3d" : "front";
+      view.az = VIEWS[to].az;
+      view.el = VIEWS[to].el;
+      $("view-btn").textContent = to === "3d" ? "Front view" : "3D view";
+      frameAll();
+      save();
+    });
     $("reset-btn").addEventListener("click", () => { if (confirm("Start again from the group photo? (Anyone you left out stays out.)")) { [...items].forEach((i) => removeItem(i, true)); defaultLayout(); frameAll(); save(); } });
     $("save-btn").addEventListener("click", savePNG);
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -525,7 +562,7 @@
         const last = r === rows - 1, take = last ? n - fifi.length : n, row = rest.slice(k, k + take);
         k += take;
         const line = last ? row.slice(0, Math.floor(row.length / 2)).concat(fifi, row.slice(Math.floor(row.length / 2))) : row, depth = rows - 1 - r;
-        line.forEach((o, i) => addItem("guest", o.id, { x: (i - (line.length - 1) / 2) * 1.05 + (depth % 2 ? 0.52 : 0), y: depth * 0.95, z: -depth * 1.3, rot: Math.sin(i * 1.7 + r) * 0.12, pose: ["wave", "waveL", "cheer", "wave"][(i * 7 + r * 3) % 4] }));
+        line.forEach((o, i) => addItem("guest", o.id, { x: (i - (line.length - 1) / 2) * 1.05 + (depth % 2 ? 0.52 : 0), y: 0, z: -depth * 1.45, rot: Math.sin(i * 1.7 + r) * 0.12, pose: ["wave", "waveL", "cheer", "wave"][(i * 7 + r * 3) % 4] }));
       });
     }
     function contentBox(camera) {
@@ -534,7 +571,12 @@
       items.forEach((it) => {
         const b = new T.Box3().setFromObject(it.holder);
         if (b.isEmpty()) return;
-        for (let i = 0; i < 8; i++) bb.expandByPoint(v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(inv));
+        for (let i = 0; i < 8; i++) {
+          v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
+          const s = v.clone().addScaledVector(SUN, -v.y / SUN.y); // where its shadow falls
+          bb.expandByPoint(v.applyMatrix4(inv));
+          bb.expandByPoint(s.applyMatrix4(inv));
+        }
       });
       return bb;
     }
@@ -550,7 +592,7 @@
     }
 
     // ---------- saving the arrangement (in this browser) and the picture ----------
-    const KEY = "fefe40.arrange";
+    const KEY = "fefe40.arrange2"; // (2: the 3D look; layouts from the flat first version start again)
     function save() {
       try {
         localStorage.setItem(KEY, JSON.stringify({ leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
@@ -573,7 +615,7 @@
       // anyone who signed up since: in a row out front
       const on = new Set(items.filter((i) => i.kind === "guest").map((i) => i.ref)), fresh = [...guests.keys()].filter((id) => !on.has(id) && !leftOut.has(id));
       fresh.forEach((id, i) => addItem("guest", id, { x: (i - (fresh.length - 1) / 2) * 1.05, z: 4, pose: "wave" }));
-      if (s.view) { view.az = +s.view.az || 0; view.el = +s.view.el || 0.22; view.size = +s.view.size || 9; if (Array.isArray(s.view.t)) view.target.fromArray(s.view.t); }
+      if (s.view) { view.az = Number.isFinite(+s.view.az) ? +s.view.az : VIEWS["3d"].az; view.el = Number.isFinite(+s.view.el) ? +s.view.el : VIEWS["3d"].el; view.size = +s.view.size || 9; if (Array.isArray(s.view.t)) view.target.fromArray(s.view.t); }
       applyCam();
       return true;
     }
@@ -593,9 +635,17 @@
       r2.setPixelRatio(1);
       r2.setSize(W, H, false);
       r2.setClearColor(0x000000, 0);
+      r2.shadowMap.enabled = true;
+      r2.shadowMap.type = T.PCFSoftShadowMap;
+      fitShadows();
+      const freshShadows = () => { if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; } }; // each renderer makes its own
+      freshShadows();
+      key.shadow.mapSize.set(4096, 4096);
       r2.render(scene, cam2);
       const url = cv.toDataURL("image/png");
       r2.dispose();
+      freshShadows();
+      key.shadow.mapSize.set(2048, 2048);
       grid.visible = true;
       ring.visible = !!selected;
       const a = document.createElement("a");
@@ -641,6 +691,7 @@
           ring.position.set(p.x, (selected.seat ? p.y : selected.y) + 0.03, p.z);
           ring.scale.setScalar(selected.bear ? 4 : selected.av ? 1 : 2.6);
         }
+        if (shadowsDirty) { shadowsDirty = false; fitShadows(); }
         renderer.render(scene, cam);
         requestAnimationFrame(loop);
       })();
