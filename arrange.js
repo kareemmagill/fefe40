@@ -949,6 +949,7 @@
     $("sel-poses").addEventListener("click", (e) => {
       const p = e.target.dataset && e.target.dataset.pose;
       if (!p || !selected) return;
+      remember();
       selected.pose = p;
       place(selected);
       select(selected);
@@ -956,6 +957,7 @@
     });
     $("sel-seat").addEventListener("click", () => {
       if (!selected) return;
+      if (selected.seat) remember();
       if (selected.seat) { const host = items.find((o) => o.id === selected.seat); selected.seat = null; if (host) { selected.x = host.x + 2; selected.z = host.z + 1; } place(selected); select(selected); save(); return; }
       seating = selected;
       statusEl.textContent = "Now tap a car, the tank, the plane, the teddy bear or the DJ desk";
@@ -963,6 +965,7 @@
     const nudge = { "sel-left": ["rot", Math.PI / 12], "sel-right": ["rot", -Math.PI / 12], "sel-bigger": ["scale", 1.1], "sel-smaller": ["scale", 1 / 1.1], "sel-up": ["y", 0.5], "sel-down": ["y", -0.5] };
     Object.keys(nudge).forEach((id) => $(id).addEventListener("click", () => {
       if (!selected || selected.seat) return;
+      remember();
       const [k, v] = nudge[id];
       if (k === "scale") selected.scale = Math.max(0.3, Math.min(6, selected.scale * v));
       else if (k === "y") selected.y = Math.max(0, selected.y + v);
@@ -970,7 +973,7 @@
       place(selected);
       save();
     }));
-    $("sel-remove").addEventListener("click", () => { if (selected) removeItem(selected); });
+    $("sel-remove").addEventListener("click", () => { if (selected) { remember(); removeItem(selected); } });
     $("add-btn").addEventListener("click", () => {
       addEl.hidden = !addEl.hidden;
       scenesEl.hidden = true;
@@ -988,6 +991,7 @@
     }
     addEl.addEventListener("click", (e) => {
       const d = e.target.dataset || {};
+      if (d.guest || d.all !== undefined || d.thing) remember();
       if (d.guest) {
         const it = items.find((i) => i.kind === "guest" && i.ref === d.guest);
         if (it) removeItem(it);
@@ -1009,8 +1013,9 @@
       select(it);
       save();
     });
-    $("frame-btn").addEventListener("click", frameAll);
+    $("frame-btn").addEventListener("click", () => { remember(); frameAll(); save(); });
     $("view-btn").addEventListener("click", () => {
+      remember();
       const to = Math.abs(view.el - VIEWS.front.el) < 0.05 && Math.abs(view.az) < 0.05 ? "3d" : "front";
       view.az = VIEWS[to].az;
       view.el = VIEWS[to].el;
@@ -1018,8 +1023,8 @@
       frameAll();
       save();
     });
-    $("reset-btn").addEventListener("click", () => { if (confirm("Start again from the group photo? (Anyone you left out stays out.)")) { [...items].forEach((i) => removeItem(i, true, true)); defaultLayout(); frameAll(); save(); } });
-    $("stage-btn").addEventListener("click", () => { setStage(!stageOn); frameAll(); save(); });
+    $("reset-btn").addEventListener("click", () => { if (confirm("Start again from the group photo? (Anyone you left out stays out.)")) { remember(); [...items].forEach((i) => removeItem(i, true, true)); defaultLayout(); frameAll(); save(); } });
+    $("stage-btn").addEventListener("click", () => { remember(); setStage(!stageOn); frameAll(); save(); });
     $("play-btn").addEventListener("click", () => setPlaying(!playing));
     function setHeads(pc) {
       headK = Math.max(1, Math.min(2, (+pc || 100) / 100));
@@ -1028,8 +1033,9 @@
       items.forEach((it) => { if (it.av) sizeHead(it.av); });
       dirty = shadowsDirty = true;
     }
-    $("heads").addEventListener("input", (e) => setHeads(e.target.value));
-    $("heads").addEventListener("change", save);
+    let headsMoving = false;
+    $("heads").addEventListener("input", (e) => { if (!headsMoving) { headsMoving = true; remember(); } setHeads(e.target.value); });
+    $("heads").addEventListener("change", () => { headsMoving = false; save(); });
     // ---------- scenes: arrangements saved by name in this browser, or as a file to open anywhere ----------
     const SCENES = "fefe40.scenes";
     function scenesGet() {
@@ -1066,6 +1072,7 @@
       if (d.open !== undefined && a[+d.open]) {
         const o = a[+d.open];
         if (!confirm("Open \u201c" + o.name + "\u201d? What's on the stage now is replaced.")) return;
+        remember();
         applyState(o.s);
         save();
         scenesEl.hidden = true;
@@ -1145,6 +1152,7 @@
       const st = o && (o.s || o);
       if (!st || !Array.isArray(st.items)) { statusEl.textContent = "That isn't a scene file"; return; }
       const name = String((o && o.name) || file.name.replace(/\.json$/i, "")).slice(0, 40);
+      remember();
       applyState(st);
       save();
       keepScene(name, st);
@@ -1154,6 +1162,7 @@
     });
     $("save-btn").addEventListener("click", savePNG);
     $("gif-btn").addEventListener("click", saveGIF);
+    const viewLabel = () => { $("view-btn").textContent = Math.abs(view.el - VIEWS.front.el) < 0.05 && Math.abs(view.az) < 0.05 ? "3D view" : "Front view"; };
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
     // ---------- pointer: tap to pick, drag to move, drag the empty stage to turn the view, pinch or scroll to zoom ----------
@@ -1192,12 +1201,12 @@
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       addEl.hidden = scenesEl.hidden = true;
-      if (e.pointerType === "mouse" && e.button === 1) { e.preventDefault(); drag = { pan: true, at: [e.clientX, e.clientY], t: view.target.clone() }; return; } // the middle button: pan, and lift
-      if (pointers.size === 2) { drag = { pinch: true, d: dist2(), size: view.size, at: mid2(), t: view.target.clone() }; return; } // two fingers: zoom, and pan and lift
+      if (e.pointerType === "mouse" && e.button === 1) { e.preventDefault(); drag = { pan: true, at: [e.clientX, e.clientY], t: view.target.clone(), before: state() }; return; } // the middle button: pan, and lift
+      if (pointers.size === 2) { drag = { pinch: true, d: dist2(), size: view.size, at: mid2(), t: view.target.clone(), before: (drag && drag.before) || state() }; return; } // two fingers: zoom, and pan and lift
       let it = hitItem(e);
       if (seating) {
         const host = it && (it.bear || it.kind === "plane" || it.model.userData.seat) ? it : null;
-        if (host && host !== seating) { items.filter((o) => o.seat === host.id).forEach((o) => { o.seat = null; o.x = host.x + 2; place(o); }); seating.seat = host.id; place(seating); select(seating); save(); }
+        if (host && host !== seating) { remember(); items.filter((o) => o.seat === host.id).forEach((o) => { o.seat = null; o.x = host.x + 2; place(o); }); seating.seat = host.id; place(seating); select(seating); save(); }
         seating = null;
         statusEl.textContent = "";
         drag = null;
@@ -1207,8 +1216,8 @@
       if (it) {
         select(it);
         const p = dragPoint(e, it);
-        drag = p ? { it, dx: it.x - p.x, dz: it.z - p.z, moved: false } : null;
-      } else drag = { orbit: true, x: e.clientX, y: e.clientY, az: view.az, el: view.el, moved: false };
+        drag = p ? { it, dx: it.x - p.x, dz: it.z - p.z, moved: false, before: state() } : null;
+      } else drag = { orbit: true, x: e.clientX, y: e.clientY, az: view.az, el: view.el, moved: false, before: state() };
     });
     const dist2 = () => { const p = [...pointers.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1; };
     canvas.addEventListener("pointermove", (e) => {
@@ -1244,6 +1253,8 @@
     canvas.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
     const up = (e) => {
       pointers.delete(e.pointerId);
+      if (drag && drag.moved && drag.before && pointers.size === 0) pushUndo(drag.before);
+      if (drag && drag.orbit && drag.moved && pointers.size === 0) save();
       if (drag && (drag.pan || drag.pinch) && drag.moved && pointers.size === 0) save();
       if (drag && drag.orbit && !drag.moved) select(null); // a tap on the empty stage: nothing selected
       if (drag && drag.it && drag.moved) save();
@@ -1251,14 +1262,67 @@
     };
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
-    canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.size = Math.max(2, Math.min(80, view.size * Math.exp(e.deltaY * 0.001))); applyCam(); }, { passive: false });
+    let wheelAt = 0;
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); if (performance.now() - wheelAt > 500) remember(); wheelAt = performance.now(); clearTimeout(wheelSave); wheelSave = setTimeout(save, 600); view.size = Math.max(2, Math.min(80, view.size * Math.exp(e.deltaY * 0.001))); applyCam(); }, { passive: false });
+    let wheelSave = 0;
     window.addEventListener("keydown", (e) => {
-      if (!selected || selected.seat || /^(INPUT|TEXTAREA)$/.test((e.target && e.target.tagName) || "")) return;
+      if (/^(INPUT|TEXTAREA)$/.test((e.target && e.target.tagName) || "")) return;
       const k = e.key.toLowerCase();
-      if (k === "q") { selected.rot += Math.PI / 12; place(selected); save(); }
-      else if (k === "e") { selected.rot -= Math.PI / 12; place(selected); save(); }
-      else if (k === "delete" || k === "backspace") removeItem(selected);
+      if ((e.metaKey || e.ctrlKey) && k === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
+      if (!selected || selected.seat) return;
+      if (k === "q") { remember(); selected.rot += Math.PI / 12; place(selected); save(); }
+      else if (k === "e") { remember(); selected.rot -= Math.PI / 12; place(selected); save(); }
+      else if (k === "delete" || k === "backspace") { remember(); removeItem(selected); }
     });
+
+    // ---------- undo: the last 10 moves, of the camera and of what's on the stage ----------
+    // Each move keeps how everything was before it. Going back changes only what's different, so undoing a turn of the
+    // camera doesn't build everyone again.
+    const UNDO_MAX = 10, undos = [];
+    const sameState = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    function pushUndo(before) {
+      if (!before || (undos.length && sameState(undos[undos.length - 1], before))) return;
+      undos.push(before);
+      if (undos.length > UNDO_MAX) undos.shift();
+      $("undo-btn").disabled = false;
+    }
+    const remember = () => pushUndo(state());
+    function undo() {
+      const now = state();
+      let s = undos.pop();
+      while (s && sameState(s, now)) s = undos.pop(); // (a move that changed nothing isn't one)
+      $("undo-btn").disabled = !undos.length;
+      if (!s) return;
+      restoreSnap(s);
+      statusEl.textContent = undos.length ? "Undone (" + undos.length + " more)" : "Undone";
+    }
+    $("undo-btn").addEventListener("click", undo);
+    function restoreSnap(s) {
+      if (!!s.stage !== stageOn) setStage(!!s.stage);
+      if ((s.heads || 100) !== Math.round(headK * 100)) setHeads(s.heads || 100);
+      leftOut.clear();
+      (s.leftOut || []).forEach((id) => leftOut.add(id));
+      const want = new Map(s.items.map((o) => [o.id, o]));
+      [...items].forEach((it) => { const o = want.get(it.id); if (!o || o.kind !== it.kind || (o.ref || null) !== (it.ref || null)) removeItem(it, true, true); });
+      s.items.forEach((o) => {
+        let it = items.find((i) => i.id === o.id);
+        if (!it) {
+          if (o.kind === "guest" ? !guests.has(o.ref) : !Object.prototype.hasOwnProperty.call(THINGS, o.kind)) return;
+          it = addItem(o.kind, o.ref, { id: o.id });
+          nextId = Math.max(nextId, o.id + 1);
+        }
+        Object.assign(it, { x: o.x, y: o.y, z: o.z, rot: o.rot, scale: o.scale, pose: o.pose, seat: null });
+      });
+      s.items.forEach((o) => { const it = items.find((i) => i.id === o.id); if (it && o.seat && items.some((h) => h.id === o.seat)) it.seat = o.seat; });
+      items.forEach(place);
+      Object.assign(view, { az: s.view.az, el: s.view.el, size: s.view.size });
+      view.target.fromArray(s.view.t);
+      applyCam();
+      viewLabel();
+      if (selected && items.includes(selected)) select(selected); else select(null);
+      if (!addEl.hidden) renderPeople();
+      save();
+    }
 
     // ---------- the group photo to start from, and fitting the view round everyone ----------
     function defaultLayout() {
@@ -1355,7 +1419,7 @@
       const on = new Set(items.filter((i) => i.kind === "guest").map((i) => i.ref)), fresh = [...guests.keys()].filter((id) => !on.has(id) && !leftOut.has(id));
       fresh.forEach((id, i) => addItem("guest", id, looseSpot(i)));
       if (!s.view) frameAll();
-      $("view-btn").textContent = Math.abs(view.el - VIEWS.front.el) < 0.05 && Math.abs(view.az) < 0.05 ? "3D view" : "Front view";
+      viewLabel();
     }
     function restore() {
       const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
