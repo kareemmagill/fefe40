@@ -27,7 +27,7 @@ jobs:
             Yymc5tbPSEcoj30PwFt1ljcCAwEAAQ==
             -----END PUBLIC KEY-----
         run: |
-          DB="https://fefe40-a3dae-default-rtdb.firebaseio.com/fefe40"
+          DB="https://fefe40-a3dae-default-rtdb.asia-southeast1.firebasedatabase.app/fefe40"
           curl -sSf "$DB/index.json" -o index.json
           printf '{' > guests.json; first=1
           for id in $(jq -r 'keys[]' index.json); do
