@@ -1,7 +1,10 @@
 /* FiFi4000 arranger: everyone who signed up, plus the cars, tank, seaplane, teddy bear and band, on a stage to arrange
    for a print (a T-shirt). Not part of the game: open arrange.html. Tap someone to pose them, drag to move them, drag
-   the empty stage to turn the view, scroll or pinch to zoom; Save PNG draws it big on a see-through background. The
-   arrangement is kept in this browser. The builders for the vehicles and the bear are the game's own (app.js). */
+   the empty stage to turn the view, scroll or pinch to zoom; Save PNG draws what's on screen, big, on a see-through
+   background. The stage can be an amphitheater: stone steps sloping up and out from a disco dance floor, a mirror ball
+   over it and trees all round, and everyone stands on whatever is under their feet. The arrangement is kept in this
+   browser, and scenes can be saved by name, or as a file to open on another phone or computer. The builders for the
+   vehicles, the bear and the trees are the game's own (app.js). */
 (function () {
   const T = THREE;
   const DB_URL = "https://fefe40-a3dae-default-rtdb.asia-southeast1.firebasedatabase.app";
@@ -213,6 +216,7 @@
     // Lit like the game: a strong sun from the side and above, so every block shows its faces, and real shadows on the
     // ground. The ground itself is invisible: only the shadows show (and print, as see-through grey).
     const scene = new T.Scene();
+    let dirty = true, shadowsDirty = true; // drawn only when something changed
     scene.add(new T.HemisphereLight(0xffffff, 0x8a7a6a, 0.55));
     scene.add(new T.AmbientLight(0xffffff, 0.16));
     const key = new T.DirectionalLight(0xfff4e6, 0.95), SUN = new T.Vector3(-0.45, 0.8, 0.4).normalize();
@@ -232,6 +236,7 @@
     function fitShadows() {
       const bb = new T.Box3();
       items.forEach((it) => bb.expandByObject(it.holder));
+      if (stageOn) amGroup.children.forEach((m) => { if (m.visible) bb.expandByObject(m); });
       if (bb.isEmpty()) return;
       const c = bb.getCenter(new T.Vector3()), r = bb.getSize(new T.Vector3()).length() / 2 + 2, cam = key.shadow.camera;
       key.target.position.copy(c);
@@ -256,12 +261,269 @@
       cam.position.set(view.target.x + Math.sin(view.az) * Math.cos(view.el) * d, view.target.y + Math.sin(view.el) * d, view.target.z + Math.cos(view.az) * Math.cos(view.el) * d);
       cam.lookAt(view.target);
       cam.updateProjectionMatrix();
+      cam.updateMatrixWorld(); // (fitting the view reads it straight away, before it's drawn)
+      cutaway();
+      dirty = shadowsDirty = true;
     }
+    const barHeight = () => document.documentElement.style.setProperty("--bar", document.querySelector(".bar").offsetHeight + "px"); // the panels open below the buttons, however many rows they take
     function resize() {
+      barHeight();
       renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
       applyCam();
     }
     window.addEventListener("resize", resize);
+
+    // ---------- the amphitheater ----------
+    // Stone steps sloping up and out from a disco dance floor, a mirror ball over it on strings of lights, and a ring of
+    // the game's palms and leafy trees round the top. Built the first time it's switched on, in half-metre blocks like
+    // the game's world. Where it would hide the people, it's cut away: the trees between the camera and the middle, and
+    // in the low front view the near half of the steps too.
+    const AM = { floorR: 5, stepW: 1.5, stepH: 0.5, steps: 7, rimR: 21, sectors: 24, ball: 12.5, hub: 14.5 };
+    AM.top = AM.steps * AM.stepH; // the grass round the top
+    AM.outR = AM.floorR + AM.steps * AM.stepW; // where the steps end
+    const GC = { grass: ["#63C04A", "#58B743", "#6FC957", "#4FAA3E"], leaf: ["#2E8B3A", "#3A9E45", "#267A32", "#44A84C"], leafLight: "#5DBE51", leafDark: "#1F6A2B",
+      palm: ["#4DB356", "#3FA24A", "#58BF5F"], trunk: "#7A5230", palmTrunk: "#A0804F", palmTrunkDark: "#86683E", coconut: "#6B4A2A", tuft: ["#4AA63F", "#5DB84A"],
+      bloom: ["#FF4FA3", "#FF3B6B", "#FF8A1F", "#B15CFF", "#FFD23F", "#FFFFFF"] };
+    const TILES = ["#FF4FA3", "#FFD23F", "#4FC3FF", "#B15CFF", "#5CFF8A", "#FF8A1F", "#FFFFFF"];
+    const sectorOf = (x, z) => Math.floor(((Math.atan2(x, z) + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI / AM.sectors)) % AM.sectors;
+    const sectorDir = (s) => ((s + 0.5) * 2 * Math.PI) / AM.sectors;
+    const tileIn = (ti, tj) => Math.hypot(Math.abs(ti + 0.5) + 0.5, Math.abs(tj + 0.5) + 0.5) <= AM.floorR - 0.25; // the 1 m light-up tiles
+    // the ground, as half-metre columns: h is the top of the blocks, stand is where feet go, sec is which slice of the bowl
+    const AN = Math.ceil(AM.rimR * 2) + 2, cells = new Array(4 * AN * AN).fill(null);
+    const cellAt = (i, j) => (i < -AN || j < -AN || i >= AN || j >= AN ? null : cells[(i + AN) * 2 * AN + j + AN]);
+    for (let i = -AN; i < AN; i++) for (let j = -AN; j < AN; j++) {
+      const x = (i + 0.5) / 2, z = (j + 0.5) / 2, r = Math.hypot(x, z), n = hash01(i * 7919 + j * 104729 + 7);
+      if (r > AM.rimR - 0.8 * hash01(Math.round(Math.atan2(x, z) * 14) + 5000)) continue; // a ragged edge
+      let c;
+      if (r < AM.floorR) c = tileIn(Math.floor(i / 2), Math.floor(j / 2)) ? { h: -0.5, cap: "#241C38", body: "#241C38", sec: -1 } : { h: 0, cap: n < 0.3 ? "#C9B894" : "#BFAD88", body: "#8F7C5C", sec: -1 };
+      else if (r < AM.outR) { const k = Math.floor((r - AM.floorR) / AM.stepW) + 1; c = { h: k * AM.stepH, cap: k % 2 ? (n < 0.3 ? "#C9B894" : "#BFAD88") : (n < 0.3 ? "#B9A57F" : "#AF9B76"), side: "#8F7C5C", body: "#8F7C5C" }; }
+      else c = { h: AM.top, cap: GC.grass[(n * 4) | 0], body: n < 0.5 ? "#8B6B47" : "#7E603F" };
+      if (c.sec === undefined) c.sec = sectorOf(x, z);
+      c.stand = Math.max(0, c.h);
+      cells[(i + AN) * 2 * AN + j + AN] = c;
+    }
+    const standAt = (x, z) => { const c = cellAt(Math.floor(x * 2), Math.floor(z * 2)); return c ? c.stand : AM.top; };
+    // meshes made face by face: only the faces that show
+    const rgbs = {};
+    const rgb = (hex) => rgbs[hex] || (rgbs[hex] = new T.Color(hex));
+    const faces = () => ({ pos: [], nor: [], col: [], idx: [] });
+    const FACE = [ // the corners of each face of a block, counter-clockwise seen from outside: +x, -x, +y, -y, +z, -z
+      (a, b) => [[b[0], a[1], b[2]], [b[0], a[1], a[2]], [b[0], b[1], a[2]], [b[0], b[1], b[2]]],
+      (a, b) => [[a[0], a[1], a[2]], [a[0], a[1], b[2]], [a[0], b[1], b[2]], [a[0], b[1], a[2]]],
+      (a, b) => [[a[0], b[1], a[2]], [a[0], b[1], b[2]], [b[0], b[1], b[2]], [b[0], b[1], a[2]]],
+      (a, b) => [[a[0], a[1], a[2]], [b[0], a[1], a[2]], [b[0], a[1], b[2]], [a[0], a[1], b[2]]],
+      (a, b) => [[a[0], a[1], b[2]], [b[0], a[1], b[2]], [b[0], b[1], b[2]], [a[0], b[1], b[2]]],
+      (a, b) => [[b[0], a[1], a[2]], [a[0], a[1], a[2]], [a[0], b[1], a[2]], [b[0], b[1], a[2]]]
+    ];
+    const NORMAL = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    function face(f, d, lo, hi, hex) {
+      const c = rgb(hex), o = f.pos.length / 3, N = NORMAL[d];
+      FACE[d](lo, hi).forEach((p) => { f.pos.push(p[0], p[1], p[2]); f.nor.push(N[0], N[1], N[2]); f.col.push(c.r, c.g, c.b); });
+      f.idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+    }
+    function faceMesh(f, sec) {
+      const g = new T.BufferGeometry();
+      g.setAttribute("position", new T.Float32BufferAttribute(f.pos, 3));
+      g.setAttribute("normal", new T.Float32BufferAttribute(f.nor, 3));
+      g.setAttribute("color", new T.Float32BufferAttribute(f.col, 3));
+      g.setIndex(f.idx);
+      g.computeBoundingBox();
+      g.computeBoundingSphere();
+      const m = new T.Mesh(g, vcMat("solid"));
+      m.castShadow = m.receiveShadow = true;
+      m.userData.sec = sec;
+      return m;
+    }
+    // blocks in a map (u, v, w are half-metre steps): every face that isn't against another block
+    const vkey = (u, v, w) => ((u + 128) * 256 + (w + 128)) * 128 + (v + 32);
+    function blockFaces(map, f) {
+      map.forEach(([u, v, w, hex]) => {
+        const lo = [u / 2, v / 2, w / 2], hi = [u / 2 + 0.5, v / 2 + 0.5, w / 2 + 0.5];
+        [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].forEach(([a, b, c], d) => { if (!map.has(vkey(u + a, v + b, w + c))) face(f, d, lo, hi, hex); });
+      });
+    }
+    // The game's trees (app.js), standing on the top of the bowl instead of the game's ground (y = 1)
+    function growTree(x, z, kind, rnd) {
+      const map = new Map(), lift = (AM.top - 1) * 2;
+      const pick = (a) => a[(rnd() * a.length) | 0];
+      const setV = (u, v, w, color) => map.set(vkey(u, v + lift, w), [u, v + lift, w, color]);
+      const metaV = (u, v, w) => map.has(vkey(u, v + lift, w));
+      const dab = (px, py, pz, color) => { const u = Math.floor(px * 2), v = Math.floor(py * 2), w = Math.floor(pz * 2); if (!metaV(u, v, w)) setV(u, v, w, color); };
+      const vbox = (bx, by, bz, bw, bh, bd, color) => {
+        for (let u = Math.round(bx * 2); u < Math.round((bx + bw) * 2); u++) for (let v = Math.round(by * 2); v < Math.round((by + bh) * 2); v++) for (let w = Math.round(bz * 2); w < Math.round((bz + bd) * 2); w++) setV(u, v, w, color);
+      };
+      function blob(cx, cy, cz, rx, ry, rz, shade) {
+        for (let u = Math.floor((cx - rx) * 2); u <= Math.floor((cx + rx) * 2); u++)
+          for (let v = Math.floor((cy - ry) * 2); v <= Math.floor((cy + ry) * 2); v++)
+            for (let w = Math.floor((cz - rz) * 2); w <= Math.floor((cz + rz) * 2); w++) {
+              const px = (u + 0.5) / 2 - cx, py = (v + 0.5) / 2 - cy, pz = (w + 0.5) / 2 - cz;
+              const d = (px / rx) * (px / rx) + (py / ry) * (py / ry) + (pz / rz) * (pz / rz);
+              if (d > 1 || (d > 0.7 && rnd() < 0.3) || metaV(u, v, w)) continue;
+              setV(u, v, w, shade(py / ry));
+            }
+      }
+      let info;
+      if (kind === "palm") { // a thin ringed trunk that curves as it rises, and arching fronds that droop at the tips
+        const h = 5.5 + ((rnd() * 5) | 0) * 0.5, ang = rnd() * Math.PI * 2, lean = 0.5 + rnd() * 0.9, lx = Math.cos(ang) * lean, lz = Math.sin(ang) * lean;
+        let tx = x + 0.25, tz = z + 0.25;
+        for (let v = 2; v < h * 2; v++) {
+          const t = (v / 2 - 1) / (h - 1);
+          tx = x + 0.25 + lx * t * t;
+          tz = z + 0.25 + lz * t * t;
+          const u = Math.floor(tx * 2), w = Math.floor(tz * 2), col = v % 3 === 0 ? GC.palmTrunkDark : GC.palmTrunk;
+          setV(u, v, w, col);
+          if (v < 4) { setV(u + 1, v, w, col); setV(u, v, w + 1, col); setV(u + 1, v, w + 1, col); }
+        }
+        const cx = (Math.floor(tx * 2) + 0.5) / 2, cz = (Math.floor(tz * 2) + 0.5) / 2, cy = h + 0.25;
+        dab(cx, cy, cz, pick(GC.palm));
+        dab(cx, cy + 0.5, cz, pick(GC.palm));
+        const n = 7 + ((rnd() * 3) | 0);
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2 + rnd() * 0.5, dx = Math.cos(a), dz = Math.sin(a), L = 2.6 + rnd(), col = pick(GC.palm), up = 0.55 + rnd() * 0.3;
+          for (let s = 0.3; s <= L; s += 0.25) {
+            const y = cy + 0.3 + up * s - 0.33 * s * s, px = cx + dx * s, pz = cz + dz * s;
+            dab(px, y, pz, col);
+            if (s > 0.7 && s < L - 0.4) { dab(px - dz * 0.5, y - 0.3, pz + dx * 0.5, col); dab(px + dz * 0.5, y - 0.3, pz - dx * 0.5, col); }
+          }
+        }
+        [[-0.5, 0], [0.5, 0], [0, 0.5]].forEach(([ox, oz]) => dab(cx + ox, cy - 0.5, cz + oz, GC.coconut));
+        info = { x: cx, y: cy + 0.6 + lift / 2, z: cz }; // the top of the trunk, where a string of lights can be tied
+      } else { // a shade tree: a stout trunk with roots and two branches, under a round canopy of three blobs
+        const flowering = kind === "bloom", h = 3 + ((rnd() * 3) | 0) * 0.5;
+        vbox(x, 1, z, 1, h - 1, 1, GC.trunk);
+        [[-0.25, 0.25], [1.25, 0.75], [0.75, -0.25], [0.25, 1.25]].forEach(([ox, oz]) => { if (rnd() < 0.7) dab(x + ox, 1.25, z + oz, GC.trunk); });
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => rnd() - 0.5).slice(0, 2).forEach(([dx, dz]) => {
+          for (let s = 0.5; s <= 1.5; s += 0.5) dab(x + 0.5 + dx * (0.5 + s), h - 0.5 + s * 0.8, z + 0.5 + dz * (0.5 + s), GC.trunk);
+        });
+        const shade = (t) => {
+          if (flowering && rnd() < 0.32) return pick([GC.bloom[0], GC.bloom[1], GC.bloom[2]]);
+          if (t > 0.45) return rnd() < 0.6 ? GC.leafLight : pick(GC.leaf);
+          if (t < -0.35) return rnd() < 0.6 ? GC.leafDark : pick(GC.leaf);
+          return pick(GC.leaf);
+        };
+        const rx = 2.1 + rnd() * 0.6, ry = 1.5 + rnd() * 0.4;
+        blob(x + 0.5, h + 1.2, z + 0.5, rx, ry, rx * (0.85 + rnd() * 0.3), shade);
+        for (let k = 0; k < 2; k++) {
+          const a = rnd() * Math.PI * 2;
+          blob(x + 0.5 + Math.cos(a) * 1.2, h + 1.0 + rnd() * 0.8, z + 0.5 + Math.sin(a) * 1.2, 1.3, 1.1, 1.3, shade);
+        }
+      }
+      return { map, info };
+    }
+    let amGroup = null, stageOn = false;
+    const amGround = [], amTrees = [], amSec = [];
+    function buildAmphi() {
+      amGroup = new T.Group();
+      // the ground: each column's top, and its sides where they show (a different slice's side counts as showing, so a
+      // cut-away slice leaves a clean edge)
+      const bySec = new Map(), F = (s) => bySec.get(s) || bySec.set(s, faces()).get(s), base = -1;
+      for (let i = -AN; i < AN; i++) for (let j = -AN; j < AN; j++) {
+        const c = cellAt(i, j);
+        if (!c) continue;
+        const f = F(c.sec), x0 = i / 2, z0 = j / 2, x1 = x0 + 0.5, z1 = z0 + 0.5;
+        face(f, 2, [x0, c.h, z0], [x1, c.h, z1], c.cap);
+        [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]].forEach(([di, dj, d]) => {
+          const nb = cellAt(i + di, j + dj), lo = nb && nb.sec === c.sec ? nb.h : base;
+          if (lo >= c.h) return;
+          const capLo = Math.max(lo, c.h - 0.5);
+          face(f, d, [x0, capLo, z0], [x1, c.h, z1], c.side || c.cap);
+          if (capLo > lo) face(f, d, [x0, lo, z0], [x1, capLo, z1], c.body);
+        });
+      }
+      // grass tufts and flowers on the top
+      let seed = 4100;
+      const rnd = () => hash01(seed++);
+      for (let k = 0; k < 140; k++) {
+        const a = rnd() * Math.PI * 2, r = AM.outR + 0.4 + rnd() * (AM.rimR - AM.outR - 1.4), x = Math.sin(a) * r, z = Math.cos(a) * r, flower = rnd() < 0.35;
+        const c = cellAt(Math.floor(x * 2), Math.floor(z * 2));
+        if (!c || c.h !== AM.top) continue;
+        const s = flower ? 0.2 : 0.25, hex = flower ? GC.bloom[(rnd() * GC.bloom.length) | 0] : GC.tuft[(rnd() * 2) | 0];
+        [0, 1, 2, 4, 5].forEach((d) => face(F(c.sec), d, [x - s / 2, AM.top, z - s / 2], [x + s / 2, AM.top + s, z + s / 2], hex));
+      }
+      bySec.forEach((f, s) => { const m = faceMesh(f, s); amGroup.add(m); amGround.push(m); if (s >= 0) amSec[s] = m; });
+      // the dance floor: light-up tiles on a dark base, and the shadows on them
+      const slabs = [], tiles = [];
+      for (let ti = -6; ti < 6; ti++) for (let tj = -6; tj < 6; tj++) if (tileIn(ti, tj)) {
+        slabs.push([ti + 0.5, -0.3, tj + 0.5, 1, 0.4, 1, "#241C38"]);
+        tiles.push([ti + 0.5, -0.05, tj + 0.5, 0.9, 0.1, 0.9, TILES[(hash01(ti * 31 + tj * 17 + 77) * TILES.length) | 0]]);
+      }
+      const slab = mergedBoxes(slabs, vcMat("solid"));
+      slab.receiveShadow = true;
+      amGroup.add(slab, mergedBoxes(tiles, vcMat("glow")));
+      const shade = new T.Mesh(new T.CircleGeometry(AM.floorR, 64), new T.ShadowMaterial({ opacity: 0.35 }));
+      shade.rotation.x = -Math.PI / 2;
+      shade.position.y = 0.004;
+      shade.receiveShadow = true;
+      amGroup.add(shade);
+      // the trees: palms at eight points round the top to tie the lights to, then more, leafy and palm, all round
+      const spots = [];
+      for (let k = 0; k < 8; k++) { const a = ((k + 0.5) * Math.PI) / 4, r = AM.outR + 1.7; spots.push({ x: Math.sin(a) * r, z: Math.cos(a) * r, kind: "palm", lights: true }); }
+      for (let tries = 0; tries < 4000 && spots.length < 40; tries++) {
+        const a = rnd() * Math.PI * 2, r = AM.outR + 1.2 + rnd() * (AM.rimR - AM.outR - 2.6), x = Math.sin(a) * r, z = Math.cos(a) * r, t = rnd(), kind = t < 0.35 ? "palm" : t > 0.75 ? "bloom" : "leafy";
+        if (spots.some((o) => Math.hypot(o.x - x, o.z - z) < (kind === "palm" || o.kind === "palm" ? 3.4 : 4.4))) continue;
+        spots.push({ x, z, kind });
+      }
+      const treeSec = new Map(), tie = [];
+      spots.forEach((o) => {
+        const t = growTree(o.x - 0.5, o.z - 0.5, o.kind, rnd), s = sectorOf(o.x, o.z);
+        if (!treeSec.has(s)) treeSec.set(s, faces());
+        blockFaces(t.map, treeSec.get(s));
+        if (o.lights) tie.push({ at: t.info, s });
+      });
+      treeSec.forEach((f, s) => { const m = faceMesh(f, s); amGroup.add(m); amTrees.push(m); });
+      // strings of party lights from the palms to the middle, where the mirror ball hangs
+      const BULBS = ["#FFE58A", "#FF6FB5", "#7FD8FF", "#FFD23F", "#B9FF7A"];
+      tie.forEach(({ at, s }, k) => {
+        const from = new T.Vector3(0, AM.hub, 0), to = new T.Vector3(at.x, at.y, at.z), n = Math.round(from.distanceTo(to) / 0.5), boxes = [];
+        for (let b = 1; b < n; b++) {
+          const t = b / n, p = from.clone().lerp(to, t);
+          p.y -= 1.1 * 4 * t * (1 - t);
+          boxes.push([p.x, p.y, p.z, 0.16, 0.2, 0.16, BULBS[(b + k) % BULBS.length]]);
+        }
+        const m = mergedBoxes(boxes, vcMat("glow"));
+        m.userData.sec = s;
+        amGroup.add(m);
+        amTrees.push(m);
+      });
+      // the mirror ball: little mirrors in greys and blues, catching the light
+      let geo = new T.IcosahedronGeometry(0.95, 2);
+      if (geo.index) geo = geo.toNonIndexed();
+      const nv = geo.attributes.position.count, col = new Float32Array(nv * 3), MIRRORS = ["#FFFFFF", "#DDEFF8", "#A9C2D2", "#7E93A3", "#F2F7FF", "#C6D9E6", "#5F7383"];
+      for (let t = 0; t < nv / 3; t++) { const c = rgb(MIRRORS[(hash01(t + 321) * MIRRORS.length) | 0]); for (let q = 0; q < 3; q++) col.set([c.r, c.g, c.b], (t * 3 + q) * 3); }
+      geo.setAttribute("color", new T.BufferAttribute(col, 3));
+      const ball = new T.Mesh(geo, new T.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 90, specular: 0xffffff }));
+      ball.position.set(0, AM.ball, 0);
+      ball.castShadow = true;
+      amGroup.add(ball, mergedBoxes([[0, (AM.ball + 0.95 + AM.hub) / 2, 0, 0.05, AM.hub - AM.ball - 0.95, 0.05, "#3A3D44"], [0, AM.ball + 1.0, 0, 0.3, 0.16, 0.3, "#8A9097"], [0, AM.hub, 0, 0.22, 0.22, 0.22, "#3A3D44"]], vcMat("solid")));
+      scene.add(amGroup);
+    }
+    // what's cut away: trees between the camera and the middle, and the near half of the steps in the low front view
+    function cutaway() {
+      if (!amGroup) return;
+      amGround.forEach((m) => { const s = m.userData.sec; m.visible = s < 0 || !(view.el < 0.33 && Math.cos(sectorDir(s) - view.az) > 0); });
+      amTrees.forEach((m) => { m.visible = !(view.el < 1.2 && Math.cos(sectorDir(m.userData.sec) - view.az) > 0.42); });
+    }
+    function setStage(on) {
+      if (on && !amGroup) buildAmphi();
+      stageOn = !!on;
+      if (amGroup) amGroup.visible = stageOn;
+      floor.visible = grid.visible = !stageOn;
+      $("stage-btn").classList.toggle("on", stageOn);
+      cutaway();
+      items.forEach(place);
+    }
+    // where an item's feet go: the highest ground under it
+    function groundAt(it) {
+      if (!stageOn) return 0;
+      const pts = [];
+      if (it.av) [[0, 0], [0.2, 0.2], [-0.2, 0.2], [0.2, -0.2], [-0.2, -0.2]].forEach((p) => pts.push(p));
+      else {
+        const b = it.foot, s = it.scale;
+        for (let a = 0; a <= 4; a++) for (let c = 0; c <= 4; c++) pts.push([(b.min.x + ((b.max.x - b.min.x) * a) / 4) * s, (b.min.z + ((b.max.z - b.min.z) * c) / 4) * s]);
+      }
+      const cs = Math.cos(it.rot), sn = Math.sin(it.rot);
+      return Math.max(...pts.map(([px, pz]) => standAt(it.x + px * cs + pz * sn, it.z - px * sn + pz * cs)));
+    }
 
     // ---------- what can be on it ----------
     const isBirthdayBoy = (name) => /^(f|ph)(i|ee|e|ie|y|ea)(f|ph)(i|ee|e|ie|y|ea)$/.test(String(name || "").toLowerCase().replace(/[^a-z]/g, ""));
@@ -306,13 +568,26 @@
       else if (pose === "cheer") { P.armR.rotation.set(-2.9, 0, -0.45); P.armL.rotation.set(-2.9, 0, 0.45); }
       else if (pose === "disco") { P.armR.rotation.set(-2.75, 0, -0.55); P.armL.rotation.set(-0.35, 0, 1.1); av.rig.rotation.z = -0.12; P.legR.rotation.z = -0.18; P.head.rotation.z = 0.15; }
       else if (pose === "dance") { P.armR.rotation.set(-1.9, 0, -0.7); P.armL.rotation.set(-0.5, 0, 0.8); av.rig.rotation.z = 0.08; }
-      if (seated === "sit" || (pose === "sit" && seated !== "stand")) { // sitting: in a seat, on the bear, or on the ground
-        av.rig.position.y = 0.42 - 0.825 * (av.scale || 1);
+      if (seated === "sit" || (pose === "sit" && seated !== "stand")) { // sitting: in a seat or on the bear, or on the ground with the legs out
+        av.rig.position.y = (seated === "sit" ? 0.42 : 0.15) - 0.825 * (av.scale || 1);
         P.legR.rotation.set(-Math.PI / 2, 0, 0.05);
         P.legL.rotation.set(-Math.PI / 2, 0, -0.05);
         if (pose === "sit" || pose === "stand") { P.armR.rotation.set(-1.25, 0, 0.25); P.armL.rotation.set(-1.25, 0, -0.25); }
       }
     }
+    // heads turned to the camera, as far as a neck goes, and tipped up to it: every face shows in the picture
+    const fwd = new T.Vector3();
+    function faceCamera(it) {
+      if (!it.av) return;
+      const head = it.av.parts.head;
+      it.holder.updateWorldMatrix(true, false);
+      it.holder.getWorldDirection(fwd);
+      const turn = view.az - Math.atan2(fwd.x, fwd.z), yaw = Math.atan2(Math.sin(turn), Math.cos(turn)); // the camera, from where they face
+      head.rotation.order = "YXZ";
+      head.rotation.y = Math.max(-1.1, Math.min(1.1, yaw));
+      head.rotation.x = -Math.max(-0.3, Math.min(0.6, view.el)) * (Math.abs(yaw) > 1.7 ? 0.3 : 0.8);
+    }
+    const lookAll = () => items.forEach(faceCamera);
     function poseBear(b, pose) {
       const [lL, lR] = [b.legs[1], b.legs[0]], [aL, aR] = [b.arms[1], b.arms[0]];
       [lL, lR, b.head, b.hip].forEach((o) => o.rotation.set(0, 0, 0));
@@ -325,7 +600,7 @@
 
     // ---------- items on the stage ----------
     const items = [];
-    let selected = null, seating = null, guests = new Map(), nextId = 1, shadowsDirty = true;
+    let selected = null, seating = null, guests = new Map(), nextId = 1;
     const leftOut = new Set(); // guests not to include: they stay off the stage until they're ticked again
     function addItem(kind, ref, at) {
       const holder = new T.Group();
@@ -339,29 +614,37 @@
       } else { model = THINGS[kind].make(); bear = model.userData.bear || null; }
       holder.add(model);
       model.traverse((o) => { if (o.isMesh) o.castShadow = !(o.material && o.material.transparent); });
-      const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {});
+      const foot = av ? null : new T.Box3().setFromObject(holder); // what it stands on (people: just their feet)
+      const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, foot, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {});
       holder.userData.item = it;
       scene.add(holder);
       items.push(it);
       place(it);
       return it;
     }
-    function removeItem(it, keep) {
+    function removeItem(it, keep, quiet) {
       if (it.kind === "guest" && !keep) leftOut.add(it.ref);
       items.filter((o) => o.seat === it.id).forEach((o) => { o.seat = null; place(o); });
       if (it.holder.parent) it.holder.parent.remove(it.holder);
       if (it.av) it.av.dispose();
       items.splice(items.indexOf(it), 1);
       if (selected === it) select(null);
-      save();
+      if (!quiet) save();
     }
     // a new thing goes beside everything already on the stage (the vehicles side-on, so their shape shows)
     const WIDTH = { bear: 6.5, plane: 5, tank: 4.6, jeepney: 6, car0: 4, car1: 4, car2: 4, car3: 4, car4: 4 };
     function spotBeside(kind) {
+      const turn = kind === "bear" || !WIDTH[kind] ? 0 : Math.PI / 2;
+      if (stageOn) { const a = view.az + (Math.random() - 0.5) * 1.2; return { x: Math.sin(a) * 3, z: Math.cos(a) * 3, rot: view.az + turn }; } // on the dance floor, near the front
       let right = -Infinity;
       items.forEach((it) => { if (!it.seat) { const b = new T.Box3().setFromObject(it.holder); if (!b.isEmpty()) right = Math.max(right, b.max.x); } });
       const w = WIDTH[kind] || 1.2, x = (right === -Infinity ? 0 : right + 0.8) + w / 2;
-      return { x, z: 0, rot: kind === "bear" || !WIDTH[kind] ? 0 : Math.PI / 2 };
+      return { x, z: 0, rot: turn };
+    }
+    // where someone new goes: on the dance floor, facing the camera, or in rows out front
+    function looseSpot(i) {
+      if (stageOn) { const r = 0.95 * Math.sqrt(i + 0.5), a = i * 2.39996; return { x: Math.sin(a) * r, z: Math.cos(a) * r, rot: view.az, pose: "wave" }; }
+      return { x: (i % 10 - 4.5) * 1.05, z: 4 + Math.floor(i / 10) * 1.3, pose: "wave" };
     }
     // where an item is drawn: free on the stage, or in a seat (a car's, the tank's hatch, the plane's cockpit, the bear's head)
     function place(it) {
@@ -381,7 +664,8 @@
         return;
       }
       if (it.holder.parent !== scene) scene.add(it.holder);
-      it.holder.position.set(it.x, it.y, it.z);
+      if (stageOn) { const r = Math.hypot(it.x, it.z), most = AM.rimR - 1.2; if (r > most) { it.x *= most / r; it.z *= most / r; } } // not off the edge
+      it.holder.position.set(it.x, groundAt(it) + it.y, it.z);
       it.holder.rotation.set(0, it.rot, 0);
       it.holder.scale.setScalar(it.scale);
       if (it.av) posePerson(it.av, it.pose);
@@ -390,9 +674,10 @@
 
     // ---------- the panels ----------
     const $ = (id) => document.getElementById(id);
-    const statusEl = $("status"), addEl = $("add"), selEl = $("sel");
+    const statusEl = $("status"), addEl = $("add"), selEl = $("sel"), scenesEl = $("scenes");
     function select(it) {
       selected = it;
+      dirty = true;
       ring.visible = !!it;
       selEl.hidden = !it;
       if (!it) return;
@@ -430,6 +715,8 @@
     $("sel-remove").addEventListener("click", () => { if (selected) removeItem(selected); });
     $("add-btn").addEventListener("click", () => {
       addEl.hidden = !addEl.hidden;
+      scenesEl.hidden = true;
+      barHeight();
       if (addEl.hidden) return;
       renderPeople();
       $("add-things").innerHTML = Object.keys(THINGS).map((k) => '<button type="button" data-thing="' + k + '">' + THINGS[k].label + "</button>").join("");
@@ -446,14 +733,14 @@
       if (d.guest) {
         const it = items.find((i) => i.kind === "guest" && i.ref === d.guest);
         if (it) removeItem(it);
-        else { leftOut.delete(d.guest); const t = view.target; addItem("guest", d.guest, { x: t.x + (Math.random() - 0.5) * 4, z: t.z + 4 }); }
+        else { leftOut.delete(d.guest); addItem("guest", d.guest, looseSpot((Math.random() * 20) | 0)); }
         renderPeople();
         save();
         return;
       }
       if (d.all !== undefined) { // everyone in, or everyone out
-        if (d.all === "1") { const on = new Set(items.filter((i) => i.kind === "guest").map((i) => i.ref)); [...guests.keys()].filter((id) => !on.has(id)).forEach((id, i) => { leftOut.delete(id); addItem("guest", id, { x: (i % 10 - 4.5) * 1.05, z: 4 + Math.floor(i / 10) * 1.3, pose: "wave" }); }); }
-        else items.filter((i) => i.kind === "guest").forEach((i) => removeItem(i));
+        if (d.all === "1") { const on = new Set(items.filter((i) => i.kind === "guest").map((i) => i.ref)); [...guests.keys()].filter((id) => !on.has(id)).forEach((id, i) => { leftOut.delete(id); addItem("guest", id, looseSpot(i)); }); }
+        else items.filter((i) => i.kind === "guest").forEach((i) => removeItem(i, false, true));
         renderPeople();
         save();
         return;
@@ -473,32 +760,121 @@
       frameAll();
       save();
     });
-    $("reset-btn").addEventListener("click", () => { if (confirm("Start again from the group photo? (Anyone you left out stays out.)")) { [...items].forEach((i) => removeItem(i, true)); defaultLayout(); frameAll(); save(); } });
+    $("reset-btn").addEventListener("click", () => { if (confirm("Start again from the group photo? (Anyone you left out stays out.)")) { [...items].forEach((i) => removeItem(i, true, true)); defaultLayout(); frameAll(); save(); } });
+    $("stage-btn").addEventListener("click", () => { setStage(!stageOn); frameAll(); save(); });
+    // ---------- scenes: arrangements saved by name in this browser, or as a file to open anywhere ----------
+    const SCENES = "fefe40.scenes";
+    function scenesGet() {
+      try { const a = JSON.parse(localStorage.getItem(SCENES) || "[]"); return Array.isArray(a) ? a.filter((o) => o && typeof o.name === "string" && o.s && Array.isArray(o.s.items)) : []; } catch (e) { return []; }
+    }
+    function keepScene(name, st) {
+      const a = scenesGet().filter((o) => o.name !== name);
+      a.unshift({ name, at: Date.now(), s: st });
+      try { localStorage.setItem(SCENES, JSON.stringify(a.slice(0, 40))); return true; } catch (e) { return false; }
+    }
+    const when = (t) => new Date(t).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    function renderScenes() {
+      const a = scenesGet();
+      $("scene-list").innerHTML = a.map((o, i) => '<div class="scene"><button type="button" data-open="' + i + '">' + esc(o.name) + "</button><span>" + esc(when(o.at)) + '</span><button type="button" class="small" data-del="' + i + '" aria-label="Delete">✕</button></div>').join("");
+      $("scene-name").placeholder = "Scene " + (a.length + 1);
+    }
+    $("scenes-btn").addEventListener("click", () => {
+      scenesEl.hidden = !scenesEl.hidden;
+      addEl.hidden = true;
+      barHeight();
+      if (!scenesEl.hidden) renderScenes();
+    });
+    function saveScene() {
+      const input = $("scene-name"), name = input.value.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 40) || input.placeholder;
+      statusEl.textContent = keepScene(name, state()) ? "Saved \u201c" + name + "\u201d" : "Couldn't save here (private browsing?): download the scene file instead";
+      input.value = "";
+      input.blur();
+      renderScenes();
+    }
+    $("scene-save").addEventListener("click", saveScene);
+    $("scene-name").addEventListener("keydown", (e) => { if (e.key === "Enter") saveScene(); });
+    $("scene-list").addEventListener("click", (e) => {
+      const d = e.target.dataset || {}, a = scenesGet();
+      if (d.open !== undefined && a[+d.open]) {
+        const o = a[+d.open];
+        if (!confirm("Open \u201c" + o.name + "\u201d? What's on the stage now is replaced.")) return;
+        applyState(o.s);
+        save();
+        scenesEl.hidden = true;
+        statusEl.textContent = "\u201c" + o.name + "\u201d";
+      } else if (d.del !== undefined && a[+d.del]) {
+        if (!confirm("Delete \u201c" + a[+d.del].name + "\u201d?")) return;
+        a.splice(+d.del, 1);
+        try { localStorage.setItem(SCENES, JSON.stringify(a)); } catch (err) { /* nothing kept anyway */ }
+        renderScenes();
+      }
+    });
+    $("scene-download").addEventListener("click", () => {
+      const name = $("scene-name").value.trim() || "FiFi4000 scene", blob = new Blob([JSON.stringify({ fifi4000: "scene", name, at: Date.now(), s: state() })], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + ".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+    $("scene-open").addEventListener("click", () => $("scene-file").click());
+    $("scene-file").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!file) return;
+      let o = null;
+      try { o = JSON.parse(await file.text()); } catch (err) { o = null; }
+      const st = o && (o.s || o);
+      if (!st || !Array.isArray(st.items)) { statusEl.textContent = "That isn't a scene file"; return; }
+      const name = String((o && o.name) || file.name.replace(/\.json$/i, "")).slice(0, 40);
+      applyState(st);
+      save();
+      keepScene(name, st);
+      renderScenes();
+      scenesEl.hidden = true;
+      statusEl.textContent = "\u201c" + name + "\u201d";
+    });
     $("save-btn").addEventListener("click", savePNG);
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
     // ---------- pointer: tap to pick, drag to move, drag the empty stage to turn the view, pinch or scroll to zoom ----------
     const ray = new T.Raycaster(), ndc = new T.Vector2(), pointers = new Map();
     let drag = null;
-    function hitItem(e) {
+    function setRay(e) {
       const r = canvas.getBoundingClientRect();
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, cam);
+    }
+    function hitItem(e) {
+      setRay(e);
       const hits = ray.intersectObjects(items.map((i) => i.holder), true);
       for (const h of hits) { let o = h.object; while (o && !(o.userData && o.userData.item)) o = o.parent; if (o) return o.userData.item; }
       return null;
     }
     function groundPoint(e, y) {
-      const r = canvas.getBoundingClientRect();
-      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-      ray.setFromCamera(ndc, cam);
+      setRay(e);
       const p = new T.Vector3();
       return ray.ray.intersectPlane(new T.Plane(new T.Vector3(0, 1, 0), -y), p) ? p : null;
     }
+    // the amphitheater's ground under the pointer (not the parts cut away): stepping along the ray till it's under the top
+    function terrainPoint(e) {
+      setRay(e);
+      const o = ray.ray.origin, d = ray.ray.direction;
+      if (d.y > -0.01) return null;
+      const t1 = (-0.01 - o.y) / d.y, dt = Math.min(0.1 / Math.max(Math.hypot(d.x, d.z), 1e-3), 0.05 / -d.y);
+      for (let t = Math.max(0, (AM.top + 0.01 - o.y) / d.y); t <= t1; t += dt) {
+        const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, c = cellAt(Math.floor(x * 2), Math.floor(z * 2));
+        if (c && (c.sec < 0 || amSec[c.sec].visible) && y <= c.stand + 0.001) return new T.Vector3(x, c.stand, z);
+      }
+      return null;
+    }
+    const dragPoint = (e, it) => (stageOn ? terrainPoint(e) || groundPoint(e, AM.top) : groundPoint(e, it.y));
     canvas.addEventListener("pointerdown", (e) => {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      addEl.hidden = true;
+      addEl.hidden = scenesEl.hidden = true;
       if (pointers.size === 2) { drag = { pinch: true, d: dist2(), size: view.size }; return; }
       let it = hitItem(e);
       if (seating) {
@@ -512,7 +888,7 @@
       if (it && it.seat) it = items.find((o) => o.id === it.seat) || it; // dragging someone in a seat moves what they sit in
       if (it) {
         select(it);
-        const p = groundPoint(e, it.y);
+        const p = dragPoint(e, it);
         drag = p ? { it, dx: it.x - p.x, dz: it.z - p.z, moved: false } : null;
       } else drag = { orbit: true, x: e.clientX, y: e.clientY, az: view.az, el: view.el, moved: false };
     });
@@ -521,9 +897,9 @@
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (!drag) return;
-      if (drag.pinch) { if (pointers.size === 2) { view.size = Math.max(2, Math.min(60, drag.size * drag.d / dist2())); applyCam(); } return; }
+      if (drag.pinch) { if (pointers.size === 2) { view.size = Math.max(2, Math.min(80, drag.size * drag.d / dist2())); applyCam(); } return; }
       if (drag.it) {
-        const p = groundPoint(e, drag.it.y);
+        const p = dragPoint(e, drag.it);
         if (!p) return;
         drag.it.x = p.x + drag.dx;
         drag.it.z = p.z + drag.dz;
@@ -531,7 +907,7 @@
         place(drag.it);
       } else if (drag.orbit) {
         view.az = drag.az - (e.clientX - drag.x) * 0.008;
-        view.el = Math.max(-0.05, Math.min(1.35, drag.el + (e.clientY - drag.y) * 0.006));
+        view.el = Math.max(stageOn ? 0.06 : -0.05, Math.min(1.35, drag.el + (e.clientY - drag.y) * 0.006));
         if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 4) drag.moved = true;
         applyCam();
       }
@@ -544,9 +920,9 @@
     };
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
-    canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.size = Math.max(2, Math.min(60, view.size * Math.exp(e.deltaY * 0.001))); applyCam(); }, { passive: false });
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.size = Math.max(2, Math.min(80, view.size * Math.exp(e.deltaY * 0.001))); applyCam(); }, { passive: false });
     window.addEventListener("keydown", (e) => {
-      if (!selected || selected.seat) return;
+      if (!selected || selected.seat || /^(INPUT|TEXTAREA)$/.test((e.target && e.target.tagName) || "")) return;
       const k = e.key.toLowerCase();
       if (k === "q") { selected.rot += Math.PI / 12; place(selected); save(); }
       else if (k === "e") { selected.rot -= Math.PI / 12; place(selected); save(); }
@@ -556,84 +932,117 @@
     // ---------- the group photo to start from, and fitting the view round everyone ----------
     function defaultLayout() {
       const list = [...guests.entries()].filter(([id]) => !leftOut.has(id)).map(([id, g]) => ({ id, g })), fifi = list.filter((o) => isBirthdayBoy(o.g.name)), rest = list.filter((o) => !isBirthdayBoy(o.g.name)).sort((a, b) => b.g.look.h - a.g.look.h);
+      const pose = (i, r) => ["wave", "waveL", "cheer", "wave"][(i * 7 + r * 3) % 4];
+      if (stageOn) { // on the steps across the far side, facing the dance floor (and the camera), the tallest higher up
+        rest.reverse();
+        const far = view.az + Math.PI, gap = 1.05, span = 2.5, cap = (k) => Math.floor((span * (AM.floorR + (k - 0.5) * AM.stepW)) / gap) + 1;
+        let rows = 1, room = cap(1);
+        while (room < rest.length && rows < AM.steps) room += cap(++rows);
+        const total = Array.from({ length: rows }, (_, k) => cap(k + 1)).reduce((a, b) => a + b, 0), n = Array.from({ length: rows }, (_, k) => Math.floor((rest.length * cap(k + 1)) / total));
+        for (let k = rows - 1, left = rest.length - n.reduce((a, b) => a + b, 0); left > 0; k = (k + rows - 1) % rows, left--) n[k]++;
+        let at = 0;
+        n.forEach((count, k) => {
+          const r = AM.floorR + (k + 0.5) * AM.stepW;
+          rest.slice(at, at + count).forEach((o, i) => {
+            const a = far + ((i - (count - 1) / 2) * gap) / r, x = Math.sin(a) * r, z = Math.cos(a) * r;
+            addItem("guest", o.id, { x, z, rot: Math.atan2(-x, -z) + Math.sin(i * 1.7 + k) * 0.1, pose: pose(i, k) });
+          });
+          at += count;
+        });
+        fifi.forEach((o, i) => addItem("guest", o.id, { x: (i - (fifi.length - 1) / 2) * 1.1, z: 0, rot: view.az, pose: "disco" })); // the birthday boy, dancing in the middle
+        return;
+      }
       const N = list.length, rows = Math.max(1, Math.round(Math.sqrt(N / 1.6))), sizes = Array.from({ length: rows }, (_, r) => Math.floor(N / rows) + (r < N % rows ? 1 : 0));
       let k = 0;
       sizes.forEach((n, r) => {
         const last = r === rows - 1, take = last ? n - fifi.length : n, row = rest.slice(k, k + take);
         k += take;
         const line = last ? row.slice(0, Math.floor(row.length / 2)).concat(fifi, row.slice(Math.floor(row.length / 2))) : row, depth = rows - 1 - r;
-        line.forEach((o, i) => addItem("guest", o.id, { x: (i - (line.length - 1) / 2) * 1.05 + (depth % 2 ? 0.52 : 0), y: 0, z: -depth * 1.45, rot: Math.sin(i * 1.7 + r) * 0.12, pose: ["wave", "waveL", "cheer", "wave"][(i * 7 + r * 3) % 4] }));
+        line.forEach((o, i) => addItem("guest", o.id, { x: (i - (line.length - 1) / 2) * 1.05 + (depth % 2 ? 0.52 : 0), y: 0, z: -depth * 1.45, rot: Math.sin(i * 1.7 + r) * 0.12, pose: pose(i, r) }));
       });
     }
+    // everything there is, seen from the camera (and the shadows people throw on the ground)
     function contentBox(camera) {
       const bb = new T.Box3(), v = new T.Vector3(), inv = camera.matrixWorldInverse;
       scene.updateMatrixWorld(true);
-      items.forEach((it) => {
-        const b = new T.Box3().setFromObject(it.holder);
+      const add = (b, shadow) => {
         if (b.isEmpty()) return;
         for (let i = 0; i < 8; i++) {
           v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
-          const s = v.clone().addScaledVector(SUN, -v.y / SUN.y); // where its shadow falls
+          if (shadow) bb.expandByPoint(v.clone().addScaledVector(SUN, -v.y / SUN.y).applyMatrix4(inv)); // where its shadow falls
           bb.expandByPoint(v.applyMatrix4(inv));
-          bb.expandByPoint(s.applyMatrix4(inv));
         }
-      });
+      };
+      items.forEach((it) => add(new T.Box3().setFromObject(it.holder), !stageOn));
+      if (stageOn) amGroup.children.forEach((m) => { if (m.visible) add(new T.Box3().setFromObject(m), false); });
       return bb;
     }
     function frameAll() {
-      if (!items.length) return;
+      if (!items.length && !stageOn) return;
       applyCam();
       const bb = contentBox(cam), cx = (bb.min.x + bb.max.x) / 2, cy = (bb.min.y + bb.max.y) / 2;
       const right = new T.Vector3().setFromMatrixColumn(cam.matrixWorld, 0), upv = new T.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
       view.target.addScaledVector(right, cx).addScaledVector(upv, cy);
       const a = (canvas.clientWidth || 1) / (canvas.clientHeight || 1);
-      view.size = Math.max(2, Math.max((bb.max.y - bb.min.y) / 2, (bb.max.x - bb.min.x) / 2 / a) * 1.12);
+      view.size = Math.max(2, Math.max((bb.max.y - bb.min.y) / 2, (bb.max.x - bb.min.x) / 2 / a) * 1.08);
       applyCam();
     }
 
-    // ---------- saving the arrangement (in this browser) and the picture ----------
-    const KEY = "fefe40.arrange2"; // (2: the 3D look; layouts from the flat first version start again)
+    // ---------- keeping the arrangement (in this browser), and the picture ----------
+    const KEY = "fefe40.arrange3"; // (3: the amphitheater; the arrangement from before it is kept as a scene)
+    const state = () => ({ stage: stageOn, leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
+      items: items.map((it) => ({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat })) });
     function save() {
-      try {
-        localStorage.setItem(KEY, JSON.stringify({ leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
-          items: items.map((it) => ({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat })) }));
-      } catch (e) { /* private browsing: it just isn't kept */ }
+      try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { /* private browsing: it just isn't kept */ }
     }
-    function restore() {
-      let s = null;
-      try { s = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { s = null; }
-      if (s && Array.isArray(s.leftOut)) s.leftOut.forEach((id) => { if (guests.has(id)) leftOut.add(id); });
-      if (!s || !Array.isArray(s.items) || !s.items.length) return false;
+    // put a kept arrangement on the stage, in place of what's there
+    function applyState(s) {
+      [...items].forEach((i) => removeItem(i, true, true));
+      select(null);
+      leftOut.clear();
+      if (Array.isArray(s.leftOut)) s.leftOut.forEach((id) => { if (guests.has(id)) leftOut.add(id); });
+      setStage(!!s.stage);
+      const v = s.view || {};
+      view.az = Number.isFinite(+v.az) ? +v.az : VIEWS["3d"].az;
+      view.el = Number.isFinite(+v.el) ? +v.el : VIEWS["3d"].el;
+      view.size = +v.size || 9;
+      if (Array.isArray(v.t) && v.t.length === 3 && v.t.every((n) => Number.isFinite(+n))) view.target.fromArray(v.t.map(Number));
+      applyCam();
       const ids = new Map();
-      s.items.forEach((o) => {
-        if (o.kind === "guest" ? !guests.has(o.ref) : !THINGS[o.kind]) return;
-        const it = addItem(o.kind, o.ref, { x: +o.x || 0, y: +o.y || 0, z: +o.z || 0, rot: +o.rot || 0, scale: +o.scale || 1, pose: o.pose || "stand" });
+      (Array.isArray(s.items) ? s.items : []).forEach((o) => {
+        if (!o || (o.kind === "guest" ? !guests.has(o.ref) : !Object.prototype.hasOwnProperty.call(THINGS, o.kind))) return;
+        if (o.kind === "guest" && items.some((i) => i.kind === "guest" && i.ref === o.ref)) return;
+        const it = addItem(o.kind, o.ref, { x: +o.x || 0, y: Math.max(0, +o.y || 0), z: +o.z || 0, rot: +o.rot || 0, scale: Math.max(0.3, Math.min(6, +o.scale || 1)), pose: typeof o.pose === "string" ? o.pose : "stand" });
         ids.set(o.id, it);
         it.savedSeat = o.seat;
       });
-      items.forEach((it) => { if (it.savedSeat && ids.has(it.savedSeat)) it.seat = ids.get(it.savedSeat).id; delete it.savedSeat; place(it); });
-      // anyone who signed up since: in a row out front
+      items.forEach((it) => { if (it.savedSeat && ids.has(it.savedSeat) && ids.get(it.savedSeat) !== it) it.seat = ids.get(it.savedSeat).id; delete it.savedSeat; place(it); });
+      // anyone who signed up since: out front
       const on = new Set(items.filter((i) => i.kind === "guest").map((i) => i.ref)), fresh = [...guests.keys()].filter((id) => !on.has(id) && !leftOut.has(id));
-      fresh.forEach((id, i) => addItem("guest", id, { x: (i - (fresh.length - 1) / 2) * 1.05, z: 4, pose: "wave" }));
-      if (s.view) { view.az = Number.isFinite(+s.view.az) ? +s.view.az : VIEWS["3d"].az; view.el = Number.isFinite(+s.view.el) ? +s.view.el : VIEWS["3d"].el; view.size = +s.view.size || 9; if (Array.isArray(s.view.t)) view.target.fromArray(s.view.t); }
-      applyCam();
-      return true;
+      fresh.forEach((id, i) => addItem("guest", id, looseSpot(i)));
+      if (!s.view) frameAll();
+      $("view-btn").textContent = Math.abs(view.el - VIEWS.front.el) < 0.05 && Math.abs(view.az) < 0.05 ? "3D view" : "Front view";
     }
+    function restore() {
+      const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+      const s = read(KEY);
+      if (s && Array.isArray(s.items) && s.items.length) { applyState(s); return true; }
+      const old = read("fefe40.arrange2"); // the arrangement from before the amphitheater: kept as a scene
+      if (old && Array.isArray(old.items) && old.items.length && !scenesGet().some((o) => o.name === "Before the amphitheater")) keepScene("Before the amphitheater", Object.assign({}, old, { stage: false }));
+      if (s && Array.isArray(s.leftOut)) s.leftOut.forEach((id) => { if (guests.has(id)) leftOut.add(id); });
+      return false;
+    }
+    // Save PNG: what's on screen, trimmed to where the picture is, drawn big on a see-through background
     async function savePNG() {
       statusEl.textContent = "Drawing the picture…";
       grid.visible = ring.visible = false;
-      await Promise.all(items.filter((i) => i.av).map((i) => i.av.ready));
-      // cropped round everything, seen the way the stage is seen now
+      await Promise.all(items.filter((i) => i.av && i.av.ready).map((i) => i.av.ready));
       applyCam();
-      const bb = contentBox(cam), pad = (bb.max.y - bb.min.y) * 0.03 + 0.2, cam2 = cam.clone();
-      Object.assign(cam2, { left: bb.min.x - pad, right: bb.max.x + pad, top: bb.max.y + pad, bottom: bb.min.y - pad });
-      cam2.updateProjectionMatrix();
-      const aspect = (cam2.right - cam2.left) / (cam2.top - cam2.bottom);
+      const cam2 = cam.clone(), L = cam2.left, B = cam2.bottom, fw = cam2.right - cam2.left, fh = cam2.top - cam2.bottom;
       const cv = document.createElement("canvas"), r2 = new T.WebGLRenderer({ canvas: cv, alpha: true, antialias: false, preserveDrawingBuffer: true });
       const gl = r2.getContext(), most = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0], 4800);
-      const W = aspect >= 1 ? most : Math.round(most * aspect), H = Math.round(W / aspect);
+      const fit = (w, h, long) => (w >= h ? [long, Math.max(1, Math.round((long * h) / w))] : [Math.max(1, Math.round((long * w) / h)), long]);
       r2.setPixelRatio(1);
-      r2.setSize(W, H, false);
       r2.setClearColor(0x000000, 0);
       r2.shadowMap.enabled = true;
       r2.shadowMap.type = T.PCFSoftShadowMap;
@@ -641,21 +1050,38 @@
       const freshShadows = () => { if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; } }; // each renderer makes its own
       freshShadows();
       key.shadow.mapSize.set(4096, 4096);
+      lookAll();
+      // a small one first, to find where the picture is (rows of pixels count up from the bottom, like the camera)
+      let [w, h] = fit(fw, fh, 480);
+      r2.setSize(w, h, false);
+      r2.render(scene, cam2);
+      const px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let x0 = w, x1 = -1, y0 = h, y1 = -1;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 3) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (x1 >= 0) {
+        const pad = 2;
+        Object.assign(cam2, { left: L + (Math.max(0, x0 - pad) / w) * fw, right: L + (Math.min(w, x1 + 1 + pad) / w) * fw, bottom: B + (Math.max(0, y0 - pad) / h) * fh, top: B + (Math.min(h, y1 + 1 + pad) / h) * fh });
+        cam2.updateProjectionMatrix();
+      }
+      [w, h] = fit(cam2.right - cam2.left, cam2.top - cam2.bottom, most);
+      r2.setSize(w, h, false);
       r2.render(scene, cam2);
       const url = cv.toDataURL("image/png");
       r2.dispose();
       freshShadows();
       key.shadow.mapSize.set(2048, 2048);
-      grid.visible = true;
+      grid.visible = !stageOn;
       ring.visible = !!selected;
+      dirty = true;
       const a = document.createElement("a");
       a.href = url;
       a.download = "fifi4000-arrangement.png";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      statusEl.textContent = "Saved: " + W + " × " + H + " pixels, see-through background";
-      window.fefeArrange = { W, H, png: url };
+      statusEl.textContent = "Saved: " + w + " × " + h + " pixels, see-through background";
+      window.fefeArrange = { W: w, H: h, png: url };
     }
 
     // ---------- the guests, from the party database ----------
@@ -683,18 +1109,24 @@
     (async function start() {
       resize();
       await loadGuests();
-      if (!restore()) { defaultLayout(); frameAll(); save(); }
+      if (!restore()) { setStage(true); defaultLayout(); frameAll(); save(); }
       statusEl.textContent = guests.size + " guests. Tap someone to pose them; drag to move.";
-      (function loop() {
+      let last = 0;
+      (function loop(now) {
+        requestAnimationFrame(loop);
+        if (shadowsDirty) { shadowsDirty = false; fitShadows(); dirty = true; }
+        if (!dirty && now - last < 500) return; // (and twice a second anyway, for faces that load late)
+        dirty = false;
+        last = now;
+        lookAll();
         if (selected) {
           const p = selected.holder.getWorldPosition(new T.Vector3());
-          ring.position.set(p.x, (selected.seat ? p.y : selected.y) + 0.03, p.z);
-          ring.scale.setScalar(selected.bear ? 4 : selected.av ? 1 : 2.6);
+          ring.position.set(p.x, p.y + 0.03, p.z);
+          ring.scale.setScalar((selected.bear ? 4 : selected.av ? 1 : 2.6) * (selected.seat ? 1 : selected.scale));
         }
-        if (shadowsDirty) { shadowsDirty = false; fitShadows(); }
         renderer.render(scene, cam);
-        requestAnimationFrame(loop);
-      })();
-      window.fefeArrangeDebug = { items: () => items.map((i) => [i.kind, i.ref && guests.get(i.ref) ? guests.get(i.ref).name : "", +i.x.toFixed(2), +i.z.toFixed(2), i.pose, i.seat]), add: (kind) => select(addItem(kind, null, spotBeside(kind))), select: (n) => select(items[n]), seatIn: (a, b) => { items[a].seat = items[b].id; place(items[a]); }, savePNG, frameAll };
+      })(0);
+      window.fefeArrangeDebug = { items: () => items.map((i) => [i.kind, i.ref && guests.get(i.ref) ? guests.get(i.ref).name : "", +i.x.toFixed(2), +i.z.toFixed(2), i.pose, i.seat]), add: (kind) => select(addItem(kind, null, spotBeside(kind))), select: (n) => select(items[n]), seatIn: (a, b) => { items[a].seat = items[b].id; place(items[a]); }, savePNG, frameAll, stage: (on) => { setStage(on); frameAll(); }, state, applyState, scenes: scenesGet, view: (az, el, size) => { Object.assign(view, { az, el, size: size || view.size }); applyCam(); },
+        feet: (n) => +items[n].holder.position.y.toFixed(3), onScreen: (n) => { const p = items[n].holder.getWorldPosition(new T.Vector3()).add(new T.Vector3(0, 1, 0)).project(cam), r = canvas.getBoundingClientRect(); return [r.left + ((p.x + 1) / 2) * r.width, r.top + ((1 - p.y) / 2) * r.height]; } };
     })();
   })();

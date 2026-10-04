@@ -8,7 +8,8 @@
 <style>
   :root { --blue: #006AA7; --deep: #0B2A55; --edge: #04406A; --yellow: #FECC02; --fefe: #FEFE40; --white: #FFFFFF; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0B2A55; color: var(--white); font: 600 14px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0B2A55; color: var(--white); font: 600 14px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
+  input { -webkit-user-select: text; user-select: text; }
   /* a checkerboard behind the stage, so it's clear the background is see-through */
   #view { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; background: repeating-conic-gradient(#173A69 0 25%, #12305A 0 50%) 0 0 / 28px 28px; }
   button { font: inherit; cursor: pointer; border: 2px solid var(--edge); border-radius: 10px; background: var(--white); color: var(--deep); padding: 7px 12px; box-shadow: 0 2px 0 var(--edge); }
@@ -25,7 +26,13 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .chips button { padding: 5px 10px; border-radius: 16px; box-shadow: none; }
   #add-guests button:not(.on) { background: transparent; color: var(--white); border-color: rgba(255, 255, 255, 0.45); text-decoration: line-through; opacity: 0.8; }
-  #add { top: 64px; max-height: calc(100% - 90px); overflow-y: auto; }
+  #add, #scenes { top: calc(var(--bar, 58px) + 4px); max-height: calc(100% - var(--bar, 58px) - 24px); overflow-y: auto; }
+  .scene { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, 0.2); }
+  .scene button:first-child { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scene span { font-weight: 500; font-size: 12px; opacity: 0.8; white-space: nowrap; }
+  #scene-list { margin: 10px 0; }
+  #scene-list:empty { display: none; }
+  input[type=text] { font: inherit; flex: 1; min-width: 0; border: 2px solid var(--edge); border-radius: 10px; padding: 7px 10px; color: var(--deep); }
   #sel { bottom: max(16px, env(safe-area-inset-bottom)); }
   #sel-name { font-size: 16px; margin-bottom: 8px; }
   .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -37,6 +44,8 @@
 <div class="bar">
   <span class="logo">FiFi4000</span>
   <button type="button" id="add-btn">People &amp; things</button>
+  <button type="button" id="scenes-btn">Scenes</button>
+  <button type="button" id="stage-btn">Amphitheater</button>
   <button type="button" id="frame-btn">Fit</button>
   <button type="button" id="view-btn">Front view</button>
   <button type="button" id="reset-btn">Start again</button>
@@ -48,6 +57,16 @@
   <div class="chips" id="add-guests"></div>
   <h2>Add things</h2>
   <div class="chips" id="add-things"></div>
+</div>
+<div class="panel" id="scenes" hidden>
+  <h2>Scenes</h2>
+  <div class="row"><input type="text" id="scene-name" maxlength="40" autocomplete="off" aria-label="Scene name"><button type="button" class="go" id="scene-save">Save scene</button></div>
+  <div id="scene-list"></div>
+  <div class="row">
+    <button type="button" class="small" id="scene-download">Download scene file</button>
+    <button type="button" class="small" id="scene-open">Open scene file…</button>
+    <input type="file" id="scene-file" accept=".json,application/json" hidden>
+  </div>
 </div>
 <div class="panel" id="sel" hidden>
   <div id="sel-name"></div>
@@ -64,8 +83,8 @@
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202610042129"></script>
-<script src="outfits-hd.js?v=202610042129"></script>
-<script src="arrange.js?v=202610042129"></script>
+<script src="avatar.js?v=202610042152"></script>
+<script src="outfits-hd.js?v=202610042152"></script>
+<script src="arrange.js?v=202610042152"></script>
 </body>
 </html>
