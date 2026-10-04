@@ -451,6 +451,7 @@
       slab.receiveShadow = true;
       amTiles = mergedBoxes(tiles, vcMat("glow"));
       amTiles.userData.tiles = tiles.length;
+      amTiles.userData.orig = amTiles.geometry.attributes.color.array.slice();
       amGroup.add(slab, amTiles);
       const shade = new T.Mesh(new T.CircleGeometry(AM.floorR, 64), new T.ShadowMaterial({ opacity: 0.35 }));
       shade.rotation.x = -Math.PI / 2;
@@ -506,7 +507,7 @@
     const SPOTS = 70, BEAMS = 9, SPOT_COLS = ["#FFFFFF", "#FFF09A", "#AEE4FF", "#FFBCE3", "#BDFFD0"];
     function buildLight() {
       const dirs = [];
-      for (let k = 0; k < SPOTS; k++) dirs.push({ t: 0.18 + 0.86 * Math.sqrt(hash01(k * 3 + 901)), a: hash01(k * 7 + 433) * Math.PI * 2 }); // angle from straight down, and round
+      for (let k = 0; k < SPOTS; k++) { const m = k % (SPOTS / 7); dirs.push({ t: 0.18 + 0.86 * Math.sqrt(hash01(m * 3 + 901)), a: hash01(m * 7 + 433) * ((2 * Math.PI) / 7) + Math.floor(k / (SPOTS / 7)) * ((2 * Math.PI) / 7) }); } // angle from straight down, and round: a pattern that repeats seven times round
       const spot = new T.InstancedMesh(new T.CircleGeometry(0.24, 14).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false }), SPOTS);
       for (let k = 0; k < SPOTS; k++) spot.setColorAt(k, rgb(SPOT_COLS[k % SPOT_COLS.length]));
       spot.renderOrder = 2;
@@ -664,7 +665,14 @@
     }
     // ---------- play: everyone moving in place to their pose, to a beat ----------
     const BEAT = 2; // beats a second: 120 a minute
-    let playing = false, playT = 0;
+    const LOOP_BEATS = 8;
+    let playing = false, playT = 0, moved = false; // (moved: they've been moving, so pausing leaves them mid-move)
+    // still again, in their poses, the floor and the ball as they were built
+    function stillAgain() {
+      items.forEach((it) => { it.nod = 0; if (it.model.position.y) it.model.position.y = 0; place(it); });
+      if (amTiles && amTiles.userData.orig) { amTiles.geometry.attributes.color.array.set(amTiles.userData.orig); amTiles.geometry.attributes.color.needsUpdate = true; tileBeat = -1; }
+      if (amLight) { amLight.angle = 0; updateLight(); }
+    }
     function movePerson(it, t) {
       const av = it.av, P = av.parts, u = t * BEAT + hash01(it.id * 13 + 5) * 0.35; // (not all on the very same beat)
       const sway = Math.sin(Math.PI * u), hop = Math.abs(sway), beat = Math.sin(2 * Math.PI * u), flip = Math.sin((Math.PI * u) / 2) < 0;
@@ -710,9 +718,9 @@
         else if (it.prop) it.prop.rotation.z = t * 30;
       });
       if (!amGroup || !stageOn) return;
-      amLight.angle = t * 0.45; // the ball turns, and its light with it
+      amLight.angle = (t / (LOOP_BEATS / BEAT)) * ((2 * Math.PI) / 7); // the ball turns, and its light with it: one repeat of the pattern every 8 beats
       updateLight();
-      const n = Math.floor(t * BEAT);
+      const n = ((Math.floor(t * BEAT) % LOOP_BEATS) + LOOP_BEATS) % LOOP_BEATS; // (8 sets of colours, round and round)
       if (n !== tileBeat && amTiles) { // the floor lights up in new colours on every beat
         tileBeat = n;
         const col = amTiles.geometry.attributes.color, per = col.count / amTiles.userData.tiles;
@@ -979,6 +987,54 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     });
     $("scene-open").addEventListener("click", () => $("scene-file").click());
+    // ---------- share links: the scene packed into the link itself; it opens as it is, playing ----------
+    const r2d = (v) => Math.round((+v || 0) * 100) / 100;
+    const packState = (st, name) => ({ v: 1, n: name || "", st: st.stage ? 1 : 0, hd: st.heads || 100, lo: st.leftOut,
+      vw: [st.view.az, st.view.el, st.view.size, ...st.view.t, (canvas.clientWidth || 1) / (canvas.clientHeight || 1)].map(r2d),
+      it: st.items.map((o) => [o.id, o.kind === "guest" ? 0 : o.kind, o.ref || 0, r2d(o.x), r2d(o.z), r2d(o.rot), o.pose, r2d(o.y), r2d(o.scale), o.seat || 0]) });
+    function unpackState(p) {
+      if (!p || !Array.isArray(p.it)) return null;
+      const vw = Array.isArray(p.vw) ? p.vw.map(Number) : [];
+      return { stage: !!p.st, heads: +p.hd || 100, leftOut: Array.isArray(p.lo) ? p.lo.filter((x) => typeof x === "string") : [],
+        view: vw.length >= 6 && vw.every(Number.isFinite) ? { az: vw[0], el: vw[1], size: vw[2], t: vw.slice(3, 6), a: vw[6] } : null,
+        items: p.it.filter(Array.isArray).map((a) => ({ id: a[0], kind: a[1] === 0 ? "guest" : String(a[1]), ref: a[1] === 0 ? String(a[2]) : null, x: +a[3], z: +a[4], rot: +a[5], pose: String(a[6] || "stand"), y: +a[7] || 0, scale: +a[8] || 1, seat: a[9] || null })) };
+    }
+    const b64u = (bytes) => { let t = ""; for (let i = 0; i < bytes.length; i++) t += String.fromCharCode(bytes[i]); return btoa(t).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+    const unb64u = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+    const squeeze = async (bytes, how) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(how)).arrayBuffer());
+    async function linkCode(st, name) {
+      const json = new TextEncoder().encode(JSON.stringify(packState(st, name)));
+      return window.CompressionStream ? "z" + b64u(await squeeze(json, new CompressionStream("deflate"))) : "j" + b64u(json);
+    }
+    async function readLinkCode(code) {
+      const bytes = unb64u(code.slice(1));
+      return JSON.parse(new TextDecoder().decode(code[0] === "z" ? await squeeze(bytes, new DecompressionStream("deflate")) : bytes));
+    }
+    $("scene-share").addEventListener("click", async () => {
+      const name = $("scene-name").value.trim(), url = location.origin + location.pathname + "#s=" + (await linkCode(state(), name));
+      window.fefeShareLink = url;
+      try { if (navigator.share && matchMedia("(pointer: coarse)").matches) { await navigator.share({ title: name || "FiFi4000", url }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+      try { await navigator.clipboard.writeText(url); statusEl.textContent = "Link copied: it opens this scene, playing"; } catch (e) { prompt("The link to this scene:", url); }
+    });
+    // a shared link's scene: as it was, made to fit this screen if it's narrower
+    async function openLinked() {
+      const m = /[#&]s=([zj][A-Za-z0-9_-]+)/.exec(location.hash || "");
+      if (!m) return false;
+      let p = null;
+      try { p = await readLinkCode(m[1]); } catch (e) { p = null; }
+      const st = unpackState(p);
+      if (!st) return false;
+      showShared(st, p.n);
+      return true;
+    }
+    window.addEventListener("hashchange", () => { openLinked(); });
+    function showShared(st, name) {
+      applyState(st);
+      const a = (canvas.clientWidth || 1) / (canvas.clientHeight || 1);
+      if (st.view && st.view.a > a) { view.size *= st.view.a / a; applyCam(); }
+      setPlaying(true);
+      if (name) statusEl.textContent = name;
+    }
     $("scene-file").addEventListener("change", async (e) => {
       const file = e.target.files && e.target.files[0];
       e.target.value = "";
@@ -996,6 +1052,7 @@
       statusEl.textContent = "\u201c" + name + "\u201d";
     });
     $("save-btn").addEventListener("click", savePNG);
+    $("gif-btn").addEventListener("click", saveGIF);
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
     // ---------- pointer: tap to pick, drag to move, drag the empty stage to turn the view, pinch or scroll to zoom ----------
@@ -1034,7 +1091,8 @@
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       addEl.hidden = scenesEl.hidden = true;
-      if (pointers.size === 2) { drag = { pinch: true, d: dist2(), size: view.size }; return; }
+      if (e.pointerType === "mouse" && e.button === 1) { e.preventDefault(); drag = { pan: true, at: [e.clientX, e.clientY], t: view.target.clone() }; return; } // the middle button: pan, and lift
+      if (pointers.size === 2) { drag = { pinch: true, d: dist2(), size: view.size, at: mid2(), t: view.target.clone() }; return; } // two fingers: zoom, and pan and lift
       let it = hitItem(e);
       if (seating) {
         const host = it && (it.bear || it.kind === "plane" || it.model.userData.seat) ? it : null;
@@ -1056,7 +1114,8 @@
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (!drag) return;
-      if (drag.pinch) { if (pointers.size === 2) { view.size = Math.max(2, Math.min(80, drag.size * drag.d / dist2())); applyCam(); } return; }
+      if (drag.pan) { panBy(drag, e.clientX, e.clientY); return; }
+      if (drag.pinch) { if (pointers.size === 2) { view.size = Math.max(2, Math.min(80, drag.size * drag.d / dist2())); const m = mid2(); panBy(drag, m[0], m[1]); } return; }
       if (drag.it) {
         const p = dragPoint(e, drag.it);
         if (!p) return;
@@ -1071,8 +1130,20 @@
         applyCam();
       }
     });
+    const mid2 = () => { const p = [...pointers.values()]; return [(p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2]; };
+    // sideways along the screen, and up and down (lifting the camera): the stage stays under the pointer
+    function panBy(d, x, y) {
+      const k = (2 * view.size) / (canvas.clientHeight || 1), right = new T.Vector3(Math.cos(view.az), 0, -Math.sin(view.az));
+      view.target.copy(d.t).addScaledVector(right, -(x - d.at[0]) * k);
+      view.target.y = d.t.y + ((y - d.at[1]) * k) / Math.max(0.3, Math.cos(view.el));
+      d.moved = true;
+      applyCam();
+    }
+    canvas.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); }); // (no scrolling arrows)
+    canvas.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
     const up = (e) => {
       pointers.delete(e.pointerId);
+      if (drag && (drag.pan || drag.pinch) && drag.moved && pointers.size === 0) save();
       if (drag && drag.orbit && !drag.moved) select(null); // a tap on the empty stage: nothing selected
       if (drag && drag.it && drag.moved) save();
       if (pointers.size === 0) drag = null;
@@ -1192,9 +1263,8 @@
       if (s && Array.isArray(s.leftOut)) s.leftOut.forEach((id) => { if (guests.has(id)) leftOut.add(id); });
       return false;
     }
-    // Save PNG: what's on screen, trimmed to where the picture is, drawn big on a see-through background
-    async function savePNG() {
-      statusEl.textContent = "Drawing the picture…";
+    // Drawing off screen, for the PNG and the GIF: what's on screen, trimmed to where the picture is
+    async function offscreen(shadowSize) {
       grid.visible = ring.visible = false;
       await Promise.all(items.filter((i) => i.av && i.av.ready).map((i) => i.av.ready));
       applyCam();
@@ -1209,10 +1279,10 @@
       fitShadows();
       const freshShadows = () => { if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; } }; // each renderer makes its own
       freshShadows();
-      key.shadow.mapSize.set(4096, 4096);
+      key.shadow.mapSize.set(shadowSize, shadowSize);
       lookAll();
       // a small one first, to find where the picture is (rows of pixels count up from the bottom, like the camera)
-      let [w, h] = fit(fw, fh, 480);
+      const [w, h] = fit(fw, fh, 480);
       r2.setSize(w, h, false);
       r2.render(scene, cam2);
       const px = new Uint8Array(w * h * 4);
@@ -1224,24 +1294,148 @@
         Object.assign(cam2, { left: L + (Math.max(0, x0 - pad) / w) * fw, right: L + (Math.min(w, x1 + 1 + pad) / w) * fw, bottom: B + (Math.max(0, y0 - pad) / h) * fh, top: B + (Math.min(h, y1 + 1 + pad) / h) * fh });
         cam2.updateProjectionMatrix();
       }
-      [w, h] = fit(cam2.right - cam2.left, cam2.top - cam2.bottom, most);
-      r2.setSize(w, h, false);
-      r2.render(scene, cam2);
-      const url = cv.toDataURL("image/png");
-      r2.dispose();
-      freshShadows();
-      key.shadow.mapSize.set(2048, 2048);
-      grid.visible = !stageOn;
-      ring.visible = !!selected;
-      dirty = true;
+      return {
+        r2, gl, cv, cam2, most,
+        size: (long) => { const [W, H] = fit(cam2.right - cam2.left, cam2.top - cam2.bottom, long); r2.setSize(W, H, false); return [W, H]; },
+        done() {
+          r2.dispose();
+          freshShadows();
+          key.shadow.mapSize.set(2048, 2048);
+          grid.visible = !stageOn;
+          ring.visible = !!selected;
+          dirty = true;
+        }
+      };
+    }
+    function download(href, name) {
       const a = document.createElement("a");
-      a.href = url;
-      a.download = "fifi4000-arrangement.png";
+      a.href = href;
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
+    }
+    // Save PNG: drawn big on a see-through background
+    async function savePNG() {
+      statusEl.textContent = "Drawing the picture…";
+      const o = await offscreen(4096), [w, h] = o.size(o.most);
+      o.r2.render(scene, o.cam2);
+      const url = o.cv.toDataURL("image/png");
+      o.done();
+      download(url, "fifi4000-arrangement.png");
       statusEl.textContent = "Saved: " + w + " × " + h + " pixels, see-through background";
       window.fefeArrange = { W: w, H: h, png: url };
+    }
+    // Save GIF: the dance, small, as a loop that goes round without a jump (8 beats: every move comes back to where it
+    // started, the floor's colours too, and the ball turns one repeat of its pattern of spots)
+    const GIF_LONG = 480, GIF_FRAMES = 50, GIF_BG = [11, 42, 85]; // 50 frames, 8/100 s each: the 4 seconds of 8 beats
+    let capturing = false;
+    async function saveGIF() {
+      if (capturing) return;
+      capturing = true;
+      $("gif-btn").disabled = true;
+      statusEl.textContent = "Making the GIF…";
+      const wasT = playT, wasMoving = moved;
+      try {
+        const o = await offscreen(2048), [w, h] = o.size(GIF_LONG), px = new Uint8Array(w * h * 4), frames = [];
+        const t0 = Math.floor(playT * BEAT) / BEAT, span = LOOP_BEATS / BEAT;
+        for (let f = 0; f < GIF_FRAMES; f++) {
+          animate(t0 + (f * span) / GIF_FRAMES);
+          lookAll();
+          o.r2.render(scene, o.cam2);
+          o.gl.readPixels(0, 0, w, h, o.gl.RGBA, o.gl.UNSIGNED_BYTE, px);
+          const rgb3 = new Uint8Array(w * h * 3); // the right way up, on the page's blue
+          for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+            const i = ((h - 1 - y) * w + x) * 4, j = (y * w + x) * 3, k = 1 - px[i + 3] / 255;
+            rgb3[j] = px[i] + GIF_BG[0] * k; rgb3[j + 1] = px[i + 1] + GIF_BG[1] * k; rgb3[j + 2] = px[i + 2] + GIF_BG[2] * k;
+          }
+          frames.push(rgb3);
+          if (f % 5 === 4) { statusEl.textContent = "Making the GIF… " + Math.round(((f + 1) / GIF_FRAMES) * 80) + "%"; await new Promise((r) => setTimeout(r, 0)); }
+        }
+        o.done();
+        statusEl.textContent = "Making the GIF… 85%";
+        await new Promise((r) => setTimeout(r, 0));
+        const gif = encodeGIF(w, h, frames, 8);
+        const url = URL.createObjectURL(new Blob([gif], { type: "image/gif" }));
+        download(url, "fifi4000-dance.gif");
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        statusEl.textContent = "Saved: a " + w + " × " + h + " GIF, " + Math.max(1, Math.round(gif.length / 1024)) + " KB";
+        window.fefeArrange = { W: w, H: h, gif: url, bytes: gif.length };
+      } finally {
+        // back as it was: still, or moving from where it had got to
+        if (wasMoving) animate(wasT); else stillAgain();
+        capturing = false;
+        $("gif-btn").disabled = false;
+        dirty = true;
+      }
+    }
+    // A GIF: one palette for all the frames (median cut), each frame only where it changed (the rest see-through, so
+    // the frame before shows), LZW-packed
+    function encodeGIF(w, h, frames, delay) {
+      // the palette: 255 colours from a sample of the frames; 255 stays free for "unchanged"
+      const pick = [0, 12, 25, 37].filter((f) => f < frames.length), S = [];
+      pick.forEach((f) => { const fr = frames[f]; for (let i = 0; i < w * h; i += 3) S.push(fr[i * 3], fr[i * 3 + 1], fr[i * 3 + 2]); });
+      const samples = Uint8Array.from(S), boxes = [{ ids: Uint32Array.from({ length: samples.length / 3 }, (_, i) => i) }];
+      const measure = (b) => { let best = -1; for (let c = 0; c < 3; c++) { let lo = 255, hi = 0; for (const i of b.ids) { const v = samples[i * 3 + c]; if (v < lo) lo = v; if (v > hi) hi = v; } if (hi - lo > best) { best = hi - lo; b.ch = c; } } b.range = best; return b; };
+      measure(boxes[0]);
+      while (boxes.length < 255) {
+        let bi = -1, score = 0;
+        boxes.forEach((b, i) => { const sc = b.range * Math.sqrt(b.ids.length); if (b.ids.length > 1 && sc > score) { score = sc; bi = i; } });
+        if (bi < 0) break;
+        const b = boxes[bi], ch = b.ch, ids = Array.from(b.ids).sort((p, q) => samples[p * 3 + ch] - samples[q * 3 + ch]), mid = ids.length >> 1;
+        boxes.splice(bi, 1, measure({ ids: Uint32Array.from(ids.slice(0, mid)) }), measure({ ids: Uint32Array.from(ids.slice(mid)) }));
+      }
+      const pal = new Uint8Array(256 * 3);
+      boxes.forEach((b, k) => { for (let c = 0; c < 3; c++) { let sum = 0; for (const i of b.ids) sum += samples[i * 3 + c]; pal[k * 3 + c] = Math.round(sum / b.ids.length); } });
+      const n = boxes.length, near = new Int16Array(32768).fill(-1);
+      const index = (r, g, b) => {
+        const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+        if (near[key] >= 0) return near[key];
+        let best = 0, bd = Infinity;
+        const R = (r & 0xf8) + 4, G = (g & 0xf8) + 4, B = (b & 0xf8) + 4;
+        for (let k = 0; k < n; k++) { const dr = pal[k * 3] - R, dg = pal[k * 3 + 1] - G, db = pal[k * 3 + 2] - B, d = 2 * dr * dr + 4 * dg * dg + 3 * db * db; if (d < bd) { bd = d; best = k; } }
+        return (near[key] = best);
+      };
+      const out = [];
+      const bytes = (...a) => a.forEach((v) => out.push(v & 255));
+      const word = (v) => bytes(v, v >> 8);
+      "GIF89a".split("").forEach((c) => out.push(c.charCodeAt(0)));
+      word(w); word(h); bytes(0xf7, 0, 0); // a 256-colour palette for all of it
+      for (let i = 0; i < 768; i++) out.push(pal[i]);
+      bytes(0x21, 0xff, 11); "NETSCAPE2.0".split("").forEach((c) => out.push(c.charCodeAt(0))); bytes(3, 1, 0, 0, 0); // round and round
+      let shown = null;
+      frames.forEach((fr, f) => {
+        const idx = new Uint8Array(w * h), now = new Uint8Array(w * h);
+        for (let i = 0; i < w * h; i++) { const k = index(fr[i * 3], fr[i * 3 + 1], fr[i * 3 + 2]); now[i] = k; idx[i] = shown && shown[i] === k ? 255 : k; }
+        shown = now;
+        bytes(0x21, 0xf9, 4, f ? 0x05 : 0x04); word(delay); bytes(255, 0); // keep the frame before; 255 is see-through
+        bytes(0x2c); word(0); word(0); word(w); word(h); bytes(0);
+        bytes(8);
+        const data = lzw(idx, 8);
+        for (let i = 0; i < data.length; i += 255) { const part = data.slice(i, i + 255); out.push(part.length); for (const v of part) out.push(v); }
+        out.push(0);
+      });
+      out.push(0x3b);
+      return Uint8Array.from(out);
+    }
+    function lzw(idx, minSize) {
+      const clear = 1 << minSize, eoi = clear + 1, out = [];
+      let size = minSize + 1, next = eoi + 1, table = new Map(), cur = 0, bits = 0;
+      const put = (code) => { cur |= code << bits; bits += size; while (bits >= 8) { out.push(cur & 255); cur >>>= 8; bits -= 8; } };
+      put(clear);
+      let pre = idx[0];
+      for (let i = 1; i < idx.length; i++) {
+        const k = idx[i], keyed = (pre << 8) | k, code = table.get(keyed);
+        if (code !== undefined) { pre = code; continue; }
+        put(pre);
+        if (next === 4096) { put(clear); next = eoi + 1; size = minSize + 1; table = new Map(); }
+        else { if (next >= 1 << size) size++; table.set(keyed, next++); }
+        pre = k;
+      }
+      put(pre);
+      put(eoi);
+      if (bits > 0) out.push(cur & 255);
+      return out;
     }
 
     // ---------- the guests, from the party database ----------
@@ -1281,15 +1475,24 @@
     (async function start() {
       resize();
       await loadGuests();
-      if (!restore()) { setStage(true); defaultLayout(); frameAll(); save(); }
+      const linked = await openLinked();
+      if (linked) { /* a shared scene */ }
+      else if (!restore()) {
+        const def = await fetch("arrange-default.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null), st = unpackState(def);
+        if (st) showShared(st, "");
+        else { setStage(true); defaultLayout(); frameAll(); }
+        save();
+      }
       const before = [...guests.values()].filter((g) => g.past).length;
       statusEl.textContent = guests.size - before + (guests.size - before === 1 ? " guest" : " guests") + (before ? ", " + before + (before === 1 ? " earlier look" : " earlier looks") : "") + ". Tap someone to pose them; drag to move.";
+      setPlaying(true); // it opens dancing
       let last = 0, prev = 0;
       (function loop(now) {
         requestAnimationFrame(loop);
         const dt = Math.min(0.1, (now - prev) / 1000 || 0);
         prev = now;
-        if (playing) { playT += dt; animate(playT); dirty = true; }
+        if (playing && !capturing) { playT += dt; moved = true; animate(playT); dirty = true; }
+        if (capturing) return;
         if (shadowsDirty) { shadowsDirty = false; fitShadows(); dirty = true; }
         if (!dirty && now - last < 500) return; // (and twice a second anyway, for faces that load late)
         dirty = false;
