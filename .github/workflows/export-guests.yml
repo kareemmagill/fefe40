@@ -27,8 +27,19 @@ jobs:
             Yymc5tbPSEcoj30PwFt1ljcCAwEAAQ==
             -----END PUBLIC KEY-----
         run: |
-          curl -sSf "https://fefe40-a3dae-default-rtdb.firebaseio.com/fefe40/guests.json" -o guests.json
-          echo "guests file: $(wc -c < guests.json) bytes"
+          DB="https://fefe40-a3dae-default-rtdb.firebaseio.com/fefe40"
+          curl -sSf "$DB/index.json" -o index.json
+          printf '{' > guests.json; first=1
+          for id in $(jq -r 'keys[]' index.json); do
+            case "$id" in *[!a-z0-9]*) continue;; esac
+            rec=$(curl -sSf "$DB/guests/$id.json") || continue
+            [ "$rec" = "null" ] && continue
+            [ $first = 1 ] || printf ',' >> guests.json; first=0
+            printf '"%s":%s' "$id" "$rec" >> guests.json
+          done
+          printf '}' >> guests.json
+          echo "guests: $(jq 'length' guests.json), $(wc -c < guests.json) bytes"
+          rm index.json
           openssl rand -hex 32 > key.txt
           openssl enc -aes-256-cbc -pbkdf2 -salt -in guests.json -out guests.enc -pass file:key.txt
           printf '%s\n' "$PUBKEY" > pub.pem
