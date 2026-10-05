@@ -587,8 +587,10 @@
       const pts = [];
       if (it.av) [[0, 0], [0.2, 0.2], [-0.2, 0.2], [0.2, -0.2], [-0.2, -0.2]].forEach((p) => pts.push(p));
       else {
-        const b = it.foot, s = it.scale;
-        for (let a = 0; a <= 4; a++) for (let c = 0; c <= 4; c++) pts.push([(b.min.x + ((b.max.x - b.min.x) * a) / 4) * s, (b.min.z + ((b.max.z - b.min.z) * c) / 4) * s]);
+        // the middle of its outline (the outline takes in arms and wings: big things stand on the step their feet or
+        // wheels are on, not on the highest step their arms reach over)
+        const b = it.foot, s = it.scale, cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2, hx = (b.max.x - b.min.x) * 0.3, hz = (b.max.z - b.min.z) * 0.3;
+        for (let a = 0; a <= 4; a++) for (let c = 0; c <= 4; c++) pts.push([(cx - hx + (hx * a) / 2) * s, (cz - hz + (hz * c) / 2) * s]);
       }
       const cs = Math.cos(it.rot), sn = Math.sin(it.rot);
       return Math.max(...pts.map(([px, pz]) => standAt(it.x + px * cs + pz * sn, it.z - px * sn + pz * cs)));
@@ -1098,13 +1100,13 @@
     $("scene-open").addEventListener("click", () => $("scene-file").click());
     // ---------- share links: the scene packed into the link itself; it opens as it is, playing ----------
     const r2d = (v) => Math.round((+v || 0) * 100) / 100;
-    const packState = (st, name) => ({ v: 1, n: name || "", d: 1, st: st.stage ? 1 : 0, hd: st.heads || 100, lo: st.leftOut,
+    const packState = (st, name) => ({ v: 1, n: name || "", d: 1, g: GEO, st: st.stage ? 1 : 0, hd: st.heads || 100, lo: st.leftOut,
       vw: [st.view.az, st.view.el, st.view.size, ...st.view.t, (canvas.clientWidth || 1) / (canvas.clientHeight || 1)].map(r2d),
       it: st.items.map((o) => [o.id, o.kind === "guest" ? 0 : o.kind, o.ref || 0, r2d(o.x), r2d(o.z), r2d(o.rot), o.pose, r2d(o.y), r2d(o.scale), o.seat || 0]) });
     function unpackState(p) {
       if (!p || !Array.isArray(p.it)) return null;
       const vw = Array.isArray(p.vw) ? p.vw.map(Number) : [];
-      return { stage: !!p.st, dj: !!p.d, heads: +p.hd || 100, leftOut: Array.isArray(p.lo) ? p.lo.filter((x) => typeof x === "string") : [],
+      return { stage: !!p.st, geo: +p.g || 1, dj: !!p.d, heads: +p.hd || 100, leftOut: Array.isArray(p.lo) ? p.lo.filter((x) => typeof x === "string") : [],
         view: vw.length >= 6 && vw.every(Number.isFinite) ? { az: vw[0], el: vw[1], size: vw[2], t: vw.slice(3, 6), a: vw[6] } : null,
         items: p.it.filter(Array.isArray).map((a) => ({ id: a[0], kind: a[1] === 0 ? "guest" : String(a[1]), ref: a[1] === 0 ? String(a[2]) : null, x: +a[3], z: +a[4], rot: +a[5], pose: String(a[6] || "stand"), y: +a[7] || 0, scale: +a[8] || 1, seat: a[9] || null })) };
     }
@@ -1387,13 +1389,37 @@
 
     // ---------- keeping the arrangement (in this browser), and the picture ----------
     const KEY = "fefe40.arrange3"; // (3: the amphitheater; the arrangement from before it is kept as a scene)
-    const state = () => ({ stage: stageOn, dj: 1, heads: Math.round(headK * 100), leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
+    const state = () => ({ stage: stageOn, geo: GEO, dj: 1, heads: Math.round(headK * 100), leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
       items: items.map((it) => ({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat })) });
     function save() {
       try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { /* private browsing: it just isn't kept */ }
     }
     // put a kept arrangement on the stage, in place of what's there
+    // The amphitheater's shape: 1, seven steps of 0.5 m out to a grass ring at 15.5 to 21 m; 2, eleven steps of
+    // 0.625 m, the grass ring at 21.5 to 27 m. An arrangement made in the first is brought into the second as near
+    // as can be: on a step, the same step (only higher); out on the grass, the same distance out on the new grass,
+    // the same way round; and a camera that took in the whole bowl takes in the whole of the bigger one.
+    const GEO = 2, OLD_OUT = 15.5, OLD_RIM = 21;
+    function fromGeo1(s) {
+      const shift = AM.outR - OLD_OUT;
+      const items2 = (s.items || []).map((o) => {
+        if (!o || o.seat) return o;
+        const r = Math.hypot(+o.x || 0, +o.z || 0);
+        if (r < OLD_OUT) return o;
+        const k = (r + shift) / r;
+        return Object.assign({}, o, { x: (+o.x || 0) * k, z: (+o.z || 0) * k });
+      });
+      let v = s.view;
+      if (v) {
+        v = Object.assign({}, v);
+        if (+v.size >= 14) v.size = +v.size * (AM.rimR / OLD_RIM);
+        if (Array.isArray(v.t) && v.t.length === 3) v.t = [+v.t[0] * (v.size !== s.view.size ? AM.rimR / OLD_RIM : 1), +v.t[1] * (AM.stepH / 0.5), +v.t[2] * (v.size !== s.view.size ? AM.rimR / OLD_RIM : 1)];
+      }
+      return Object.assign({}, s, { items: items2, view: v, geo: GEO });
+    }
+    const oldShape = (s) => !!(s && s.stage && !(+s.geo >= GEO));
     function applyState(s) {
+      if (oldShape(s)) s = fromGeo1(s);
       [...items].forEach((i) => removeItem(i, true, true));
       select(null);
       leftOut.clear();
@@ -1425,7 +1451,12 @@
     function restore() {
       const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
       const s = read(KEY);
-      if (s && Array.isArray(s.items) && s.items.length) { applyState(s); return true; }
+      if (s && Array.isArray(s.items) && s.items.length) {
+        if (oldShape(s) && !scenesGet().some((o) => o.name === "Before rearranging")) keepScene("Before rearranging", Object.assign({}, s, { geo: GEO })); // just as it was, in case
+        applyState(s);
+        save();
+        return true;
+      }
       const old = read("fefe40.arrange2"); // the arrangement from before the amphitheater: kept as a scene
       if (old && Array.isArray(old.items) && old.items.length && !scenesGet().some((o) => o.name === "Before the amphitheater")) keepScene("Before the amphitheater", Object.assign({}, old, { stage: false }));
       if (s && Array.isArray(s.leftOut)) s.leftOut.forEach((id) => { if (guests.has(id)) leftOut.add(id); });
