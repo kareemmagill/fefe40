@@ -973,7 +973,7 @@
         if (!sel.options.length) sel.innerHTML = '<option value="">Their own</option>' + FefeAvatar.OUTFITS.map((o, k) => '<option value="' + k + '">' + esc(o.name) + "</option>").join("");
         sel.value = it.outfit === null || it.outfit === undefined ? "" : String(it.outfit);
       }
-      ["sel-move"].forEach((id) => { $(id).hidden = !!it.seat; });
+      ["sel-left", "sel-right", "sel-smaller", "sel-bigger", "sel-down", "sel-up"].forEach((id) => { $(id).hidden = !!it.seat; }); // (in a seat: it's what they sit in that moves)
     }
     $("sel-poses").addEventListener("click", (e) => {
       const p = e.target.dataset && e.target.dataset.pose;
@@ -1016,7 +1016,8 @@
       if (!selected) return;
       remember();
       const s = selected, host = s.seat ? items.find((o) => o.id === s.seat) : null, base = host || s;
-      const right = new T.Vector3(Math.cos(view.az), 0, -Math.sin(view.az)), gap = s.av ? 0.95 * s.scale : (WIDTH[s.kind] || 2) * 0.85 * s.scale;
+      const right = new T.Vector3(Math.cos(view.az), 0, -Math.sin(view.az));
+      const gap = host ? (WIDTH[host.kind] || 3) * 0.55 * host.scale + 0.6 : s.av ? 0.95 * s.scale : (WIDTH[s.kind] || 2) * 0.85 * s.scale; // (clear of what they're sitting in)
       if (s.kind === "guest") leftOut.delete(s.ref);
       const it = addItem(s.kind, s.ref, { x: base.x + right.x * gap, z: base.z + right.z * gap, y: s.seat ? 0 : s.y, rot: host ? view.az : s.rot, scale: s.scale, pose: s.pose, outfit: s.outfit });
       select(it);
@@ -1253,9 +1254,10 @@
         drag = null;
         return;
       }
-      if (it && it.seat) it = items.find((o) => o.id === it.seat) || it; // dragging someone in a seat moves what they sit in
+      const tapped = it; // someone in a seat is who's selected (to pose, dress, copy or get out); dragging them moves what they sit in
+      if (it && it.seat) it = items.find((o) => o.id === it.seat) || it;
       if (it) {
-        select(it);
+        select(tapped);
         const y0 = dragHeight(it), p = groundPoint(e, y0);
         drag = p ? { it, y0, dx: it.x - p.x, dz: it.z - p.z, moved: false, before: state() } : null;
       } else drag = { orbit: true, x: e.clientX, y: e.clientY, az: view.az, el: view.el, moved: false, before: state() };
