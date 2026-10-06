@@ -5162,21 +5162,10 @@
       else lsSet("fefe40.night", "0");
       showSwitch();
     });
+    // Everyone makes a new avatar each time they come in, even on a phone that's been here before: a new photo and an
+    // outfit (the name is filled in). They're still the same guest; the look they had is kept with their past looks.
     function openJoin() {
       nightSwitch.hidden = true;
-      // been here before on this phone: no photo or outfit again, straight into the party as last time
-      if (!me) {
-        let saved = null;
-        try { saved = JSON.parse(lsGet("fefe40.look") || "null"); } catch (e) { saved = null; }
-        if (saved && typeof saved.name === "string" && saved.name.trim() && saved.look && typeof saved.look === "object") {
-          myName = saved.name.trim().slice(0, 20);
-          draft = Object.assign({}, saved.look);
-          clearSelection();
-          dismissHint();
-          enterParty();
-          return;
-        }
-      }
       joinEl.hidden = false;
       setDressMode("join");
       showStep("photo");
