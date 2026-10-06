@@ -716,6 +716,11 @@
         face(yaw) { hearts.forEach((o) => { o.m.rotation.y = yaw + Math.sin(o.k * 2.1) * 0.25; }); }
       };
       g.userData.hearts.update(0);
+      // a column to grab it by, the whole way up: invisible, but the pointer finds it, gaps between hearts and all
+      const grab = new T.Mesh(new T.BoxGeometry(1.7, H + 0.6, 1.7), new T.MeshBasicMaterial());
+      grab.position.y = (H + 0.6) / 2;
+      grab.visible = false;
+      g.add(grab);
       return g;
     }
     function bearModel() {
@@ -1229,19 +1234,10 @@
       const p = new T.Vector3();
       return ray.ray.intersectPlane(new T.Plane(new T.Vector3(0, 1, 0), -y), p) ? p : null;
     }
-    // the amphitheater's ground under the pointer (not the parts cut away): stepping along the ray till it's under the top
-    function terrainPoint(e) {
-      setRay(e);
-      const o = ray.ray.origin, d = ray.ray.direction;
-      if (d.y > -0.01) return null;
-      const t1 = (-0.01 - o.y) / d.y, dt = Math.min(0.1 / Math.max(Math.hypot(d.x, d.z), 1e-3), 0.05 / -d.y);
-      for (let t = Math.max(0, (AM.top + 0.01 - o.y) / d.y); t <= t1; t += dt) {
-        const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, c = cellAt(Math.floor(x * 2), Math.floor(z * 2));
-        if (c && (c.sec < 0 || amSec[c.sec].visible) && y <= c.stand + 0.001) return new T.Vector3(x, c.stand, z);
-      }
-      return null;
-    }
-    const dragPoint = (e, it) => (stageOn ? terrainPoint(e) || groundPoint(e, AM.top) : groundPoint(e, it.y));
+    // Dragging slides along a level plane at the height it was picked up from, so it stays under the pointer: the
+    // ground itself would be a poor guide, as the far side of the bowl slopes up almost along the line of sight, where
+    // a small move of the pointer is a long way over the steps. (What's dragged still steps up and down with them.)
+    const dragHeight = (it) => (stageOn ? it.holder.position.y : it.y);
     canvas.addEventListener("pointerdown", (e) => {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1260,8 +1256,8 @@
       if (it && it.seat) it = items.find((o) => o.id === it.seat) || it; // dragging someone in a seat moves what they sit in
       if (it) {
         select(it);
-        const p = dragPoint(e, it);
-        drag = p ? { it, dx: it.x - p.x, dz: it.z - p.z, moved: false, before: state() } : null;
+        const y0 = dragHeight(it), p = groundPoint(e, y0);
+        drag = p ? { it, y0, dx: it.x - p.x, dz: it.z - p.z, moved: false, before: state() } : null;
       } else drag = { orbit: true, x: e.clientX, y: e.clientY, az: view.az, el: view.el, moved: false, before: state() };
     });
     const dist2 = () => { const p = [...pointers.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1; };
@@ -1272,7 +1268,7 @@
       if (drag.pan) { panBy(drag, e.clientX, e.clientY); return; }
       if (drag.pinch) { if (pointers.size === 2) { view.size = Math.max(2, Math.min(80, drag.size * drag.d / dist2())); const m = mid2(); panBy(drag, m[0], m[1]); } return; }
       if (drag.it) {
-        const p = dragPoint(e, drag.it);
+        const p = groundPoint(e, drag.y0);
         if (!p) return;
         drag.it.x = p.x + drag.dx;
         drag.it.z = p.z + drag.dz;
