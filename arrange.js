@@ -853,29 +853,44 @@
     const items = [];
     let selected = null, seating = null, guests = new Map(), nextId = 1;
     const leftOut = new Set(); // guests not to include: they stay off the stage until they're ticked again
+    // a person: a guest or one of the band, in their own clothes or another costume (for this one figure only)
+    const isPerson = (kind) => kind === "guest" || !!(THINGS[kind] && THINGS[kind].band !== undefined);
+    const costumeOf = (v) => (Number.isInteger(v) && v >= 0 && v < FefeAvatar.OUTFITS.length ? v : null);
+    function personAv(kind, ref, outfit) {
+      const m = kind === "guest" ? null : BAND[THINGS[kind].band], base = m ? m.look : guests.get(ref).look;
+      const av = FefeAvatar.build(T, outfit === null ? base : Object.assign({}, base, { outfit }));
+      if (m) Object.entries(KIT[m.kit]).forEach(([slot, k]) => av.hold(slot, k));
+      return av;
+    }
     function addItem(kind, ref, at) {
-      const holder = new T.Group();
+      const holder = new T.Group(), outfit = costumeOf(at && at.outfit);
       let model, av = null, bear = null;
-      if (kind === "guest") { av = FefeAvatar.build(T, guests.get(ref).look); model = av.root; }
-      else if (THINGS[kind] && THINGS[kind].band !== undefined) {
-        const m = BAND[THINGS[kind].band];
-        av = FefeAvatar.build(T, m.look);
-        Object.entries(KIT[m.kit]).forEach(([slot, k]) => av.hold(slot, k));
-        model = av.root;
-      } else { model = THINGS[kind].make(); bear = model.userData.bear || null; }
+      if (isPerson(kind)) { av = personAv(kind, ref, outfit); model = av.root; }
+      else { model = THINGS[kind].make(); bear = model.userData.bear || null; }
       holder.add(model);
       if (av) sizeHead(av);
       model.traverse((o) => { if (o.isMesh) o.castShadow = !(o.material && o.material.transparent); });
       const foot = av ? null : new T.Box3().setFromObject(holder); // what it stands on (people: just their feet)
-      const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, foot, prop: model.userData.prop || null, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {});
+      const it = Object.assign({ id: nextId++, kind, ref, holder, model, av, bear, foot, prop: model.userData.prop || null, x: 0, y: 0, z: 0, rot: 0, scale: 1, pose: av ? "wave" : "stand", seat: null }, at || {}, { outfit: av ? outfit : null });
       holder.userData.item = it;
       scene.add(holder);
       items.push(it);
       place(it);
       return it;
     }
+    // a new costume for one figure: built again, where it was, as it was
+    function dress(it, outfit) {
+      const av = personAv(it.kind, it.ref, outfit);
+      it.holder.remove(it.model);
+      it.av.dispose();
+      Object.assign(it, { av, model: av.root, outfit });
+      it.holder.add(av.root);
+      sizeHead(av);
+      av.root.traverse((o) => { if (o.isMesh) o.castShadow = !(o.material && o.material.transparent); });
+      place(it);
+    }
     function removeItem(it, keep, quiet) {
-      if (it.kind === "guest" && !keep) leftOut.add(it.ref);
+      if (it.kind === "guest" && !keep && !items.some((o) => o !== it && o.kind === "guest" && o.ref === it.ref)) leftOut.add(it.ref); // (out of the picture when the last of them goes)
       items.filter((o) => o.seat === it.id).forEach((o) => { o.seat = null; place(o); });
       if (it.holder.parent) it.holder.parent.remove(it.holder);
       if (it.av) it.av.dispose();
@@ -947,6 +962,12 @@
       $("sel-poses").innerHTML = poses.map(([k, l]) => '<button type="button" data-pose="' + k + '"' + (k === it.pose ? ' class="on"' : "") + ">" + l + "</button>").join("");
       $("sel-seat").hidden = !it.av;
       $("sel-seat").textContent = it.seat ? "Get out" : "Put in a seat…";
+      $("sel-costume-row").hidden = !it.av;
+      if (it.av) {
+        const sel = $("sel-costume");
+        if (!sel.options.length) sel.innerHTML = '<option value="">Their own</option>' + FefeAvatar.OUTFITS.map((o, k) => '<option value="' + k + '">' + esc(o.name) + "</option>").join("");
+        sel.value = it.outfit === null || it.outfit === undefined ? "" : String(it.outfit);
+      }
       ["sel-move"].forEach((id) => { $(id).hidden = !!it.seat; });
     }
     $("sel-poses").addEventListener("click", (e) => {
@@ -976,6 +997,27 @@
       place(selected);
       save();
     }));
+    $("sel-costume").addEventListener("change", (e) => {
+      if (!selected || !selected.av) return;
+      const outfit = e.target.value === "" ? null : costumeOf(+e.target.value);
+      if (outfit === selected.outfit) return;
+      remember();
+      dress(selected, outfit);
+      select(selected);
+      save();
+    });
+    // a copy beside them (or beside what they're sitting in), the same pose, size and costume
+    $("sel-dup").addEventListener("click", () => {
+      if (!selected) return;
+      remember();
+      const s = selected, host = s.seat ? items.find((o) => o.id === s.seat) : null, base = host || s;
+      const right = new T.Vector3(Math.cos(view.az), 0, -Math.sin(view.az)), gap = s.av ? 0.95 * s.scale : (WIDTH[s.kind] || 2) * 0.85 * s.scale;
+      if (s.kind === "guest") leftOut.delete(s.ref);
+      const it = addItem(s.kind, s.ref, { x: base.x + right.x * gap, z: base.z + right.z * gap, y: s.seat ? 0 : s.y, rot: host ? view.az : s.rot, scale: s.scale, pose: s.pose, outfit: s.outfit });
+      select(it);
+      if (!addEl.hidden) renderPeople();
+      save();
+    });
     $("sel-remove").addEventListener("click", () => { if (selected) { remember(); removeItem(selected); } });
     $("add-btn").addEventListener("click", () => {
       addEl.hidden = !addEl.hidden;
@@ -996,8 +1038,8 @@
       const d = e.target.dataset || {};
       if (d.guest || d.all !== undefined || d.thing) remember();
       if (d.guest) {
-        const it = items.find((i) => i.kind === "guest" && i.ref === d.guest);
-        if (it) removeItem(it);
+        const theirs = items.filter((i) => i.kind === "guest" && i.ref === d.guest);
+        if (theirs.length) theirs.forEach((i) => removeItem(i, false, true));
         else { leftOut.delete(d.guest); addItem("guest", d.guest, looseSpot((Math.random() * 20) | 0)); }
         renderPeople();
         save();
@@ -1102,13 +1144,13 @@
     const r2d = (v) => Math.round((+v || 0) * 100) / 100;
     const packState = (st, name) => ({ v: 1, n: name || "", d: 1, g: GEO, st: st.stage ? 1 : 0, hd: st.heads || 100, lo: st.leftOut,
       vw: [st.view.az, st.view.el, st.view.size, ...st.view.t, (canvas.clientWidth || 1) / (canvas.clientHeight || 1)].map(r2d),
-      it: st.items.map((o) => [o.id, o.kind === "guest" ? 0 : o.kind, o.ref || 0, r2d(o.x), r2d(o.z), r2d(o.rot), o.pose, r2d(o.y), r2d(o.scale), o.seat || 0]) });
+      it: st.items.map((o) => [o.id, o.kind === "guest" ? 0 : o.kind, o.ref || 0, r2d(o.x), r2d(o.z), r2d(o.rot), o.pose, r2d(o.y), r2d(o.scale), o.seat || 0, Number.isInteger(o.outfit) ? o.outfit : -1]) });
     function unpackState(p) {
       if (!p || !Array.isArray(p.it)) return null;
       const vw = Array.isArray(p.vw) ? p.vw.map(Number) : [];
       return { stage: !!p.st, geo: +p.g || 1, dj: !!p.d, heads: +p.hd || 100, leftOut: Array.isArray(p.lo) ? p.lo.filter((x) => typeof x === "string") : [],
         view: vw.length >= 6 && vw.every(Number.isFinite) ? { az: vw[0], el: vw[1], size: vw[2], t: vw.slice(3, 6), a: vw[6] } : null,
-        items: p.it.filter(Array.isArray).map((a) => ({ id: a[0], kind: a[1] === 0 ? "guest" : String(a[1]), ref: a[1] === 0 ? String(a[2]) : null, x: +a[3], z: +a[4], rot: +a[5], pose: String(a[6] || "stand"), y: +a[7] || 0, scale: +a[8] || 1, seat: a[9] || null })) };
+        items: p.it.filter(Array.isArray).map((a) => ({ id: a[0], kind: a[1] === 0 ? "guest" : String(a[1]), ref: a[1] === 0 ? String(a[2]) : null, x: +a[3], z: +a[4], rot: +a[5], pose: String(a[6] || "stand"), y: +a[7] || 0, scale: +a[8] || 1, seat: a[9] || null, outfit: Number.isInteger(a[10]) && a[10] >= 0 ? a[10] : null })) };
     }
     const b64u = (bytes) => { let t = ""; for (let i = 0; i < bytes.length; i++) t += String.fromCharCode(bytes[i]); return btoa(t).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
     const unb64u = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -1306,12 +1348,13 @@
       leftOut.clear();
       (s.leftOut || []).forEach((id) => leftOut.add(id));
       const want = new Map(s.items.map((o) => [o.id, o]));
-      [...items].forEach((it) => { const o = want.get(it.id); if (!o || o.kind !== it.kind || (o.ref || null) !== (it.ref || null)) removeItem(it, true, true); });
+      const dressed = (o) => (Number.isInteger(o.outfit) ? o.outfit : null);
+      [...items].forEach((it) => { const o = want.get(it.id); if (!o || o.kind !== it.kind || (o.ref || null) !== (it.ref || null) || dressed(o) !== dressed(it)) removeItem(it, true, true); });
       s.items.forEach((o) => {
         let it = items.find((i) => i.id === o.id);
         if (!it) {
           if (o.kind === "guest" ? !guests.has(o.ref) : !Object.prototype.hasOwnProperty.call(THINGS, o.kind)) return;
-          it = addItem(o.kind, o.ref, { id: o.id });
+          it = addItem(o.kind, o.ref, { id: o.id, outfit: o.outfit });
           nextId = Math.max(nextId, o.id + 1);
         }
         Object.assign(it, { x: o.x, y: o.y, z: o.z, rot: o.rot, scale: o.scale, pose: o.pose, seat: null });
@@ -1390,7 +1433,7 @@
     // ---------- keeping the arrangement (in this browser), and the picture ----------
     const KEY = "fefe40.arrange3"; // (3: the amphitheater; the arrangement from before it is kept as a scene)
     const state = () => ({ stage: stageOn, geo: GEO, dj: 1, heads: Math.round(headK * 100), leftOut: [...leftOut], view: { az: view.az, el: view.el, size: view.size, t: view.target.toArray() },
-      items: items.map((it) => ({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat })) });
+      items: items.map((it) => Object.assign({ id: it.id, kind: it.kind, ref: it.ref, x: it.x, y: it.y, z: it.z, rot: it.rot, scale: it.scale, pose: it.pose, seat: it.seat }, it.outfit !== null && it.outfit !== undefined ? { outfit: it.outfit } : {})) });
     function save() {
       try { localStorage.setItem(KEY, JSON.stringify(state())); } catch (e) { /* private browsing: it just isn't kept */ }
     }
@@ -1435,8 +1478,7 @@
       const ids = new Map();
       (Array.isArray(s.items) ? s.items : []).forEach((o) => {
         if (!o || (o.kind === "guest" ? !guests.has(o.ref) : !Object.prototype.hasOwnProperty.call(THINGS, o.kind))) return;
-        if (o.kind === "guest" && items.some((i) => i.kind === "guest" && i.ref === o.ref)) return;
-        const it = addItem(o.kind, o.ref, { x: +o.x || 0, y: Math.max(0, +o.y || 0), z: +o.z || 0, rot: +o.rot || 0, scale: Math.max(0.3, Math.min(6, +o.scale || 1)), pose: typeof o.pose === "string" ? o.pose : "stand" });
+        const it = addItem(o.kind, o.ref, { x: +o.x || 0, y: Math.max(0, +o.y || 0), z: +o.z || 0, rot: +o.rot || 0, scale: Math.max(0.3, Math.min(6, +o.scale || 1)), pose: typeof o.pose === "string" ? o.pose : "stand", outfit: o.outfit });
         ids.set(o.id, it);
         it.savedSeat = o.seat;
       });

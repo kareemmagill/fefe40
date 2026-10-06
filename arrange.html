@@ -8,7 +8,7 @@
 <script>
   // Opened from the browser's cache after an update: go again, once, for the new version
   (function () {
-    var v = "202610051307";
+    var v = "202610060312";
     fetch("arrange-version.txt", { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) {
       t = t.trim();
       if (!/^[0-9]+$/.test(t) || t === v) return;
@@ -25,6 +25,9 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0B2A55; color: var(--white); font: 600 14px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
   input { -webkit-user-select: text; user-select: text; }
+  .costume { display: flex; align-items: center; gap: 6px; }
+  .costume[hidden] { display: none; }
+  .costume select { font: inherit; border: 2px solid var(--edge); border-radius: 10px; padding: 4px 8px; background: var(--white); color: var(--deep); max-width: 60vw; }
   .heads { display: flex; align-items: center; gap: 6px; background: var(--white); color: var(--deep); border: 2px solid var(--edge); border-radius: 10px; padding: 3px 10px; box-shadow: 0 2px 0 var(--edge); }
   .heads input { width: 100px; margin: 0; accent-color: var(--blue); }
   #heads-val { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
@@ -95,7 +98,11 @@
 <div class="panel" id="sel" hidden>
   <div id="sel-name"></div>
   <div class="chips" id="sel-poses"></div>
-  <div class="row"><button type="button" id="sel-seat" class="small">Put in a seat…</button></div>
+  <div class="row">
+    <button type="button" id="sel-seat" class="small">Put in a seat…</button>
+    <button type="button" id="sel-dup" class="small">Duplicate</button>
+    <label class="costume" id="sel-costume-row">Costume <select id="sel-costume"></select></label>
+  </div>
   <div class="row" id="sel-move">
     <button type="button" class="small" id="sel-left" aria-label="Turn left">⟲ Turn</button>
     <button type="button" class="small" id="sel-right" aria-label="Turn right">Turn ⟳</button>
@@ -107,8 +114,8 @@
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="avatar.js?v=202610051307"></script>
-<script src="outfits-hd.js?v=202610051307"></script>
-<script src="arrange.js?v=202610051307"></script>
+<script src="avatar.js?v=202610060312"></script>
+<script src="outfits-hd.js?v=202610060312"></script>
+<script src="arrange.js?v=202610060312"></script>
 </body>
 </html>
