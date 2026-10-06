@@ -5137,9 +5137,9 @@
     const video = $("cam"), shot = $("shot"), camMsg = $("cam-msg"), guide = $("guide");
     const snapBtn = $("snap"), retakeBtn = $("retake"), fileIn = $("file"), nameIn = $("guest-name"), makeBtn = $("make");
     const previewCanvas = $("preview");
-    // Phones take the photo with the camera; picking a file is for computers (or when the camera won't open), since on
-    // a phone it only muddles things.
-    const fileBtn = $("file-btn"), onPhone = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches && matchMedia("(hover: none)").matches);
+    // Take a photo with the camera, or use one already on the phone or computer (it opens the photo library, not the
+    // camera): both, always.
+    const fileBtn = $("file-btn");
     const outfitName = $("outfit-name"), outfitCount = $("outfit-count"), waitMsg = $("wait-msg");
     let stream = null, photo = null, draft = null;
     nameIn.value = lsGet("fefe40.name") || "";
@@ -5215,7 +5215,7 @@
       retakeBtn.hidden = true;
       snapBtn.hidden = false;
       snapBtn.disabled = true;
-      fileBtn.hidden = onPhone;
+      fileBtn.hidden = false;
       guide.hidden = false;
       video.hidden = false;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
