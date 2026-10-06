@@ -1714,13 +1714,23 @@
     (async function start() {
       resize();
       await loadGuests();
+      // A shared link opens its scene. Otherwise the page's own scene (arrange-default.json), when there is one, is what
+      // everyone sees when it opens; an arrangement of their own, if it's different, is kept as a scene to go back to.
       const linked = await openLinked();
-      if (linked) { /* a shared scene */ }
-      else if (!restore()) {
+      if (!linked) {
         const def = await fetch("arrange-default.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null), st = unpackState(def);
-        if (st) showShared(st, "");
-        else { setStage(true); defaultLayout(); frameAll(); }
-        save();
+        if (st) {
+          let mine = null;
+          try { mine = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { mine = null; }
+          // (only if it was changed since the page last opened it: what was saved then is remembered)
+          const sig = (x) => JSON.stringify([(x.items || []).map((o) => [o.id, o.kind, o.ref || 0, r2d(o.x), r2d(o.y), r2d(o.z), r2d(o.rot), r2d(o.scale), o.pose, Number.isInteger(o.outfit) ? o.outfit : -1, o.seat || 0]), x.stage ? 1 : 0, x.heads || 100]);
+          let opened = null;
+          try { opened = localStorage.getItem("fefe40.arrangeOpened"); } catch (e) { opened = null; }
+          if (mine && Array.isArray(mine.items) && mine.items.length && sig(mine) !== opened) keepScene("My last arrangement", mine);
+          showShared(st, "");
+          save();
+          try { localStorage.setItem("fefe40.arrangeOpened", sig(state())); } catch (e) { /* not kept */ }
+        } else if (!restore()) { setStage(true); defaultLayout(); frameAll(); save(); }
       }
       const before = [...guests.values()].filter((g) => g.past).length;
       statusEl.textContent = guests.size - before + (guests.size - before === 1 ? " guest" : " guests") + (before ? ", " + before + (before === 1 ? " earlier look" : " earlier looks") : "") + ". Tap someone to pose them; drag to move.";
