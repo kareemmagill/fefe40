@@ -542,9 +542,11 @@
     });
   }
 
-  function planLiving(ms) {
-    const n = ms.length;
-    return ms.map((a, i) => Object.assign({ act: n === 1 ? "tv" : n === 2 ? "gaming" : "movie", pop: i % 2 === 0 }, i < SOFA_LIVING.length ? { spot: SOFA_LIVING[i].slice(), heading: HALF, seat: 0.45 } : { face: [11, 10] }));
+  // The TV shows the bedroom cam from the main villa bedroom: while something's going on in there, the sofa sees it
+  // all, pointing and laughing, hiding behind their hands, jaws dropping, popcorn flying
+  function planLiving(ms, env) {
+    const n = ms.length, onCam = env.bedCam;
+    return ms.map((a, i) => Object.assign(onCam ? { act: "tvshock", role: i % 4, since: onCam } : { act: n === 1 ? "tv" : n === 2 ? "gaming" : "movie", pop: i % 2 === 0 }, i < SOFA_LIVING.length ? { spot: SOFA_LIVING[i].slice(), heading: HALF, seat: 0.45 } : { face: [11, 10] }));
   }
 
   function planLanai(ms, env, area) {
@@ -1133,6 +1135,35 @@
       return { pose: p };
     },
 
+    tvshock(m) {
+      const p = sit(0.45), r = m.asg.role, k = m.T * 9 + m.seed * 5, x = m.x, y = m.y, z = m.z;
+      if (r === 0) { // pointing at the screen, rocking with laughter
+        p.armR = [-1.7, 0, 0.15];
+        p.armL = [-0.6, 0, -0.5];
+        p.rig[3] = -0.12 + Math.abs(Math.sin(k)) * 0.14;
+        p.head = [-0.15 + Math.sin(k * 2) * 0.08, 0, 0];
+        if (m.every(1.4)) m.fx.icon("bang", x, y + 2.7, z, { size: 0.3 });
+      } else if (r === 1) { // hands over the eyes, peeking now and then
+        const peek = Math.sin(m.T * 1.7 + m.seed * 4) > 0.6;
+        p.armR = [-2.55, 0, peek ? 0.95 : 0.6];
+        p.armL = [-2.55, 0, peek ? -0.95 : -0.6];
+        p.head = [0.2, 0, 0];
+        if (m.every(1.6)) m.fx.icon("blush", x, y + 2.6, z, { size: 0.32 });
+      } else if (r === 2) { // jaw on the floor, leaning in, hands on the cheeks
+        p.armR = [-2.3, 0, 0.85];
+        p.armL = [-2.3, 0, -0.85];
+        p.rig[3] = 0.22;
+        p.head = [-0.2, 0, 0];
+        if (m.every(2.2)) m.fx.icon("heart", x, y + 2.7, z, { size: 0.3 });
+      } else { // the popcorn goes everywhere
+        const s = (m.T * 1.3 + m.seed) % 1;
+        p.armR = [lerp(-0.9, -3.0, Math.min(1, s * 3)), 0, 0.3];
+        p.armL = [-1.0, 0, -0.2];
+        p.rig[1] += s < 0.3 ? s * 0.4 : 0;
+        if (m.every(1.3)) for (let j = 0; j < 5; j++) m.fx.arc(j % 2 ? "#FFF4C2" : "#FFE07A", [x, y + 1.7, z], [x + 0.6 + j * 0.25, y + 0.5, z - 0.9 + j * 0.45], 0.8, 0.9, 0.09);
+      }
+      return { pose: p, L: r === 3 ? "popcorn" : null };
+    },
     tv(m) { const p = sit(0.45); p.head = [Math.floor(m.T / 5) % 3 === 0 ? -0.15 : 0, 0, 0]; return { pose: p }; },
     gaming(m) {
       const p = sit(0.45);
@@ -1428,7 +1459,7 @@
     raiseglass: ["clink", 5, "skal", 0.5], cheersit: ["cheer", 4, "heja"], tabledance: ["cheer", 3], pong: ["pok", 3],
     paper: ["fart", 6], toilet: ["pee", 9], makeup: ["kiss", 7], wash: ["splash", 5], queue: ["nej", 0], gottago: ["nej", 0],
     kiss: ["kiss", 1.6, "alskar"], snus: ["sniff", 6], sleep: ["zzz", 3], jumpbed: ["boing", 0.7], pillow: ["pillow", 1], sleepover: ["giggle", 4],
-    scene: ["boing", 0.5, "oj"], steamy: ["boing", 0.45, "alskar"], tv: ["laugh", 12], gaming: ["pop", 3], movie: ["laugh", 10], fan: ["whoosh", 4], fika: ["clink", 7, "fika", 0.8], cards: ["laugh", 8, "chatter", 0.5],
+    scene: ["boing", 0.5, "oj"], steamy: ["boing", 0.45, "alskar"], tv: ["laugh", 12], tvshock: ["laugh", 2.5, "oj", 0.4], gaming: ["pop", 3], movie: ["laugh", 10], fan: ["whoosh", 4], fika: ["clink", 7, "fika", 0.8], cards: ["laugh", 8, "chatter", 0.5],
     serve: ["pok", 6, "heja", 0.3], hoops: ["bonk", 5, "hockey", 0.3], rally: ["pok", 6, "heja", 0.3], watch: ["clap", 6, "hockey", 0.4], swing: ["whoosh", 2.9], seesaw: ["boing", 3.2], run: ["laugh", 4],
     photo: ["pop", 4], peace: ["laugh", 8], phone: ["pop", 7], fetch: ["clink", 8], wave: ["wave", 5, "hej"], brawl: ["bonk", 0.6, "nej"],
     smoke: ["sniff", 6], puke: ["vomit", 3.2, "bork", 0.3], toiletpuke: ["vomit", 3], smell: ["sniff", 5], climb: ["", 6, "heja", 0.5],
@@ -1437,7 +1468,7 @@
   const SOBERING = new Set(["swim", "float", "bomb", "splash", "ball", "paddle", "shower", "rally", "serve", "hoops", "run"]);
   // acts where people are meant to be this close, so they aren't nudged apart
   const CLOSE_ACTS = new Set(["steamy", "kiss", "slowdance", "scene", "surf", "carry", "brawl", "conga", "huddle"]);
-  const HEAD_LOCKED = new Set(["candy", "toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
+  const HEAD_LOCKED = new Set(["tvshock", "candy", "toiletpuke", "kiss", "slowdance", "cue", "blow", "makeup", "wash", "pee", "snus", "chug", "climb", "smell", "puke"]);
   // Clothes come off in the pool, and in a bedroom with company: app.js swaps the look (swimwear, or bare under a pixel
   // mosaic in Cheeky mode) and leaves the clothes in a pile (ctx.onUndress), then dresses replays again (ctx.onRedress).
   const undresses = (area, ms) => area.id === "pool" || (/^bed\d$/.test(area.id) && ms.length >= 2);
@@ -1467,6 +1498,7 @@
     const st = (a) => { let s = states.get(a); if (!s) { s = { bar: 0, barAt: 0 }; states.set(a, s); } return s; };
     let lastDrop = null;
     const scenes = [], steamies = [];
+    let bedCamSince = 0;
     const env = {
       t: 0,
       actors: [],
@@ -1477,6 +1509,7 @@
       get lastDrop() { return lastDrop; },
       drunk(a) { const s = st(a); return Math.max(0, s.bar - Math.floor((env.t - s.barAt) / 60)); }, // wears off a level a minute
       scene(room, count) { scenes.push({ room, count }); },
+      get bedCam() { return bedCamSince; }, // when the scene on the living room's bedroom cam started (0: nothing on)
       nearestCar(pt) { return ctx.nearestCar ? ctx.nearestCar(pt[0], pt[1]) : null; },
       steamy(car, count) { if (steamies.indexOf(car) < 0) { steamies.push(car); car.steamyCount = count; } },
       burning(tree) { return !!(ctx.isBurning && ctx.isBurning(tree)); },
@@ -1662,6 +1695,7 @@
         });
         if (ctx.onDance) ctx.onDance(env.danceCount);
         if (ctx.onScenes) ctx.onScenes(scenes.map((sc) => BEDROOMS.indexOf(sc.room)));
+        bedCamSince = scenes.some((sc) => sc.room === BEDROOMS[0]) ? bedCamSince || t : 0;
         steamies.forEach((car) => { // hearts out of the roof, clothes out of the windows, the odd honk
           const n = car.steamyCount || 2;
           if (Math.random() < dt * (2 + n)) fx.icon("heart", car.x + (Math.random() - 0.5), car.y + 2.3, car.z + (Math.random() - 0.5) * 2, { vy: 1.2, life: 1.6, max: 1.6, size: 0.4 });
